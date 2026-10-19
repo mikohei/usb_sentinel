@@ -1,0 +1,6 @@
+# Replace <user> and the project path, then copy to ~/.config/autostart/.
+[Desktop Entry]
+Type=Application
+Name=USB Sentinel Display
+Exec=/home/<user>/.local/bin/uv run --offline --frozen --no-sync --project /home/<user>/usb_sentinel/frontend usb-sentinel-display run --kiosk
+X-GNOME-Autostart-enabled=true

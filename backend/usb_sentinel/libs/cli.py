@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -10,6 +11,19 @@ from .report import render_text, write_all
 from .report.json_report import digest
 from .runner import SubprocessRunner
 from .store import store_for
+
+LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
+
+logger = logging.getLogger(__name__)
+
+
+def configure_logging() -> None:
+    """Send diagnostics to stderr as "LEVEL logger: message" without a timestamp.
+
+    journald adds the timestamp. basicConfig does nothing when the root logger already has
+    handlers, so repeated calls and pytest's capture handlers keep their existing setup.
+    """
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stderr)
 
 
 def main() -> int:
@@ -27,6 +41,7 @@ def main() -> int:
     inspection = commands.add_parser("inspect")
     inspection.add_argument("device")
     args = parser.parse_args()
+    configure_logging()
     runner = SubprocessRunner()
     try:
         if args.command == "selftest":
@@ -63,12 +78,12 @@ def main() -> int:
             if (output / "result.json").exists():
                 failure = store.record_completed(result, digest(result))
                 if failure:
-                    print(f"SQLite record failed (completion): {failure}", file=sys.stderr)
+                    logger.warning("SQLite record failed (completion): %s", failure)
         print(render_text(result))
         return 0 if result.verdict == Verdict.NO_DEFECT else 1
     except UnsafeDeviceError as exc:
-        print(f"Inspection refused: {exc}", file=sys.stderr)
+        logger.error("Inspection refused: %s", exc)
         return 2
     except (OSError, RuntimeError, ValueError, TypeError) as exc:
-        print(f"Runtime error: {exc}", file=sys.stderr)
+        logger.error("Runtime error: %s", exc)
         return 3

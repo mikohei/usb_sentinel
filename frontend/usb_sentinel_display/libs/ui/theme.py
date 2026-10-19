@@ -1,9 +1,11 @@
-import sys
+import logging
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import font as tkfont
 
 from ..models import SlotState
+
+logger = logging.getLogger(__name__)
 
 # Dimensions of the screen and each area (design doc 1.1).
 SCREEN_W = 480
@@ -96,7 +98,7 @@ def resolve_font_family(root: tk.Misc, preferred: str) -> str:
     if preferred in tkfont.families(root):
         return preferred
     fallback = str(tkfont.nametofont("TkDefaultFont", root).actual("family"))
-    print(f"Font {preferred} not found; using {fallback}", file=sys.stderr)
+    logger.warning("Font %s not found; using %s", preferred, fallback)
     return fallback
 
 

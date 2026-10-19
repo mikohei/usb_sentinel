@@ -324,7 +324,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 
 文言は英語表示でも同じ順で対応する（「SQLite索引の読み取り」節の表）。
 
-標準エラー出力にだけ出るもの。
+標準エラー出力にだけ出るもの。各行は`WARNING usb_sentinel_display.libs.ui.app:`や`ERROR usb_sentinel_display.libs.cli:`のように、重大度とロガー名で始まる。
 
 | 文言 | 原因 | 対処 |
 |---|---|---|

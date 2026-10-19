@@ -7,6 +7,7 @@ FakeRunner.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ from tests import test_orchestrator
 from usb_sentinel.libs import FakeRunner, InspectionResult
 from usb_sentinel.libs import cli as cli_mod
 from usb_sentinel.libs import report as report_mod
+from usb_sentinel.libs.device import UnsafeDeviceError
 from usb_sentinel.libs.report.json_report import digest
 
 # Reuse the FakeRunner that runs the full inspection sequence (including the SYS_BLOCK and
@@ -121,3 +123,45 @@ class TestMain:
         assert code == 1
         assert list(tmp_path.rglob("*.sqlite*")) == []
         assert len(_result_dirs(tmp_path)) == 1
+
+
+class TestDiagnostics:
+    """Diagnostics go through logging (stderr) at ERROR, and the exit code is unchanged."""
+
+    def test_refused_inspection_logs_error_and_returns_2(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def refuse(*args: object) -> InspectionResult:
+            raise UnsafeDeviceError("not a USB device")
+
+        monkeypatch.setattr(cli_mod, "inspect", refuse)
+        code = _run_main(monkeypatch, FakeRunner(), _write_config(tmp_path, ""))
+
+        assert code == 2
+        assert [(r.name, r.levelno, r.getMessage()) for r in caplog.records] == [
+            ("usb_sentinel.libs.cli", logging.ERROR, "Inspection refused: not a USB device")
+        ]
+        assert capsys.readouterr().out == ""
+
+    def test_runtime_error_logs_error_and_returns_3(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def fail(*args: object) -> InspectionResult:
+            raise RuntimeError("lsblk failed")
+
+        monkeypatch.setattr(cli_mod, "inspect", fail)
+        code = _run_main(monkeypatch, FakeRunner(), _write_config(tmp_path, ""))
+
+        assert code == 3
+        assert [(r.name, r.levelno, r.getMessage()) for r in caplog.records] == [
+            ("usb_sentinel.libs.cli", logging.ERROR, "Runtime error: lsblk failed")
+        ]
+        assert capsys.readouterr().out == ""

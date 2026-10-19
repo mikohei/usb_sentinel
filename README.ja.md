@@ -165,7 +165,8 @@ backendは検査1件につき`inspections.sqlite`へ1行を書く（開始時に
 `root:usb-sentinel`の`2770`（setgid）で作るので、DB本体とWALの`-wal`・`-shm`は
 `usb-sentinel`グループで読める。`result.json`が正本で、DBは一覧と検索のための索引である。
 記録に失敗しても検査は続き、終了コードも変わらない（開始時の失敗は`result.json`の`warnings`、
-完了時の失敗はjournalのstderrに`SQLite record failed (completion)`として残る）。
+完了時の失敗はjournalのstderrに`WARNING usb_sentinel.libs.cli: SQLite record failed (completion): ...`として残る）。
+標準エラー出力の診断メッセージは、`ERROR usb_sentinel.libs.cli: Inspection refused: ...`のように重大度とロガー名で始まる。標準出力にはコマンドの出力（`selftest`の各行と検査結果の本文）だけが出る。
 列の意味は[doc/qr-payload.ja.md](doc/qr-payload.ja.md)の第8節にある。
 
 DBが壊れたときは、検査が走っていないことを確認してから`inspections.sqlite`と`-wal`・`-shm`を

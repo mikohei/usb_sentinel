@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -66,19 +67,26 @@ class TestParser:
 
 class TestConfigErrors:
     def test_invalid_config_returns_one(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """A config error is logged at ERROR and returns 1."""
         config = tmp_path / "display.toml"
         config.write_text("poll_interval_s = 99\n", encoding="utf-8")
         assert main(["--config", str(config), "calibrate"]) == 1
-        assert "poll_interval_s" in capsys.readouterr().err
+        (record,) = caplog.records
+        assert record.name == "usb_sentinel_display.libs.cli"
+        assert record.levelno == logging.ERROR
+        assert record.getMessage().startswith("Configuration error: ")
+        assert "poll_interval_s" in record.getMessage()
 
     def test_config_is_directory_returns_one(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Passing a directory to --config returns 1, treating the OSError as a config error."""
         assert main(["--config", str(tmp_path), "calibrate"]) == 1
-        assert "Configuration error" in capsys.readouterr().err
+        (record,) = caplog.records
+        assert record.levelno == logging.ERROR
+        assert "Configuration error" in record.getMessage()
 
 
 class TestCalibrate:
@@ -115,9 +123,13 @@ class TestCalibrate:
         assert sleeps == [0.5, 0.5]
 
     def test_missing_sys_block_reports_and_continues(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """If sys_block is missing, report it on stderr and keep looping."""
+        """If sys_block is missing, log a warning and keep looping; stdout stays empty."""
 
         def stop(seconds: float) -> None:
             raise KeyboardInterrupt
@@ -133,4 +145,7 @@ class TestCalibrate:
             ]
         )
         assert code == 0
-        assert "sysfs" in capsys.readouterr().err
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert "sysfs" in record.getMessage()
+        assert capsys.readouterr().out == ""

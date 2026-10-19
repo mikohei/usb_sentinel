@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 import time
 from dataclasses import replace
@@ -11,6 +12,19 @@ from .sysfs import SysfsMissingError, SysfsPermissionError, boot_time, list_usb_
 # ui/__init__.py is empty, so importing i18n does not load the GUI library (tkinter).
 from .ui.i18n import text
 from .units import Runner, SubprocessRunner
+
+LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
+
+logger = logging.getLogger(__name__)
+
+
+def configure_logging() -> None:
+    """Send diagnostics to stderr as "LEVEL logger: message" without a timestamp.
+
+    journald adds the timestamp. basicConfig does nothing when the root logger already has
+    handlers, so repeated calls and pytest's capture handlers keep their existing setup.
+    """
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,10 +90,10 @@ def calibrate(config: DisplayConfig, interval: float) -> int:
             try:
                 disks = list_usb_disks(config.sys_block, fallback_time=fallback_time)
             except SysfsMissingError:
-                print(text(config.language, "notice." + NOTICE_SYSFS_MISSING), file=sys.stderr)
+                logger.warning(text(config.language, "notice." + NOTICE_SYSFS_MISSING))
                 disks = []
             except SysfsPermissionError:
-                print(text(config.language, "notice." + NOTICE_SYSFS_PERMISSION), file=sys.stderr)
+                logger.warning(text(config.language, "notice." + NOTICE_SYSFS_PERMISSION))
                 disks = []
             for disk in disks:
                 key = (disk.kernel_name, disk.port_path, disk.attached_at)
@@ -101,11 +115,12 @@ def main(argv: list[str] | None = None) -> int:
         Exit code. 1 for config ValueError (including TOML syntax errors) and load OSError.
     """
     args = build_parser().parse_args(argv)
+    configure_logging()
     config_path = args.config if args.config is not None else default_config_path()
     try:
         config = _apply_overrides(load_config(config_path), args)
     except (ValueError, OSError) as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
+        logger.error("Configuration error: %s", exc)
         return 1
     if args.command == "calibrate":
         return calibrate(config, args.interval)

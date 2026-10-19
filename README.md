@@ -165,7 +165,8 @@ updated to `state = 'completed'` after `result.json` is written). `install-docke
 `root:usb-sentinel` with `2770` (setgid), so the DB itself and the WAL files `-wal` and `-shm` can be read
 by the `usb-sentinel` group. `result.json` is the source of truth; the DB is an index for listing and searching.
 If recording fails, the inspection continues and the exit code does not change (a failure at the start is left in `warnings` of `result.json`,
-and a failure at completion is left in the journal's stderr as `SQLite record failed (completion)`).
+and a failure at completion is left in the journal's stderr as `WARNING usb_sentinel.libs.cli: SQLite record failed (completion): ...`).
+Diagnostic messages on stderr start with a level and a logger name, such as `ERROR usb_sentinel.libs.cli: Inspection refused: ...`. Standard output carries only the command output (the `selftest` lines and the inspection result text).
 The meaning of the columns is in Section 8 of [doc/qr-payload.md](doc/qr-payload.md).
 
 If the DB is corrupted, confirm that no inspection is running, and then move `inspections.sqlite` and `-wal` and `-shm`

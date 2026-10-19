@@ -1,5 +1,5 @@
+import logging
 import signal
-import sys
 import time
 import tkinter as tk
 import traceback
@@ -28,6 +28,8 @@ from .qr_view import QrView
 from .strip import resolution_warning, strip_text
 from .theme import QR_W, SCREEN_H, SCREEN_W, TILE_COUNT, TILE_W, Fonts
 from .tiles import TilesView
+
+logger = logging.getLogger(__name__)
 
 WINDOW_TITLE = "USB Sentinel Display"
 FOCUS_RETRY_MS = 200
@@ -167,10 +169,10 @@ class App:
         self._check_resolution(self.root.winfo_width(), self.root.winfo_height())
 
     def _check_resolution(self, width: int, height: int) -> None:
-        """If not 480x320, print once to stderr and keep it for the info strip."""
+        """If not 480x320, log a warning once and keep it for the info strip."""
         resolution = resolution_warning(width, height)
         if resolution is not None and self._resolution is None:
-            print(text(self.language, "resolution", width=width, height=height), file=sys.stderr)
+            logger.warning(text(self.language, "resolution", width=width, height=height))
         self._resolution = resolution
 
     def _redraw(self) -> None:
@@ -197,11 +199,11 @@ class App:
         self._redraw()
 
     def toggle_language(self) -> None:
-        """Language button and key L. Switch and save; print a save failure to stderr only once."""
+        """Language button and key L. Switch and save; log a save failure only once."""
         self.language = other_language(self.language)
         reason = save_language(state_file(), self.language)
         if reason is not None and not self._save_warned:
-            print(reason, file=sys.stderr)
+            logger.warning(reason)
             self._save_warned = True
         self._redraw()
 

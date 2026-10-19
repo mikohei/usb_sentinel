@@ -324,7 +324,7 @@ The cause and remedy for each message on the info strip.
 
 The messages correspond in the same order in English (the table in the "Reading the SQLite index" section).
 
-Messages that appear only on standard error.
+Messages that appear only on standard error. Each line starts with a level and a logger name, such as `WARNING usb_sentinel_display.libs.ui.app:` or `ERROR usb_sentinel_display.libs.cli:`.
 
 | Message | Cause | Remedy |
 |---|---|---|

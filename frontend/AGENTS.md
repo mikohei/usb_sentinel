@@ -31,6 +31,7 @@ uv run python -m usb_sentinel_display --help
 - PEP 8に従い、ruffの設定（`line-length = 100`）を守る。
 - すべての関数に型ヒントを付ける。ruffの`ANN`ルールが未注釈を検出する。
 - コメント、docstring、実行時に出力する文字列は英語で書く。実行時に出力する文字列とは、`summary`、`reasons`、`warnings`、例外メッセージ、`result.txt`の見出し、標準出力と標準エラー出力、`--help`の説明である。画面の文言だけは`ui/i18n.py`に日本語と英語の両方で持つ。日本語は`ui/i18n.py`の`"ja"`辞書にだけ置く。
+- 診断メッセージ（警告やエラー）は`logging.getLogger(__name__)`のロガーで出す。標準エラー出力への設定は`libs/cli.py`の`main()`で1回だけ行う。標準出力への`print`はコマンドの出力にだけ使う。
 - `except:`（bare except）は使わない。具体的な例外クラスを指定する。
 - パッケージ側（`usb_sentinel_display/`）で`assert`を使わない。ruffの`S101`が検出する。テストと`scripts/`では許可している。
 - 型チェッカーの指摘は、まず型注釈を直して解消する。抑制コメントを使う場合は、その行だけに`# ty: ignore[<ルール名>]`を付け、理由を英語で添える。ルール指定なしの`# ty: ignore`、ルールの全体無効化、ファイル除外で指摘を隠さない。
@@ -80,6 +81,7 @@ usb_sentinel_display/
 tests/                   偽sysfsツリーとFakeRunnerで外部依存を差し替えたテスト
   conftest.py            fake_sysfsフィクスチャ、FakeRunner、make_result()／sample_result()／phase2_result()
   test_i18n.py           ja／enのキー集合の一致、判定ラベル、言語の記録と優先順
+  test_theme_font.py     フォント解決。tkfontを差し替え、見つからないときのWARNINGログを確かめる
   test_store.py          SqliteIndex。backendのスキーマv1を文字列でコピーし、権限なし・壊れたファイル・版違いの理由キーを確かめる
   test_store_readonly.py SqliteIndexが読み取り専用である証明（バイト列不変、mode=ro、query_only）
   test_gui_smoke.py      @pytest.mark.gui。QrView／TilesView／キー束縛。tk.Tk()が作れない環境では自動skip

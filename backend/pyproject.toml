@@ -1,0 +1,72 @@
+[project]
+name = "usb-sentinel"
+version = "0.1.0"
+description = "USB ドライブの自動検査（マルウェア / 容量 / 速度）— Raspberry Pi 4 / Ubuntu 向け"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # QR コード画像の生成。結果をエアギャップ越しに転送するために使う。
+    "qrcode[pil]>=8.0",
+]
+
+[project.scripts]
+usb-sentinel = "usb_sentinel.libs:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.3",
+    "ty==0.0.87",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# src/ レイアウトではなく backend/ 直下に usb_sentinel/ を置いている。
+module-root = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "PTH",  # flake8-use-pathlib
+    "RET",  # flake8-return
+    "S",    # flake8-bandit
+    "DTZ",  # flake8-datetimez
+    "ANN",  # flake8-annotations（mypy strict の disallow_untyped_defs の代替）
+]
+ignore = [
+    # subprocess の呼び出しは runner.py に集約し、argv をリストで固定している。
+    "S603",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# テストでは assert と固定値の利用を許容する。
+"tests/*" = ["S101", "S105", "S106", "DTZ001"]
+
+[tool.ty.rules]
+# mypy strict 相当の検査へ近づけるため、既定で無効なルールを有効にする。
+# デコレータが関数の型を失う場合を検出する（mypy の disallow_untyped_decorators 相当）。
+dynamic-function-decorator-return = "error"
+# 型引数のないジェネリクスを検出する（mypy の disallow_any_generics 相当）。
+missing-type-argument = "error"
+# 条件分岐によって未定義になりうる変数の参照を警告する。
+possibly-unresolved-reference = "warn"
+# 宣言した戻り値型の部分型でない値を返す return を検出する。
+unsound-return-statement = "error"
+# 不要になった `# ty: ignore` を警告する（mypy の warn_unused_ignores 相当）。
+unused-ignore-comment = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,3 @@
+# Host udev starts systemd; systemd starts one Docker backend per whole USB disk.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{DEVTYPE}=="disk", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-sentinel-docker@%k.service"

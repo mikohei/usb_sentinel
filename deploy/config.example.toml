@@ -1,0 +1,92 @@
+# usb_sentinel の設定例。
+#
+# 配置先: /etc/usb-sentinel/config.toml
+# 記載しなかったキーは backend/usb_sentinel/libs/config.py の既定値が使われる。
+# ファイル自体が無い場合も既定値で動作する。
+
+# 結果の保存先ルート。配下に <timestamp>-<serial>/ を作り、
+# result.json / result.txt / result-qr.png / hash-inventory.tsv を置く。
+results_dir = "/var/lib/usb-sentinel/results"
+
+# read-only マウント用の一時ディレクトリのルート。
+mount_root = "/run/usb-sentinel/mnt"
+
+# trueのときのみ破壊的な容量・速度検査を実行する。
+# 到達するのはClamAVスキャンとハッシュ台帳の作成が完了した後だけ。
+# ドライブのデータは消えるので、検体を返却する運用ではfalseのままにする。
+# Docker構成では/etc/usb-sentinel/docker.envのUSB_SENTINEL_DEVICE_ACCESS=rwも必要。
+allow_destructive = false
+
+# ファイルのハッシュ台帳（hash-inventory.tsv）を作るか。
+# 隔離環境の外でハッシュを突き合わせる運用に使う。
+# ClamAVがスキャンを実行した後は、結果にかかわらず作成する。上限はhash_inventory_timeout_s。
+hash_inventory = true
+# 台帳作成の上限秒数。ClamAVの結果（検知・エラー・タイムアウト）にかかわらず台帳は作る。
+hash_inventory_timeout_s = 3600.0
+
+# 検査1件につき1行を記録するSQLite。空文字で無効。result.jsonが正本で、DBは索引。
+sqlite_path = "/var/lib/usb-sentinel/db/inspections.sqlite"
+
+# 結果サマリの QR コード画像を生成するか。
+# air gap 越しに結果を持ち出す主要手段。
+emit_qr = true
+
+
+[malware]
+# 定義 DB がこの日数より古いと結果に警告を残す。隔離環境では freshclam が
+# 走らないため、DB は手動でステージングする前提。
+max_db_age_days = 30
+
+# trueなら定義DBがmax_db_age_daysより古いときスキャンせずERRORにする。既定は警告のみ。
+stale_db_is_error = false
+
+# ドライブ全体のスキャンにかける上限秒数。超えると ERROR（Pass にはしない）。
+timeout_s = 3600.0
+
+# スキャン対象外にする正規表現（clamscan の --exclude に渡す）。
+# 既定は空。除外するとカバレッジが落ちるので安易に増やさない。
+exclude_patterns = []
+
+
+[capacity]
+# 実容量 >= 公称容量 * pass_ratioならPass。判定基準は運用要件に合わせて調整する。
+# 容量不足はSpec Mismatch、容量が足りているのにf3readが消失・破損セクタを報告したら
+# Defectiveになる。
+pass_ratio = 0.93
+
+# 商品ページの公称容量（バイト、10進表記をそのまま。32GB → 32000000000）。
+# 設定すると申告容量・実測容量の両方をこの値と比べ、93%未満は容量不足、107%超は偽装疑い。
+# 未設定なら申告容量（lsblk）基準の93%判定のみ。GiB表記（32GiB = 34359738368）と混同しない。
+# nominal_bytes = 32000000000
+over_ratio = 1.07
+
+# trueならf3probe（高速・破壊的。デバイスに直接書く）。
+# falseならf3write + f3read（空き領域だけを検証。満杯・NTFS・解析不能の検体はtrueを使う）。
+use_probe = false
+
+# ステップ全体の上限秒数。超えるとERROR（Passにはしない）。
+timeout_s = 14400.0
+
+
+[speed]
+# fioの順次読み取り→順次書き込みのパラメータ。暫定値で、CrystalDiskMarkなど既存ツールの
+# 数値を突き合わせるキャリブレーションが必要。
+block_size = "1M"
+queue_depth = 8
+duration_s = 30
+
+# 公称速度に対してこの比率以上の実測値ならPass。暫定値。
+pass_ratio = 0.80
+
+# 2回のfio実行の合計に対する上限秒数。超えるとERROR。
+timeout_s = 900.0
+
+# メーカー公称速度（MB/s、10^6バイト/秒）。設定した側だけを判定し、未設定側は記録のみ。
+# 両方未設定なら速度ステップはSKIPPED、総合判定はInconclusiveになる。
+# nominal_read_mb_s = 90.0
+# nominal_write_mb_s = 20.0
+
+# デバイス種別。公称速度が未設定のとき、この種別の業界最低値で判定する。
+# hdd_5400 / hdd_7200 / sata_ssd / nvme_ssd / sd_c10 / sd_u3 / usb2_flash / usb3_flash
+# 未設定ならUSBリンク速度からusb2_flash / usb3_flashを選ぶ（HDD・SSD・SDは判別できないので設定が必要）。
+# device_class = "usb3_flash"

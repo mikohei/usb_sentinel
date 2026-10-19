@@ -1,0 +1,19 @@
+[Unit]
+Description=USB Sentinel Docker inspection (%i)
+BindsTo=dev-%i.device
+Requires=docker.service
+After=dev-%i.device docker.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/usb-sentinel/docker.env
+ExecStart=/opt/usb-sentinel/scripts/run-docker.sh /dev/%i
+# When USB is removed, stop the container as well as the attached Docker CLI.
+ExecStopPost=-/usr/bin/docker stop -t 10 usb-sentinel-%i
+TimeoutStartSec=0
+TimeoutStopSec=30
+SuccessExitStatus=0 1 2
+Restart=no
+StandardOutput=journal
+StandardError=journal

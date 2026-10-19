@@ -1,8 +1,8 @@
-"""SHA-256ハッシュ台帳（hash-inventory.tsv）の作成。
+"""Build the SHA-256 hash inventory (hash-inventory.tsv).
 
-`ro,noexec,nosuid,nodev`マウントの内側で、clamscanがスキャンを実行した後にだけ呼ばれる
-（orchestratorの分岐）。ファイルはバイト列として読むだけで内容を解釈しない。
-時間上限は`Budget`で付け、外さない。
+Called only inside the `ro,noexec,nosuid,nodev` mount, and only after clamscan has run a scan
+(an orchestrator branch). Files are read only as bytes; their contents are never interpreted.
+The time limit is enforced with `Budget` and must not be removed.
 """
 
 import hashlib
@@ -16,24 +16,24 @@ from .models import StepResult, StepStatus
 from .steps import StepContext
 from .steps.common import Budget
 
-# 1回に読むバイト数。チャンクごとに時間予算を確認する。
+# Bytes read per call. The time budget is checked after each chunk.
 CHUNK_SIZE = 1024 * 1024
-# details.read_errorsに残す件数の上限（件数自体はread_error_countに入る）。
+# Maximum entries kept in details.read_errors (the total goes into read_error_count).
 MAX_READ_ERRORS = 50
 
 
 def _hash_file(path: Path, budget: Budget) -> tuple[str, int] | None:
-    """ファイルをチャンクで読みSHA-256を求める。
+    """Read the file in chunks and compute its SHA-256.
 
     Args:
-        path: 対象ファイル。
-        budget: 時間予算。チャンクごとに残りを確認する。
+        path: Target file.
+        budget: Time budget. The remainder is checked after each chunk.
 
     Returns:
-        (16進ダイジェスト, 読んだバイト数)。予算超過を検知したらNone。
+        (hex digest, bytes read). None if the budget is found to be exceeded.
 
     Raises:
-        OSError: ファイルを開けない、または読めない。
+        OSError: If the file cannot be opened or read.
     """
     hasher = hashlib.sha256()
     size = 0
@@ -49,10 +49,11 @@ def _hash_file(path: Path, budget: Budget) -> tuple[str, int] | None:
 def _write_ledger(
     ctx: StepContext, stream: TextIO, budget: Budget, details: dict[str, Any]
 ) -> None:
-    """マウントポイント内の全ファイルを台帳へ書く。進捗はdetailsに入れる。"""
+    """Write every file under the mount points to the ledger. Progress goes into details."""
     for index, mountpoint in enumerate(ctx.mountpoints):
         for path in sorted(mountpoint.rglob("*")):
-            # 0バイトファイル多数やディレクトリ走査にも予算を効かせる（チャンク後の確認とは別）。
+            # Apply the budget to many zero-byte files and directory walks too (separate from
+            # the per-chunk check).
             if budget.remaining() <= 0:
                 details["timed_out"] = True
                 return
@@ -62,13 +63,13 @@ def _write_ledger(
             try:
                 hashed = _hash_file(path, budget)
             except OSError as exc:
-                # ファイル単位の失敗は記録して次へ進む（台帳全体を失わない）。
+                # Record per-file failures and move on (do not lose the whole ledger).
                 details["read_error_count"] += 1
                 if len(details["read_errors"]) < MAX_READ_ERRORS:
                     details["read_errors"].append({"path": name, "errno": exc.errno})
                 continue
             if hashed is None:
-                # 超過を検知した途中のファイルは書かない。
+                # Do not write the file that was in progress when the overrun was detected.
                 details["timed_out"] = True
                 return
             digest, size = hashed
@@ -79,15 +80,15 @@ def _write_ledger(
 
 
 def inventory(ctx: StepContext, monotonic: Callable[[], float] = time.monotonic) -> StepResult:
-    """ハッシュ台帳を作り、台帳自体のSHA-256をdetails.digestに入れる。
+    """Build the hash inventory and put the SHA-256 of the ledger itself in details.digest.
 
     Args:
-        ctx: ステップ文脈。`ctx.config.hash_inventory_timeout_s`を時間上限にする。
-        monotonic: 単調増加時刻（テストで差し替える）。
+        ctx: Step context. `ctx.config.hash_inventory_timeout_s` is the time limit.
+        monotonic: Monotonic clock (replaced in tests).
 
     Returns:
-        ファイル0件でもPASS。時間超過または読み取り不能ファイルが1件以上あればERROR。
-        台帳ファイル自体を書けないときもERROR。
+        PASS even with zero files. ERROR if the time limit is exceeded or at least one file is
+        unreadable. Also ERROR if the ledger file itself cannot be written.
     """
     timeout_s = ctx.config.hash_inventory_timeout_s
     budget = Budget(timeout_s, monotonic)

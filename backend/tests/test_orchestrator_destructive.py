@@ -1,6 +1,8 @@
-"""検査シーケンスの破壊的ステップ（容量・速度）のゲートと申告容量の非破壊チェック。
+"""Gate for the destructive steps (capacity, speed) in the inspection sequence, and the
+non-destructive advertised-capacity check.
 
-材料（full_runner、_statuses、_assert_nothing_destructive）はtest_orchestrator.pyから借りる。
+Fixtures (full_runner, _statuses, _assert_nothing_destructive) are borrowed from
+test_orchestrator.py.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ class TestInspectDestructive:
     def test_destructive_steps_blocked_while_mounted(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """アンマウントに失敗した状態では書き込みに進まない。"""
+        """Do not proceed to writing when unmounting has failed."""
         still_mounted = json.loads(json.dumps(LSBLK_DISK))
         still_mounted["blockdevices"][0]["children"][0]["mountpoint"] = "/mnt/sda1"
         full_runner.register(["lsblk"], stdout=json.dumps(still_mounted))
@@ -61,7 +63,8 @@ class TestInspectDestructive:
     def test_destructive_steps_run_when_enabled_and_unmounted(
         self, full_runner: FakeRunner, config: Config, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """条件を満たせば容量・速度ステップが実行され、両方PASSならNo Defectになる。"""
+        """When conditions are met, the capacity and speed steps run, and if both PASS the
+        verdict is No Defect."""
         monkeypatch.setattr(capacity_mod, "DEFAULT_STATVFS", lambda _p: make_statvfs())
         enabled = replace(
             config,
@@ -76,19 +79,20 @@ class TestInspectDestructive:
         assert result.verdict is Verdict.NO_DEFECT
         capacity = result.step("capacity")
         assert capacity is not None
-        # 開発機のディスク使用量が混入せず、注入したstatvfsの値になる。
+        # The injected statvfs value is used, not the dev machine's disk usage.
         assert capacity.details["used_bytes"] == STATVFS_USED_BYTES
         rw_mounts = _rw_mount_calls(full_runner)
         assert len(rw_mounts) == 1
         assert "noexec,nosuid,nodev" in rw_mounts[0]
-        # 読み取りfioは書き込みfioより先。
+        # The read fio runs before the write fio.
         fio_calls = [c for c in full_runner.calls if c[0] == "fio"]
         assert [c[1] for c in fio_calls] == ["--name=seq_read", "--name=seq_write"]
 
     def test_elapsed_s_recorded_for_executed_steps(
         self, full_runner: FakeRunner, config: Config, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """実行したステップには所要時間（秒、非負のfloat）が入り、全体にも入る。"""
+        """Executed steps get an elapsed time (seconds, non-negative float), and so does the
+        whole run."""
         monkeypatch.setattr(capacity_mod, "DEFAULT_STATVFS", lambda _p: make_statvfs())
         enabled = replace(
             config,
@@ -106,7 +110,7 @@ class TestInspectDestructive:
         assert result.elapsed_s >= 0.0
 
     def test_skipped_steps_have_no_elapsed_s(self, full_runner: FakeRunner, config: Config) -> None:
-        """SKIPPEDとして組み立てたStepResultの所要時間はNoneのまま。"""
+        """A StepResult built as SKIPPED keeps an elapsed time of None."""
         result = inspect(full_runner, config, "/dev/sda")
 
         capacity = result.step("capacity")
@@ -121,7 +125,8 @@ class TestInspectDestructive:
     def test_capacity_umount_failure_blocks_fio(
         self, full_runner: FakeRunner, config: Config, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """容量ステップがumountに失敗したら、速度ステップは自衛してfioを起動しない。"""
+        """If the capacity step fails to umount, the speed step protects itself and does not
+        start fio."""
         monkeypatch.setattr(capacity_mod, "DEFAULT_STATVFS", lambda _p: make_statvfs())
         still_mounted = json.loads(json.dumps(LSBLK_DISK))
         still_mounted["blockdevices"][0]["children"][0]["mountpoint"] = "/run/x/rw/0"
@@ -158,12 +163,14 @@ def _with_nominal(config: Config, nominal: int | None, **overrides: object) -> C
 
 
 class TestAdvertisedCheck:
-    """申告容量の非破壊チェック（probe()直後、マウント前）とCounterfeit Suspected。"""
+    """Non-destructive advertised-capacity check (right after probe(), before mounting) and
+    Counterfeit Suspected."""
 
     def test_exceeded_without_destructive_steps(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """allow_destructive=falseでも申告32GBが公称29GBの107%超なら偽装疑いになる。"""
+        """Even with allow_destructive=false, advertised 32 GB over 107% of nominal 29 GB means
+        suspected counterfeit."""
         result = inspect(full_runner, _with_nominal(config, 29_000_000_000), "/dev/sda")
 
         assert result.advertised_check["exceeded"] is True
@@ -194,21 +201,24 @@ class TestAdvertisedCheck:
     def test_exceeded_does_not_block_destructive_steps(
         self, full_runner: FakeRunner, config: Config, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """超過は破壊的ゲートに影響しない（permitted不変）。書き込みはroマウントより後。"""
+        """An overrun does not affect the destructive gate (permitted unchanged). Writes come
+        after the ro mount."""
         monkeypatch.setattr(capacity_mod, "DEFAULT_STATVFS", lambda _p: make_statvfs())
         enabled = _with_nominal(config, 29_000_000_000, allow_destructive=True)
 
         result = inspect(full_runner, enabled, "/dev/sda")
 
         assert _statuses(result)["capacity"] is StepStatus.FAIL
-        # 速度ステップも実行される（公称速度未設定なので判定はSKIPPEDだがfioは走る）。
+        # The speed step also runs (no nominal speed is set, so the verdict is SKIPPED, but fio
+        # runs).
         assert any(c[0] == "f3write" for c in full_runner.calls)
         assert any(c[0] == "fio" for c in full_runner.calls)
         assert result.verdict is Verdict.COUNTERFEIT_SUSPECTED
         capacity = result.step("capacity")
         assert capacity is not None
         assert "over_advertised" in capacity.details["counterfeit_reasons"]
-        # 非破壊チェックとステップの両方で確認した記録として、reasonsには2回出る。
+        # It appears twice in reasons, recording that both the non-destructive check and the
+        # step confirmed it.
         assert sum("申告容量" in r for r in result.reasons) == 2
         assert result.reason_codes.count("c:over") == 1
         first_ro_mount = next(

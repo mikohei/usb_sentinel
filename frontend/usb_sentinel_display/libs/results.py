@@ -1,6 +1,7 @@
-"""結果ディレクトリの走査とSQLite索引の突き合わせ（ResultStore）。
+"""Scanning result directories and matching against the SQLite index (ResultStore).
 
-ディレクトリ名の解析・時刻の変換・result.jsonの要約（parse_summary）はresult_file.pyにある。
+Directory name parsing, time conversion, and result.json summaries (parse_summary) live in
+result_file.py.
 """
 
 import hashlib
@@ -23,7 +24,7 @@ from .result_file import (
 )
 from .store import DbRow, SqliteIndex
 
-# ディレクトリ名と時刻とparse_summaryはresult_file.pyへ移した。既存の参照先として名前を残す。
+# Directory names, times, and parse_summary moved to result_file.py. Names kept for old refs.
 __all__ = [
     "DIR_NAME_RE",
     "RESULT_FILE",
@@ -42,28 +43,29 @@ __all__ = [
 
 
 class ResultsMissingError(Exception):
-    """結果ルートが存在しない、またはディレクトリでない。"""
+    """The results root does not exist or is not a directory."""
 
 
 class ResultsPermissionError(Exception):
-    """結果ルートを読む権限がない。"""
+    """No permission to read the results root."""
 
 
 class ResultStore:
-    """結果ルートを走査し、result.jsonを安全に読んでキャッシュする。
+    """Scan the results root, read result.json safely, and cache it.
 
-    SQLite索引（index）があればcollect()がDBで候補を引くが、result.jsonは必ず読み直して正本とする。
+    With an SQLite index, collect() finds candidates via the DB, but result.json is always
+    re-read as the source of truth.
     """
 
     def __init__(
         self, root: Path, *, index: SqliteIndex | None = None, max_failures: int = 10
     ) -> None:
-        """結果ルートと索引を受け取り、キャッシュを空で始める。
+        """Take the results root and index, and start with an empty cache.
 
         Args:
-            root: 結果ルート（results_dir）。
-            index: SQLite索引。Noneなら常にディレクトリ走査（scan）を使う。
-            max_failures: result.jsonの読み込みが何回連続で失敗したら「結果破損」とみなすか。
+            root: Results root (results_dir).
+            index: SQLite index. If None, always scan the directories (scan).
+            max_failures: Consecutive result.json read failures that count as "result corrupt".
         """
         self.root = root
         self.max_failures = max_failures
@@ -72,12 +74,12 @@ class ResultStore:
         self._failures: dict[Path, int] = {}
 
     def reset(self) -> None:
-        """キャッシュと失敗回数を捨てる（F5）。"""
+        """Drop the cache and failure counts (F5)."""
         self._cache.clear()
         self._failures.clear()
 
     def _load(self, path: Path, dir_name: str, mtime: float) -> ResultSummary | None:
-        """result.jsonを読んで要約を返す。読めなければ失敗回数を加算してNone。"""
+        """Read result.json and return the summary. If unreadable, count a failure, return None."""
         key = (path, mtime)
         cached = self._cache.get(key)
         if cached is not None:
@@ -99,7 +101,7 @@ class ResultStore:
         return summary
 
     def _list_root(self) -> list[os.DirEntry[str]]:
-        """結果ルートの直下を列挙する。不在・権限なしは専用の例外に変える。"""
+        """List the results root entries. Missing/denied become dedicated exceptions."""
         try:
             with os.scandir(self.root) as entries:
                 return list(entries)
@@ -109,17 +111,17 @@ class ResultStore:
             raise ResultsPermissionError(str(self.root)) from exc
 
     def scan(self, min_mtime: float | None) -> list[ResultRecord]:
-        """結果ルートを走査する。
+        """Scan the results root.
 
         Args:
-            min_mtime: これより古いresult.jsonは候補にしない。Noneなら走査だけして空を返す。
+            min_mtime: result.json older than this is not a candidate. If None, return empty.
 
         Returns:
-            名前順のレコード一覧。
+            Records sorted by name.
 
         Raises:
-            ResultsMissingError: 結果ルートが無い、またはディレクトリでない。
-            ResultsPermissionError: 結果ルートを読む権限がない。
+            ResultsMissingError: The results root does not exist or is not a directory.
+            ResultsPermissionError: No permission to read the results root.
         """
         names = self._list_root()
         if min_mtime is None:
@@ -144,10 +146,10 @@ class ResultStore:
         return records
 
     def _record_from_row(self, row: DbRow) -> ResultRecord | None:
-        """DBの1行からレコードを組む。result.jsonを読み直し、DBの値は結び付けの材料にだけ使う。
+        """Build a record from one DB row. Re-read result.json; DB values are only binding inputs.
 
-        output_dir列は使わず、inspection_idを結果ルート直下のディレクトリ名としてだけ扱う。
-        形式外の名前や"/"を含む名前は捨てる。
+        The output_dir column is unused; inspection_id is treated only as a dir name under the root.
+        Malformed names and names containing "/" are dropped.
         """
         name = row.inspection_id
         parsed = parse_dir_name(name)
@@ -162,11 +164,11 @@ class ResultStore:
         summary = self._load(path, name, mtime) if mtime is not None else None
         if mtime is not None and summary is not None:
             if row.result_digest is not None and row.result_digest != summary.digest:
-                # 索引のダイジェストと実ファイルが食い違う。1回目から結果破損として扱う。
+                # The index digest and the real file disagree. Treat as corrupt from the first time.
                 return ResultRecord(name, mtime, serial_part, None, True)
             return ResultRecord(name, mtime, serial_part, summary, False)
         if row.state == "started":
-            # 開始したが完了結果が無い。検査中か結果なしかはmapperがユニット状態で決める。
+            # Started but no final result. The mapper picks inspecting vs no result by unit state.
             started_epoch = epoch_from_iso(row.started_at)
             return ResultRecord(
                 name,
@@ -182,19 +184,20 @@ class ResultStore:
         return ResultRecord(name, mtime if mtime is not None else 0.0, serial_part, None, broken)
 
     def collect(self, min_mtime: float | None) -> tuple[list[ResultRecord], str | None]:
-        """SQLite索引で候補を引き、result.jsonを正本として読み直す。
+        """Find candidates via the SQLite index and re-read result.json as the source of truth.
 
-        索引が無い・開けない・スキーマ版が新しいときは従来のscan()に戻り、理由キーを添える。
+        If the index is missing, unopenable, or has a newer schema, fall back to scan() with a
+        reason key.
 
         Args:
-            min_mtime: 接続時刻の最小値（エポック秒）。Noneなら列挙だけして空を返す。
+            min_mtime: Minimum connect time (epoch seconds). If None, just list and return empty.
 
         Returns:
-            (名前順のレコード一覧、通知キー)。索引が使えたときの通知キーはNone。
+            (records sorted by name, notice key). The notice key is None when the index was used.
 
         Raises:
-            ResultsMissingError: 結果ルートが無い、またはディレクトリでない。
-            ResultsPermissionError: 結果ルートを読む権限がない。
+            ResultsMissingError: The results root does not exist or is not a directory.
+            ResultsPermissionError: No permission to read the results root.
         """
         if self._index is None:
             return self.scan(min_mtime), None

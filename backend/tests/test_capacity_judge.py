@@ -1,7 +1,8 @@
-"""容量判定の純関数（steps/capacity_judge.py）。
+"""Pure functions for capacity judgment (steps/capacity_judge.py).
 
-容量超過の境界値（Fractionで1バイトもずれない）、非破壊チェックの辞書、
-judge()の優先順位（counterfeit > short > defect > unverified > ok）を確認する。
+Verify the capacity-overrun boundary (Fraction keeps it exact to the byte), the
+non-destructive check dict, and judge() priority (counterfeit > short > defect > unverified >
+ok).
 """
 
 from __future__ import annotations
@@ -37,9 +38,9 @@ class TestOverThreshold:
         ],
     )
     def test_exact_without_float_drift(self, nominal: int, expected: int) -> None:
-        # 浮動小数のまま掛けると…000.000004になりceilで+1される。Fractionなら一致する。
+        # Multiplying as a float gives ...000.000004 and ceil adds 1. With Fraction it matches.
         assert over_threshold(nominal, 1.07) == expected
-        # 浮動小数版は+1される（この前提が崩れたらFractionは不要になる）。
+        # The float version gets +1 (if this premise breaks, Fraction becomes unnecessary).
         assert math.ceil(nominal * 1.07) == expected + 1
 
     def test_none_and_zero_give_none(self) -> None:
@@ -91,7 +92,8 @@ class TestPrecheckAdvertised:
 
 
 def _judge(**overrides: int | float | str | None) -> CapacityVerdict:
-    """32GB・既使用1GB・検証済み30.2GB相当のPASSケースを既定にして一部を差し替える。"""
+    """Default to a PASS case (32 GB, 1 GB used, about 30.2 GB verified) and override some
+    values."""
     params: dict[str, Any] = {
         "actual": 31_200_000_000,
         "advertised": GB32,
@@ -109,7 +111,8 @@ def _judge(**overrides: int | float | str | None) -> CapacityVerdict:
 
 
 class TestJudgeWithoutNominal:
-    """nominal未設定では現行の4分岐（short / defect / unverified / ok）と同じ判定になる。"""
+    """Without nominal, the judgment matches the current four branches (short / defect /
+    unverified / ok)."""
 
     def test_ok(self) -> None:
         verdict = _judge()
@@ -140,7 +143,7 @@ class TestJudgeWithoutNominal:
         assert "既使用30.20GB" in verdict.summary
 
     def test_probe_mode_has_no_unverified(self) -> None:
-        # f3probeモードはverified_bytes=None・bad_sectors=Noneで呼ばれる。
+        # f3probe mode is called with verified_bytes=None and bad_sectors=None.
         verdict = _judge(verified_bytes=None, bad_sectors=None, lost_ratio=None)
         assert verdict.kind == "ok"
 
@@ -228,7 +231,8 @@ class TestJudgePriority:
         assert verdict.kind == "defect"
 
     def test_nominal_changes_base_of_short(self) -> None:
-        # 申告32GBでも公称40GBなら、実容量31.2GBは不足になる（分母がnominal）。
+        # Even with 32 GB advertised, a 40 GB nominal makes an actual 31.2 GB short (nominal is
+        # the denominator).
         verdict = _judge(nominal=40_000_000_000, threshold=37_200_000_000)
         assert verdict.kind == "short"
         assert "公称40.00GB" in verdict.summary

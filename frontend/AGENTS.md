@@ -30,7 +30,7 @@ uv run python -m usb_sentinel_display --help
 
 - PEP 8に従い、ruffの設定（`line-length = 100`）を守る。
 - すべての関数に型ヒントを付ける。ruffの`ANN`ルールが未注釈を検出する。
-- コメントとdocstringは日本語で書く。英単語・数字と日本語の間にスペースを入れない。
+- コメントとdocstringは英語で書く。UIに出す文言は`ui/i18n.py`に日本語と英語の両方で持つ。実行時に出力する文字列（`summary`、`reasons`、例外メッセージなど）は既存の言語のまま変えない。
 - `except:`（bare except）は使わない。具体的な例外クラスを指定する。
 - パッケージ側（`usb_sentinel_display/`）で`assert`を使わない。ruffの`S101`が検出する。テストと`scripts/`では許可している。
 - 型チェッカーの指摘は、まず型注釈を直して解消する。抑制コメントを使う場合は、その行だけに`# ty: ignore[<ルール名>]`を付け、理由を日本語で添える。ルール指定なしの`# ty: ignore`、ルールの全体無効化、ファイル除外で指摘を隠さない。

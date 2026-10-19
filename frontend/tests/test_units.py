@@ -22,24 +22,24 @@ class TestUnitName:
         assert unit_name("x@{kernel}.service", "sda") == "x@sda.service"
 
     def test_other_braces_are_left_as_is(self) -> None:
-        """{kernel}以外の波括弧や属性参照はstr.formatとして解釈しない。"""
+        """Braces and attribute access other than {kernel} are not interpreted by str.format."""
         assert unit_name("{kernel.__class__}@{kernel}{0}", "sda") == "{kernel.__class__}@sda{0}"
 
     @pytest.mark.parametrize("kernel", ["sda; rm", "../sda", "sdA", "sda1", ""])
     def test_rejects_invalid_kernel(self, kernel: str) -> None:
-        """カーネル名の再検証に落ちるとValueError。"""
+        """ValueError when the kernel name fails re-validation."""
         with pytest.raises(ValueError, match="kernel"):
             unit_name(TEMPLATE, kernel)
 
 
 class TestParseShowOutput:
     def test_two_blocks(self) -> None:
-        """空行区切りの2ブロックが辞書になる。"""
+        """Two blocks separated by a blank line become dicts."""
         text = "Id=a.service\nActiveState=active\n\nId=b.service\nActiveState=inactive\n"
         assert parse_show_output(text) == {"a.service": "active", "b.service": "inactive"}
 
     def test_block_without_active_state_skipped(self) -> None:
-        """ActiveStateが無いブロックは採用せず、他方は解析する。"""
+        """A block without ActiveState is skipped; the other is parsed."""
         text = "Id=a.service\n\nId=b.service\nActiveState=failed\n"
         assert parse_show_output(text) == {"b.service": "failed"}
 
@@ -47,14 +47,14 @@ class TestParseShowOutput:
         assert parse_show_output("") == {}
 
     def test_value_with_equals(self) -> None:
-        """値に=が含まれても最初の=で分ける。"""
+        """Split on the first = even when the value contains =."""
         text = "Id=a=b.service\nActiveState=active\n"
         assert parse_show_output(text) == {"a=b.service": "active"}
 
 
 class TestQueryUnitStates:
     def test_active_and_inactive(self) -> None:
-        """2ユニットを1回で問い合わせ、順序が違っても対応付く。"""
+        """Query two units in one call; they are matched even if the order differs."""
         runner = FakeRunner()
         runner.register(
             SHOW_ARGV,
@@ -69,7 +69,7 @@ class TestQueryUnitStates:
         assert runner.calls == [tuple([*SHOW_ARGV, *units])]
 
     def test_missing_unit_not_in_dict(self) -> None:
-        """出力に無いユニットは辞書に入らない。"""
+        """Units missing from the output are not added to the dict."""
         runner = FakeRunner()
         runner.register(SHOW_ARGV, stdout="Id=a.service\nActiveState=active\n")
         assert query_unit_states(runner, ["a.service", "b.service"]) == {"a.service": "active"}
@@ -95,7 +95,7 @@ class TestQueryUnitStates:
         assert runner.calls == []
 
     def test_timeout_passed(self) -> None:
-        """timeout_sがRunnerに渡る。"""
+        """timeout_s is passed to the Runner."""
         seen: list[float] = []
 
         class Recording:
@@ -114,7 +114,7 @@ class TestActiveStates:
 
 class TestSubprocessRunner:
     def test_missing_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """コマンド不在は127で返し例外にしない。"""
+        """A missing command returns 127 without raising."""
 
         def raise_not_found(*args: object, **kwargs: object) -> None:
             raise FileNotFoundError("systemctl")
@@ -132,6 +132,6 @@ class TestSubprocessRunner:
         assert out.timed_out is True
 
     def test_success(self) -> None:
-        """実際のサブプロセスで標準出力が返る。"""
+        """A real subprocess returns its stdout."""
         out = SubprocessRunner().run(["echo", "Id=x"], timeout_s=5.0)
         assert out == CommandOutput(0, "Id=x\n", False)

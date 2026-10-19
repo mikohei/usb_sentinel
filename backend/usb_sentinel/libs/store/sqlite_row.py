@@ -1,7 +1,8 @@
-"""result.jsonと同じ値からinspectionsの1行を組む純関数（設計書第5節）。SQLiteには触らない。
+"""Pure functions that build one inspections row from the same values as result.json.
 
-列の値はすべてInspectionResult（result.jsonの元）から読む。detailsの新キーは.get()で読み、
-ERROR経路などで無ければNoneにする。
+Design doc section 5. SQLite is not touched. Every column value is read from InspectionResult
+(the source of result.json). New details keys are read with .get() and become None when absent,
+such as on ERROR paths.
 """
 
 from __future__ import annotations
@@ -26,29 +27,30 @@ STEP_NAMES = ("malware", "hash_inventory", "capacity", "speed", "unmount")
 
 
 def _details(result: InspectionResult, name: str) -> dict[str, Any]:
-    """ステップのdetails。ステップが無ければ空の辞書。"""
+    """The step's details. Empty dict if the step does not exist."""
     step = result.step(name)
     return step.details if step else {}
 
 
 def _nested(details: dict[str, Any], key: str) -> dict[str, Any]:
-    """detailsの入れ子辞書。無いか辞書でなければ空の辞書。"""
+    """Nested dict in details. Empty dict if absent or not a dict."""
     value = details.get(key)
     return value if isinstance(value, dict) else {}
 
 
 def _json(values: list[str]) -> str:
-    """JSON配列の文字列にする（日本語はエスケープしない）。"""
+    """Encode as a JSON array string (non-ASCII is not escaped)."""
     return json.dumps(values, ensure_ascii=False)
 
 
 def _status(step: StepResult | None) -> str | None:
-    """ステップのstatus文字列（`step_*`列の値）。ステップが無ければNone。"""
+    """The step's status string (value of a `step_*` column). None if the step does not exist."""
     return step.status.value if step else None
 
 
 def _counterfeit_reasons(result: InspectionResult, capacity: dict[str, Any]) -> list[str]:
-    """非破壊チェックの"over_advertised"とステップのcounterfeit_reasonsの順序保持和集合。"""
+    """Order-preserving union of the non-destructive "over_advertised" and the step's
+    counterfeit_reasons."""
     reasons: list[str] = []
     if result.advertised_check.get("exceeded") is True:
         reasons.append("over_advertised")
@@ -59,19 +61,19 @@ def _counterfeit_reasons(result: InspectionResult, capacity: dict[str, Any]) -> 
 
 
 def _started_compact(started_at: str) -> str:
-    """result_dir_for()と同じ%Y%m%dT%H%M%SZ形式。"""
+    """Same %Y%m%dT%H%M%SZ format as result_dir_for()."""
     return datetime.fromisoformat(started_at).strftime("%Y%m%dT%H%M%SZ")
 
 
 def row_from_result(result: InspectionResult, digest: str | None) -> dict[str, Any]:
-    """result.jsonと同じ値から全列の辞書を組む純関数。
+    """Pure function that builds a dict of all columns from the same values as result.json.
 
     Args:
-        result: 検査結果。
-        digest: result.jsonのSHA-256（開始時はNone）。
+        result: Inspection result.
+        digest: SHA-256 of result.json (None at start).
 
     Returns:
-        列名→値の辞書。detailsの新キーは.get()で読み、無ければNone。
+        Dict of column name -> value. New details keys are read with .get(); None if absent.
     """
     device = result.device
     malware = _details(result, "malware")

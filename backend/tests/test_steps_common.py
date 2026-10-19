@@ -1,4 +1,4 @@
-"""容量・速度ステップの共通部品（Budget、権限判定、lsblk問い合わせ）。"""
+"""Shared parts of the capacity and speed steps (Budget, permission check, lsblk query)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from usb_sentinel.libs.steps.common import (
 
 
 class FakeClock:
-    """注入用の単調時刻。advance()で進める。"""
+    """Injectable monotonic clock. Advance it with advance()."""
 
     def __init__(self) -> None:
         self.now = 100.0
@@ -39,7 +39,7 @@ class TestBudget:
         assert budget.remaining() == 20.0
 
     def test_remaining_clamps_to_zero(self) -> None:
-        # 超過後は負にならず0.0に張り付く。
+        # After overrun it does not go negative; it stays at 0.0.
         clock = FakeClock()
         budget = Budget(30.0, clock)
         clock.advance(31)
@@ -101,7 +101,7 @@ class TestQueryBlockInfo:
             query_block_info(runner, "/dev/sda")
 
     def test_empty_blockdevices_is_device_query_error(self) -> None:
-        # UnsafeDeviceErrorはRuntimeError派生なので同様に包まれる。
+        # UnsafeDeviceError derives from RuntimeError, so it is wrapped the same way.
         runner = FakeRunner()
         runner.register(["lsblk"], stdout=json.dumps({"blockdevices": []}))
         with pytest.raises(DeviceQueryError, match="^デバイス情報を取得できない: "):

@@ -1,6 +1,6 @@
-"""inspect()とSQLite記録の結線、scan_executed()、結果ディレクトリ名。
+"""Wiring between inspect() and SQLite recording, scan_executed(), and result directory names.
 
-材料（full_runner、_statuses）はtest_orchestrator.pyから借りる。
+Fixtures (full_runner, _statuses) are borrowed from test_orchestrator.py.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ full_runner = test_orchestrator.full_runner
 
 
 class RecordingStore:
-    """呼び出しを記録し、指定した失敗文字列を返すフェイクstore。"""
+    """Fake store that records calls and returns the given failure string."""
 
     def __init__(self, started_failure: str | None = None) -> None:
         self.started_failure = started_failure
@@ -47,7 +47,8 @@ class TestStoreWiring:
     def test_record_started_called_once_with_output_dir(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """inspect()はoutput_dirを決めた後に開始記録を1回だけ呼ぶ。完了記録は呼ばない。"""
+        """inspect() calls the start record exactly once after deciding output_dir. It does not
+        call the completion record."""
         store = RecordingStore()
 
         result = inspect(full_runner, config, "/dev/sda", store)
@@ -79,7 +80,8 @@ class TestStoreWiring:
 
 class TestScanExecuted:
     def test_true_when_detections_key_present(self) -> None:
-        """detectionsはclamscan --recursiveが返った後にだけ入る（空でも実行済み）。"""
+        """detections is set only after clamscan --recursive returns (empty still means it
+        ran)."""
         step = StepResult("malware", StepStatus.ERROR, details={"detections": []})
         assert scan_executed(step) is True
 
@@ -89,7 +91,7 @@ class TestScanExecuted:
 
 
 def test_result_dir_sanitizes_serial() -> None:
-    """シリアルに使えない文字が混ざってもディレクトリ名として安全にする。"""
+    """Keep the directory name safe even if the serial contains unusable characters."""
     device = DeviceInfo(
         path="/dev/sda",
         kernel_name="sda",

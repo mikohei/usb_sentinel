@@ -1,7 +1,7 @@
-"""速度ステップ（SpeedStep）とfio出力のパーサ。
+"""Speed step (SpeedStep) and the fio output parser.
 
-書き込みはデバイスを破壊するため、読み取り（--readonly付き）が先に走ること、
-マウントが残っていればfioを起動しないことを確認する。
+Writing destroys the device, so verify that the read (with --readonly) runs first and that fio
+is not started if a mount remains.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ class TestParseFio:
 
 @pytest.fixture
 def fio_runner(runner: FakeRunner) -> FakeRunner:
-    """未マウントのlsblkと、読み取り85.3MB/s・書き込み20.1MB/sのfioを登録する。"""
+    """Register an unmounted lsblk and fio with 85.3 MB/s read and 20.1 MB/s write."""
     runner.register(["lsblk"], stdout=json.dumps(LSBLK_UNMOUNTED))
     runner.register(READ_ARGV, stdout=fio_json("read", bw_bytes=85_300_000))
     runner.register(WRITE_ARGV, stdout=fio_json("write", bw_bytes=20_100_000))
@@ -82,7 +82,7 @@ def fio_runner(runner: FakeRunner) -> FakeRunner:
 
 
 def _with_speed(ctx: StepContext, **kwargs: float | str | None) -> StepContext:
-    ctx.config = replace(ctx.config, speed=SpeedConfig(**kwargs))  # ty: ignore[invalid-argument-type]  kwargsはテスト用の公称速度と種別だけ
+    ctx.config = replace(ctx.config, speed=SpeedConfig(**kwargs))  # ty: ignore[invalid-argument-type]  kwargs are only the test's nominal speeds and device kind
     return ctx
 
 
@@ -125,7 +125,7 @@ class TestJudgement:
         assert "defect" not in result.details
 
     def test_exact_threshold_passes(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
-        # 80.0MB/s = 公称100.0×0.80ちょうど（境界値）。
+        # 80.0 MB/s = exactly nominal 100.0 x 0.80 (boundary value).
         fio_runner.register(READ_ARGV, stdout=fio_json("read", bw_bytes=80_000_000))
 
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=100.0))
@@ -187,7 +187,7 @@ class TestDetails:
         assert d["link_speed_mbps"] == 5000
         assert d["ratio_read"] == 0.948
         assert d["ratio_write"] == 1.005
-        # 既存キーは意味も値も変わらない。
+        # Existing keys keep both their meaning and their values.
         assert d["nominal_read_mb_s"] == 90.0
         assert d["threshold_write_mb_s"] == 16.0
 

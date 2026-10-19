@@ -32,25 +32,25 @@ from .tiles import TilesView
 WINDOW_TITLE = "USB Sentinel Display"
 FOCUS_RETRY_MS = 200
 CONFIGURE_SETTLE_MS = 100
-# 詳細QRのページ数（qr_mode 1〜3）。
+# Number of detail QR pages (qr_mode 1-3).
 DETAIL_PAGES = 3
 
 
 class MonitorLike(Protocol):
-    """Appが使うMonitorの操作（テストでは偽物に差し替える）。"""
+    """Monitor operations used by App (replaced by a fake in tests)."""
 
     def tick(self) -> Snapshot:
-        """1tick分の表示内容を返す。例外は投げない（前回のスロットを保持して返す）。"""
+        """Return the display contents for one tick. Never raises (returns the previous slots)."""
         ...
 
     def force_reload(self) -> None:
-        """結果キャッシュを捨て、次のtickで全result.jsonを読み直す（F5）。"""
+        """Drop the result cache and reload every result.json on the next tick (F5)."""
         ...
 
 
 @dataclass(frozen=True)
 class AppOptions:
-    """起動オプション。windowedとkioskは同時に指定しない（D13）。"""
+    """Startup options. windowed and kiosk are never given together (D13)."""
 
     windowed: bool
     kiosk: bool
@@ -59,7 +59,7 @@ class AppOptions:
 def build_monitor(
     config: DisplayConfig, runner: Runner | None, now: Callable[[], float]
 ) -> Monitor:
-    """設定からMonitorを組む（FEAT-002の注入点）。sqlite_pathが空ならSQLite索引を使わない。"""
+    """Build the Monitor from the config (FEAT-002 injection point). Empty sqlite_path: no index."""
     index = SqliteIndex(config.sqlite_path) if config.sqlite_path is not None else None
     return Monitor(
         config,
@@ -71,7 +71,7 @@ def build_monitor(
 
 
 class App:
-    """tkのウィンドウとMonitorを結線する。描画以外のロジックは持たない。"""
+    """Wire the tk window to the Monitor. Holds no logic other than drawing."""
 
     def __init__(
         self,
@@ -82,14 +82,14 @@ class App:
         now: Callable[[], float] = time.time,
         monitor: MonitorLike | None = None,
     ) -> None:
-        """tkルートとCanvas・View・キーバインドを組み、Monitorと結線する。
+        """Build the tk root, Canvases, Views, and key bindings, and wire them to the Monitor.
 
         Args:
-            config: 表示設定。
-            options: 起動オプション（windowed／kiosk）。
-            runner: systemctlの実行器。Noneならユニット状態を問い合わせない。
-            now: 現在時刻（テストで差し替える）。
-            monitor: Monitorの差し替え。Noneならbuild_monitor()で組む。
+            config: Display config.
+            options: Startup options (windowed/kiosk).
+            runner: systemctl runner. If None, unit states are not queried.
+            now: Current time (swapped in tests).
+            monitor: Monitor override. If None, build it with build_monitor().
         """
         self.config = config
         self.options = options
@@ -98,9 +98,9 @@ class App:
             monitor if monitor is not None else build_monitor(config, runner, now)
         )
         self.selected = 0
-        # 言語の優先順は記録→設定→既定（en）。
+        # Language priority: saved -> config -> default (en).
         self.language = initial_language(config.language, load_saved_language(state_file()))
-        # 0が通常QR、1〜3が詳細QRのページ。ポートを切り替えても保つ。
+        # 0 is normal QR, 1-3 are detail QR pages. Kept when switching ports.
         self.qr_mode = 0
         self.stop_requested = False
         self._save_warned = False
@@ -144,47 +144,47 @@ class App:
         signal.signal(signal.SIGTERM, self._on_sigterm)
 
     def _on_sigterm(self, signum: int, frame: FrameType | None) -> None:
-        """SIGTERMではフラグだけ立て、destroyは次のtickで行う（設計書1.4）。"""
+        """On SIGTERM only set a flag; destroy happens on the next tick (design doc 1.4)."""
         self.stop_requested = True
 
     def _on_focus_out(self, event: object) -> None:
-        """全画面ではフォーカスを取り戻す（キーボードが唯一の操作手段のため）。"""
+        """In full screen, take focus back (the keyboard is the only input)."""
         self.root.after(FOCUS_RETRY_MS, self.root.focus_force)
 
     def _on_configure(self, event: object) -> None:
-        """--windowedではトップレベルの実サイズで解像度を判定する（D7）。
+        """With --windowed, judge the resolution from the top-level's real size (D7).
 
-        geometry()直後は1x1や200x200の過渡的なサイズでも<Configure>が届くので、
-        少し待ってから確定したサイズを読む。
+        Right after geometry(), <Configure> also arrives with transient sizes like 1x1 or 200x200,
+        so wait a little and read the settled size.
         """
         if self._configure_job is not None:
             self.root.after_cancel(self._configure_job)
         self._configure_job = self.root.after(CONFIGURE_SETTLE_MS, self._check_window_size)
 
     def _check_window_size(self) -> None:
-        """確定したウィンドウサイズで解像度を判定する。"""
+        """Judge the resolution from the settled window size."""
         self._configure_job = None
         self._check_resolution(self.root.winfo_width(), self.root.winfo_height())
 
     def _check_resolution(self, width: int, height: int) -> None:
-        """480x320以外なら標準エラーに1回出し、情報ストリップ用に保持する。"""
+        """If not 480x320, print once to stderr and keep it for the info strip."""
         resolution = resolution_warning(width, height)
         if resolution is not None and self._resolution is None:
             print(text(self.language, "resolution", width=width, height=height), file=sys.stderr)
         self._resolution = resolution
 
     def _redraw(self) -> None:
-        """直近のスナップショットがあれば描き直す。"""
+        """Redraw if there is a latest snapshot."""
         if self._last_snapshot is not None:
             self._render(self._last_snapshot)
 
     def select(self, index: int) -> None:
-        """スロットを選択し、直近のスナップショットで描き直す。"""
+        """Select a slot and redraw with the latest snapshot."""
         self.selected = index % TILE_COUNT
         self._redraw()
 
     def step(self, delta: int) -> None:
-        """◀▶と矢印キー。通常QRでは前後のスロット、詳細QRではページ送り（1→2→3→1）。"""
+        """Prev/next and arrow keys. Normal QR: adjacent slot. Detail QR: next page (1->2->3->1)."""
         if self.qr_mode == 0:
             self.select(self.selected + delta)
             return
@@ -192,12 +192,12 @@ class App:
         self._redraw()
 
     def toggle_qr_mode(self) -> None:
-        """右キャンバスのタップとキーQ。通常QR→詳細1枚目、詳細中→通常QR。"""
+        """Right canvas tap and key Q. Normal QR -> detail page 1; in detail -> normal QR."""
         self.qr_mode = 1 if self.qr_mode == 0 else 0
         self._redraw()
 
     def toggle_language(self) -> None:
-        """言語ボタンとキーL。切り替えて記録し、記録の失敗は標準エラーに1回だけ出す。"""
+        """Language button and key L. Switch and save; print a save failure to stderr only once."""
         self.language = other_language(self.language)
         reason = save_language(state_file(), self.language)
         if reason is not None and not self._save_warned:
@@ -206,15 +206,15 @@ class App:
         self._redraw()
 
     def force_reload(self) -> None:
-        """F5: 結果キャッシュを捨てる。"""
+        """F5: drop the result cache."""
         self.monitor.force_reload()
 
     def quit(self) -> None:
-        """Ctrl+Q（kioskでない場合だけ束縛される）。"""
+        """Ctrl+Q (bound only when not in kiosk mode)."""
         self.root.destroy()
 
     def _render(self, snapshot: Snapshot) -> None:
-        """スナップショットを両Canvasに描く。"""
+        """Draw the snapshot on both Canvases."""
         self._last_snapshot = snapshot
         blink_on = snapshot.tick_count % 2 == 0
         dots = snapshot.tick_count % 3 + 1
@@ -231,7 +231,7 @@ class App:
         self.qr_view.render(slot, strip, self.qr_mode, self.language)
 
     def tick(self) -> None:
-        """1tick。描画例外でもafterを再登録し、停止要求があればdestroyする（設計書4.1）。"""
+        """One tick. Re-register after even on draw errors; destroy on stop request (doc 4.1)."""
         try:
             snapshot = self.monitor.tick()
             self._render(snapshot)
@@ -244,16 +244,16 @@ class App:
                 self.root.after(int(self.config.poll_interval_s * 1000), self.tick)
 
     def run(self) -> None:
-        """最初のtickを呼んでメインループに入る。"""
+        """Run the first tick and enter the main loop."""
         self.tick()
         self.root.mainloop()
 
 
 def run_app(config: DisplayConfig, options: AppOptions, runner: Runner | None) -> int:
-    """Appを組んで実行する。
+    """Build and run the App.
 
     Returns:
-        終了コード（常に0）。
+        Exit code (always 0).
     """
     App(config, options, runner=runner).run()
     return 0

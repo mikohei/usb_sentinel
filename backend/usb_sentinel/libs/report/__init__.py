@@ -12,17 +12,17 @@ __all__ = ["render_text", "write_all"]
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
-    """同ディレクトリの`<name>.tmp`に書いてからos.replace()で置き換える。"""
+    """Write to `<name>.tmp` in the same directory, then replace with os.replace()."""
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(data)
-    os.replace(tmp, path)  # noqa: PTH105 -- テストがos.replaceを差し替えて記録・失敗させるため
+    os.replace(tmp, path)  # noqa: PTH105 -- tests patch os.replace to record calls and fail
 
 
 def write_all(result: InspectionResult, target: Path, *, emit_qr: bool = True) -> list[Path]:
-    """result.json・result.txt・result-qr.pngをtargetに書き出す。
+    """Write result.json, result.txt, and result-qr.png to target.
 
-    表示フロントエンドが書き込み途中のファイルを読まないよう、各ファイルは一時ファイル経由で
-    アトミックに置き換える。
+    Each file is replaced atomically via a temporary file so that the display frontend never
+    reads a partially written file.
     """
     target.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -33,10 +33,10 @@ def write_all(result: InspectionResult, target: Path, *, emit_qr: bool = True) -
     if emit_qr:
         path = target / "result-qr.png"
         tmp = path.with_name(path.name + ".tmp")
-        # PilImage.save()はformat="PNG"を既定で渡すので拡張子が.tmpでもPNGになる。
+        # PilImage.save() passes format="PNG" by default, so the output is PNG even with .tmp.
         qrcode.make(build_payload(result), error_correction=qrcode.constants.ERROR_CORRECT_L).save(
             str(tmp)
         )
-        os.replace(tmp, path)  # noqa: PTH105 -- 同上
+        os.replace(tmp, path)  # noqa: PTH105 -- same as above
         paths.append(path)
     return paths

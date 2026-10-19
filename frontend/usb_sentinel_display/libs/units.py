@@ -4,15 +4,15 @@ from typing import Protocol
 
 from .sysfs import KERNEL_NAME_RE
 
-# 「検査中」とみなすActiveState。
+# ActiveState values treated as "inspecting".
 ACTIVE_STATES = frozenset({"active", "activating"})
-# systemctl showの固定引数。ユニット名はこの後ろに並べる。
+# Fixed arguments for systemctl show. Unit names follow them.
 SHOW_ARGV = ("systemctl", "show", "-p", "Id", "-p", "ActiveState")
 
 
 @dataclass(frozen=True)
 class CommandOutput:
-    """外部コマンドの実行結果。"""
+    """Result of running an external command."""
 
     returncode: int
     stdout: str
@@ -20,25 +20,25 @@ class CommandOutput:
 
 
 class Runner(Protocol):
-    """外部コマンドの実行を差し替えるためのプロトコル。"""
+    """Protocol for swapping out external command execution."""
 
     def run(self, argv: list[str], *, timeout_s: float) -> CommandOutput:
-        """argvを実行して結果を返す。例外を外へ出さず、失敗は戻り値で表す。"""
+        """Run argv and return the result. Never raises; failures go in the return value."""
         ...
 
 
 class SubprocessRunner:
-    """subprocessで実際にコマンドを実行する。"""
+    """Run commands for real with subprocess."""
 
     def run(self, argv: list[str], *, timeout_s: float) -> CommandOutput:
-        """argvを実行する。コマンド不在は127、タイムアウトはtimed_out=Trueで返す。
+        """Run argv. A missing command returns 127; a timeout returns timed_out=True.
 
         Args:
-            argv: 実行するargv（リスト固定。文字列の結合でコマンドを組まない）。
-            timeout_s: タイムアウト秒。
+            argv: argv to run (a fixed list; never build commands by joining strings).
+            timeout_s: Timeout in seconds.
 
         Returns:
-            終了コードとstdout。不在は`CommandOutput(127, "", False)`、タイムアウトは
+            Exit code and stdout. Missing is `CommandOutput(127, "", False)`; a timeout is
             `CommandOutput(-1, "", True)`。
         """
         try:
@@ -53,19 +53,19 @@ class SubprocessRunner:
 
 
 def unit_name(template: str, kernel: str) -> str:
-    """unit_templateにカーネル名を埋めてユニット名を作る。
+    """Build a unit name by filling the kernel name into unit_template.
 
     Raises:
-        ValueError: カーネル名がsd[a-z]{1,3}の形でないとき。
+        ValueError: When the kernel name is not of the form sd[a-z]{1,3}.
     """
     if not KERNEL_NAME_RE.fullmatch(kernel):
         raise ValueError(f"invalid kernel name: {kernel!r}")
-    # str.formatは属性参照や他のプレースホルダを解釈するので、単純置換にする。
+    # str.format interprets attribute access and other placeholders, so use plain replacement.
     return template.replace("{kernel}", kernel)
 
 
 def parse_show_output(text: str) -> dict[str, str]:
-    """systemctl show -p Id -p ActiveStateの出力をユニット名→ActiveStateに変換する。"""
+    """Convert systemctl show -p Id -p ActiveState output into unit name -> ActiveState."""
     states: dict[str, str] = {}
     for block in text.split("\n\n"):
         fields: dict[str, str] = {}
@@ -81,15 +81,15 @@ def parse_show_output(text: str) -> dict[str, str]:
 def query_unit_states(
     runner: Runner, units: list[str], *, timeout_s: float = 2.0
 ) -> dict[str, str]:
-    """複数ユニットのActiveStateを1回のsystemctl showで問い合わせる。
+    """Query the ActiveState of several units with one systemctl show.
 
     Args:
-        runner: コマンド実行器。
-        units: ユニット名の一覧。空なら呼ばずに空辞書を返す。
-        timeout_s: タイムアウト秒。
+        runner: Command runner.
+        units: List of unit names. If empty, return an empty dict without calling.
+        timeout_s: Timeout in seconds.
 
     Returns:
-        ユニット名→ActiveState。失敗（非0、タイムアウト、不在）は空辞書。
+        Unit name -> ActiveState. An empty dict on failure (non-zero, timeout, missing).
     """
     if not units:
         return {}

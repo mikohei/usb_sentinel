@@ -1,1 +1,1 @@
-"""テストパッケージ。conftest.pyの共有フィクスチャを各テストから絶対インポートするために置く。"""
+"""Test package. Exists so each test can absolutely import shared fixtures from conftest.py."""

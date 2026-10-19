@@ -1,8 +1,8 @@
-"""偽sysfsツリーとサンプル結果を作る開発用スクリプト（plan.md D15）。
+"""Development script that builds a fake sysfs tree and sample results (plan.md D15).
 
-使い方: uv run python scripts/make-fixtures.py [OUT] --scene a|b
-OUT（既定/tmp/usb-sentinel-fixtures）にsys_block/、devices/...、results/、display.tomlを作る。
-既存のOUTがあれば同名ファイルを上書きし、削除はしない。
+Usage: uv run python scripts/make-fixtures.py [OUT] --scene a|b|c
+Creates sys_block/, devices/..., results/ and display.toml under OUT (default
+/tmp/usb-sentinel-fixtures). Files with the same name are overwritten; nothing is deleted.
 """
 
 import argparse
@@ -15,22 +15,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-DEFAULT_OUT = Path("/tmp/usb-sentinel-fixtures")  # noqa: S108 -- 開発機専用の既定出力先
+DEFAULT_OUT = Path("/tmp/usb-sentinel-fixtures")  # noqa: S108 -- default output location, development machines only
 PCIE = "devices/platform/scb/fd500000.pcie/pci0000:00/0000:00:00.0/0000:01:00.0"
-# ポートディレクトリをどれだけ過去にするか（起動待ちの20秒を確実に過ぎた状態にする）。
+# How far in the past to put the port directory (safely beyond the 20 s startup wait).
 PORT_AGE_S = 600
 ALL_PASS = ["malware", "hash_inventory", "unmount", "capacity", "speed"]
 
 
 @dataclass(frozen=True)
 class Device:
-    """フィクスチャ1台分の定義。"""
+    """Definition of one fixture device."""
 
     kernel: str
     port_path: str
     serial: str
     verdict: str | None
-    # "ok"（正常なresult.json）、"broken"（途中で切れたJSON）、None（結果なし）。
+    # "ok" (valid result.json), "broken" (truncated JSON) or None (no result).
     result_kind: str | None
 
 
@@ -45,7 +45,7 @@ SCENES: dict[str, list[Device]] = {
         Device("sda", "1-1.1", "SPEC9999", "Spec Mismatch", "ok"),
         Device("sdb", "2-2", "DEFECT77", "Defective", "ok"),
     ],
-    # 第2期: 偽装疑いと、詳細QRに数値が入る正常品。
+    # Phase 2: a suspected counterfeit and a good device whose figures fill the detail QR.
     "c": [
         Device("sda", "1-1.1", "FAKE32GB", "Counterfeit Suspected", "ok"),
         Device("sdb", "1-1.2", "GOOD64GB", "No Defect", "ok"),
@@ -53,7 +53,8 @@ SCENES: dict[str, list[Device]] = {
     ],
 }
 
-# 詳細QR用の第2期の数値（容量・速度・ClamAV・台帳）。シーンcの検体にだけ付ける。
+# Phase 2 figures for the detail QR (capacity, speed, ClamAV, inventory).
+# Attached only to scene c devices.
 PHASE2_DETAILS: dict[str, dict[str, object]] = {
     "FAKE32GB": {
         "nominal_bytes": 32_000_000_000,
@@ -83,7 +84,8 @@ DISPLAY_TOML = """\
 results_dir = "{results}"
 sys_block = "{sys_block}"
 poll_interval_s = 1.0
-# 開発機にはSQLite索引が無いので無効にし、情報ストリップにdb_missingを出さない。
+# Development machines have no SQLite index, so disable it and keep db_missing out
+# of the info strip.
 sqlite_path = ""
 
 [[ports]]
@@ -105,7 +107,7 @@ paths = ["1-1.4"]
 
 
 def device_dir(out: Path, device: Device) -> tuple[Path, Path]:
-    """ブロックデバイスの実体ディレクトリとポートディレクトリのパスを返す。"""
+    """Return the paths of the block device directory and the port directory."""
     bus = device.port_path.split("-")[0]
     hub = device.port_path.split(".")[0]
     pcie = out / PCIE / f"usb{bus}"
@@ -123,7 +125,7 @@ def device_dir(out: Path, device: Device) -> tuple[Path, Path]:
 
 
 def steps_for(device: Device) -> list[dict[str, object]]:
-    """判定に応じたステップ一覧。"""
+    """Step list matching the verdict."""
     if device.verdict == "Malware Detected":
         detections = [
             {"path": "/mnt/usb/autorun.inf", "signature": "Win.Trojan.Agent-1"},
@@ -150,7 +152,7 @@ def steps_for(device: Device) -> list[dict[str, object]]:
 
 
 def _with_phase2_details(device: Device, steps: list[dict[str, object]]) -> list[dict[str, object]]:
-    """シーンcの検体に、backend第2期のdetails（数値）を埋める。"""
+    """Fill in the backend phase 2 details (figures) for scene c devices."""
     extra = PHASE2_DETAILS.get(device.serial)
     if extra is None:
         return steps
@@ -185,7 +187,7 @@ def _with_phase2_details(device: Device, steps: list[dict[str, object]]) -> list
 
 
 def result_json(device: Device, started: datetime) -> str:
-    """backendのto_json()と同じ形のresult.json文字列。"""
+    """result.json text in the same shape as the backend to_json()."""
     extra = PHASE2_DETAILS.get(device.serial)
     device_info: dict[str, object] = {
         "kernel_name": device.kernel,
@@ -203,7 +205,7 @@ def result_json(device: Device, started: datetime) -> str:
         "verdict": device.verdict,
     }
     if extra is not None:
-        # backend第2期が足すトップレベルのキー。
+        # Top-level keys added by backend phase 2.
         device_info["advertised_bytes"] = extra["advertised_bytes"]
         device_info["link_speed_mbps"] = 5000
         nominal = extra["nominal_bytes"]
@@ -219,7 +221,7 @@ def result_json(device: Device, started: datetime) -> str:
 
 
 def write_result(results: Path, device: Device, now: float) -> None:
-    """結果ディレクトリとresult.jsonを書き、mtimeを現在に揃える。"""
+    """Write the result directory and result.json, and set the mtime to now."""
     started = datetime.fromtimestamp(now - 300, tz=UTC)
     name = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{device.serial}"
     directory = results / name
@@ -235,7 +237,7 @@ def write_result(results: Path, device: Device, now: float) -> None:
 
 
 def build(out: Path, scene: str) -> None:
-    """OUT配下にシーンのフィクスチャ一式を作る。"""
+    """Build the full fixture set for the scene under OUT."""
     now = time.time()
     sys_block = out / "sys_block"
     results = out / "results"
@@ -253,7 +255,7 @@ def build(out: Path, scene: str) -> None:
         os.utime(port_dir, (past, past))
         if device.result_kind is not None:
             write_result(results, device, now)
-    # 他シーンのリンクが残っていれば、このシーンに無いカーネル名のリンクだけ外す。
+    # Remove only leftover links from other scenes whose kernel names are not in this scene.
     wanted = {d.kernel for d in SCENES[scene]}
     for entry in sys_block.iterdir():
         if entry.is_symlink() and entry.name not in wanted:
@@ -265,10 +267,10 @@ def build(out: Path, scene: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """エントリポイント。"""
+    """Entry point."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("out", nargs="?", type=Path, default=DEFAULT_OUT, help="出力先")
-    parser.add_argument("--scene", choices=sorted(SCENES), default="a", help="シーン")
+    parser.add_argument("out", nargs="?", type=Path, default=DEFAULT_OUT, help="output directory")
+    parser.add_argument("--scene", choices=sorted(SCENES), default="a", help="scene")
     args = parser.parse_args(argv)
     build(args.out, args.scene)
     return 0

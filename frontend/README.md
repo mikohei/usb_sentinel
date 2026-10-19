@@ -1,48 +1,50 @@
-# 表示フロントエンド（USB Sentinel Display）
+[日本語版](README.ja.md)
 
-Raspberry Pi 4に接続した3.5インチHDMIタッチディスプレイ（480x320）に、4ポート分の検査状態と選択中ポートのQRコードを表示するtkinterアプリケーションである。`backend/`には手を入れず、ホスト上で次の4つを1秒周期で読んで画面を組み立てる。
+# Display frontend (USB Sentinel Display)
 
-- `/var/lib/usb-sentinel/results/<timestamp>-<serial>/result.json`（検査結果。これが正本）
-- `/var/lib/usb-sentinel/db/inspections.sqlite`（backendのSQLite索引。読み取り専用。無ければ結果ディレクトリの走査だけで動く）
-- `/sys/block/`配下のUSBディスク情報（どのポートに何が挿さっているか）
-- `systemctl show`で得る検査ユニットの状態（検査中かどうか）
+A tkinter application that shows the inspection status of four ports and the QR code of the selected port on a 3.5-inch HDMI touch display (480x320) connected to a Raspberry Pi 4. It does not touch `backend/`. Every second it reads the following four sources on the host and builds the screen from them.
 
-HTTP APIや常駐サーバーは無い。ネットワークも使わない。画面の文言は英語と日本語を切り替えられる（既定は英語）。
+- `/var/lib/usb-sentinel/results/<timestamp>-<serial>/result.json` (the inspection result; this is the source of truth)
+- `/var/lib/usb-sentinel/db/inspections.sqlite` (the backend's SQLite index; opened read-only; without it the app works by scanning the results directory alone)
+- USB disk information under `/sys/block/` (which disk is plugged into which port)
+- The state of the inspection unit obtained with `systemctl show` (whether an inspection is running)
 
-## 画面構成
+There is no HTTP API and no resident server. The network is not used. The on-screen text can be switched between English and Japanese (English by default).
+
+## Screen layout
 
 ```text
 x:   0        160                          480
 y0   +--------+----------------------------+
-     | P1タイル|                            |
+     | P1 tile|                            |
 y64  +--------+                            |
-     | P2タイル|      QRキャンバス            |
-y128 +--------+      320x296（白地）        |
-     | P3タイル|                            |
+     | P2 tile|      QR canvas             |
+y128 +--------+      320x296 (white)       |
+     | P3 tile|                            |
 y192 +--------+                            |
-     | P4タイル|                            |
+     | P4 tile|                            |
 y256 +--+---+-+----------------------------+
-     | ◀|言語|▶| 情報ストリップ320x24         |
+     | ◀|Lang|▶| Info strip 320x24          |
 y320 +--+---+-+----------------------------+
 ```
 
-- 左160pxに4ポートのタイル（各160x64）と、◀（x0〜53）・言語（x53〜107）・▶（x107〜160）の3ボタン。タイルは1行目にポート名と判定、2行目にシリアル、3行目に状態と時刻を出す。選択中のタイルには白い枠が付く。言語ボタンには切替先の名前（英語表示中は「日本語」、日本語表示中は「EN」）が出る。
-- 右320pxに選択中ポートのQRコード（白地、最大294px）。通常QRと詳細QR（3枚）をタップで切り替える。その下の情報ストリップにポート名、シリアル先頭、ダイジェスト先頭16桁（詳細QR中は「詳細n/3」と12桁）、または警告文を出す。
+- The left 160px holds four port tiles (160x64 each) and three buttons: ◀ (x0 to 53), language (x53 to 107), and ▶ (x107 to 160). Each tile shows the port name and verdict on line 1, the serial on line 2, and the state and time on line 3. The selected tile has a white border. The language button shows the name of the language to switch to ("EN" while Japanese is shown; the word for "Japanese" written in Japanese while English is shown).
+- The right 320px shows the QR code of the selected port (white background, up to 294px). Tapping switches between the normal QR and the detail QR (3 codes). The info strip below it shows the port name, the first part of the serial, the first 16 digits of the digest (while a detail QR is shown, "Detail n/3" and 12 digits), or a warning message.
 
-## ディスプレイの設置
+## Display setup
 
-Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手作業で行い、本プロジェクトのスクリプトからは実行しない。backendのDocker構成（ルートの`README.md`）を導入済みであること。
+These steps assume Ubuntu Desktop (Pi 4, GNOME). Perform all of them by hand; no script in this project runs them. The backend Docker setup (the root `README.md`) must already be installed.
 
-1. **解像度を480x320に固定する。** 480x320より高い解像度はLCD側で縮小されてQRが滲む。Ubuntu on Pi 4はKMSドライバで動くため、効く層が3つに分かれる。GNOMEセッションの解像度を決めるのはmutterなので(c)を主にし、(b)をコンソール用に併用する。
-   - (a) `/boot/firmware/config.txt`（ファームウェア層。KMSでは効かない可能性が高い。効かなければ消す）
+1. **Fix the resolution at 480x320.** At resolutions higher than 480x320, the LCD downscales the image and the QR code blurs. Ubuntu on the Pi 4 runs on the KMS driver, so the setting takes effect in three separate layers. The resolution of the GNOME session is decided by mutter, so use (c) as the main setting and use (b) alongside it for the console.
+   - (a) `/boot/firmware/config.txt` (firmware layer. It probably has no effect under KMS. Remove it if it does nothing.)
      ```ini
      hdmi_group=2
      hdmi_mode=87
      hdmi_cvt=480 320 60 6 0 0 0
      hdmi_drive=2
      ```
-   - (b) `/boot/firmware/cmdline.txt`にカーネル引数`video=HDMI-A-1:480x320@60`を追加する（コンソールと初期モード用）。
-   - (c) **GNOMEセッション**: 「設定→ディスプレイ」で480x320を選ぶ。一覧に無い場合は`~/.config/monitors.xml`に次のように書く。`connector`は`HDMI-1`、`vendor`などの値は設定アプリで一度別の解像度を選んで生成されたファイルから写す。GDMのログイン画面にも効かせるなら`sudo cp ~/.config/monitors.xml /var/lib/gdm3/.config/monitors.xml`し、所有者を`gdm:gdm`にする。
+   - (b) Add the kernel argument `video=HDMI-A-1:480x320@60` to `/boot/firmware/cmdline.txt` (for the console and the initial mode).
+   - (c) **GNOME session**: choose 480x320 in "Settings → Displays". If it is not in the list, write `~/.config/monitors.xml` as shown below. Use `HDMI-1` for `connector`, and copy values such as `vendor` from the file that the Settings app generates once you select a different resolution there. To apply it to the GDM login screen as well, run `sudo cp ~/.config/monitors.xml /var/lib/gdm3/.config/monitors.xml` and change the owner to `gdm:gdm`.
      ```xml
      <monitors version="2">
        <configuration>
@@ -56,78 +58,78 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手
        </configuration>
      </monitors>
      ```
-   - **確認方法**: 手順11でアプリを起動したとき、標準エラーにも情報ストリップにも「画面解像度WxH（480x320を想定）」の警告が出ないこと。出る場合は上の(c)が効いていない。
-   - どの手段でも480x320が選べない場合は、LCDが整数比で縮小できる960x640を選び、アプリ側を2倍で描く`--scale 2`を実装する案がある。現時点では実装していない。
-2. **タッチドライバ**を入れる。ベンダー手順（https://osoyoo.com/ja/?p=56145）に従う。ベンダーの注記では「Raspberry Pi OS bookwormではタッチ非対応」とあり、Ubuntuでの動作は未検証である。ドライバが動かなくても本アプリはキーボードで全操作できる（「操作」節）。外部サイトのスクリプトを本プロジェクトから自動取得・実行はしない。
-3. **日本語フォント**を入れる。
+   - **How to check**: when you start the app in step 11, neither standard error nor the info strip should show the warning "Resolution WxH (expected 480x320)". If it appears, (c) above is not taking effect.
+   - If 480x320 cannot be selected by any means, one option is to select 960x640, which the LCD can downscale at an integer ratio, and implement `--scale 2` so the app draws at 2x. This is not implemented at present.
+2. **Install the touch driver.** Follow the vendor's instructions (https://osoyoo.com/ja/?p=56145). The vendor's note says "touch is not supported on Raspberry Pi OS bookworm", and operation on Ubuntu has not been verified. Even if the driver does not work, every operation in this app can be done from the keyboard (the "Controls" section). This project does not automatically download or run scripts from external sites.
+3. **Install a Japanese font.**
    ```bash
    sudo apt-get install -y fonts-noto-cjk
    ```
-4. **自動ログイン**をオンにする。「設定→ユーザー→自動ログイン」、または`/etc/gdm3/custom.conf`に`AutomaticLoginEnable=true`と`AutomaticLogin=<user>`を書く。
-5. **自動マウントを無効にする。** Desktop版ではGNOMEがUSBを自動マウントし、`run-docker.sh`が「host-mounted disk refused」で検査を拒否するため必須である。
+4. **Turn on automatic login.** Use "Settings → Users → Automatic Login", or write `AutomaticLoginEnable=true` and `AutomaticLogin=<user>` in `/etc/gdm3/custom.conf`.
+5. **Disable automount.** On the Desktop edition GNOME mounts USB drives automatically, and `run-docker.sh` refuses to inspect them with "host-mounted disk refused", so this step is required.
    ```bash
    gsettings set org.gnome.desktop.media-handling automount false
    gsettings set org.gnome.desktop.media-handling automount-open false
    ```
-6. **スリープとスクリーンセーバーを止める。** Waylandセッションなので`xset`は使わない。
+6. **Stop sleep and the screensaver.** Do not use `xset`, because this is a Wayland session.
    ```bash
    gsettings set org.gnome.desktop.session idle-delay 0
    gsettings set org.gnome.desktop.screensaver lock-enabled false
    gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
    gsettings set org.gnome.desktop.screensaver idle-activation-enabled false
    ```
-7. **結果ディレクトリを読めるようにする。** `scripts/install-docker.sh`は結果ルート`/var/lib/usb-sentinel/results`を`root:usb-sentinel`の`0750`で作る。表示ユーザーを`usb-sentinel`グループに加えて再ログインする。書き込み権限は与えない（証跡の改変を防ぐ）。
+7. **Make the results directory readable.** `scripts/install-docker.sh` creates the results root `/var/lib/usb-sentinel/results` as `root:usb-sentinel` with mode `0750`. Add the display user to the `usb-sentinel` group and log in again. Do not grant write permission (this prevents tampering with the evidence).
    ```bash
    sudo usermod -aG usb-sentinel <user>
-   # 再ログイン後に有効
+   # Takes effect after logging in again
    ```
-   旧版の`install-docker.sh`（結果ルートを`0700`で作っていた版）で導入した機では、グループと権限を手で設定する。
+   On a machine set up with an older `install-docker.sh` (one that created the results root with `0700`), set the group and permissions by hand.
    ```bash
    sudo groupadd --system usb-sentinel
    sudo chgrp usb-sentinel /var/lib/usb-sentinel/results
    sudo chmod 0750 /var/lib/usb-sentinel/results
    ```
-   画面に「結果ディレクトリを読む権限がない」が出たら、まずこの手順を疑う。
+   If the screen shows "No permission to read results dir", suspect this step first.
 
-   同じグループでSQLite索引（`/var/lib/usb-sentinel/db`、`2770`）も読める。backendはWALモードで書くため、読み取り専用で開く側も`-shm`ファイルを作れる必要があり、ディレクトリにグループの書き込み権限が要る（`2770`で満たす）。DBファイル自体には書かない。グループに入っていなければ索引を使わず、従来の結果ディレクトリの走査にフォールバックする（「SQLite索引の読み取り」節）。
-8. **uvと依存を取り込む。** ネットワーク接続中に行う。
+   The same group can also read the SQLite index (`/var/lib/usb-sentinel/db`, `2770`). The backend writes in WAL mode, so even a read-only reader must be able to create the `-shm` file, which requires group write permission on the directory (`2770` provides it). The app never writes to the DB file itself. If the user is not in the group, the app does not use the index and falls back to scanning the results directory as before (the "Reading the SQLite index" section).
+8. **Fetch uv and the dependencies.** Do this while connected to the network.
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
    cd frontend
    uv sync --frozen
    uv run python -c "import tkinter"
    ```
-   `import tkinter`が通らない場合はaptの`python3`、`python3-tk`、`python3-qrcode`で動かす構成に切り替える。その場合は手順10の`.desktop`の`Exec`を`/usr/bin/python3 -m usb_sentinel_display run --kiosk`に変え、`PYTHONPATH`で`frontend/`を指す。
+   If `import tkinter` fails, switch to a setup that runs with the apt packages `python3`, `python3-tk`, and `python3-qrcode`. In that case, change `Exec` in the `.desktop` file of step 10 to `/usr/bin/python3 -m usb_sentinel_display run --kiosk` and point `PYTHONPATH` at `frontend/`.
 
-   **依存の同期はこの手順でだけ行う。** `deploy/usb-sentinel-display.desktop`の`Exec`は`uv run --offline --frozen --no-sync`で起動する。これらが無いと`uv run`は起動ごとにロックと環境の整合を確認し、差分があれば解決や同期を試みる。ネットワーク非接続のPiではそれがエラーになって起動が止まるので、起動時には何も解決しない。backendが`uv sync --frozen`で環境を揃えるのと同じ方針である。
-9. **ポートをキャリブレーションする。** 「ポートのキャリブレーション」節のとおり`uv run usb-sentinel-display calibrate`を実行し、各ポートのポートパスを`~/.config/usb-sentinel/display.toml`に書く。
-10. **自動起動を登録する。** `deploy/usb-sentinel-display.desktop`の`<user>`とプロジェクトのパスを書き換え、`~/.config/autostart/`にコピーする。
+   **Synchronize dependencies only in this step.** `Exec` in `deploy/usb-sentinel-display.desktop` starts the app with `uv run --offline --frozen --no-sync`. Without these options, `uv run` checks the lock and the environment for consistency on every start, and tries to resolve or sync if there is a difference. On a Pi with no network connection that causes an error and the app fails to start, so nothing is resolved at startup. This is the same policy by which the backend aligns its environment with `uv sync --frozen`.
+9. **Calibrate the ports.** As described in the "Port calibration" section, run `uv run usb-sentinel-display calibrate` and write the port path of each port to `~/.config/usb-sentinel/display.toml`.
+10. **Register autostart.** Replace `<user>` and the project path in `deploy/usb-sentinel-display.desktop`, and copy it to `~/.config/autostart/`.
     ```bash
     mkdir -p ~/.config/autostart
     sed "s|<user>|$USER|g" deploy/usb-sentinel-display.desktop > ~/.config/autostart/usb-sentinel-display.desktop
     ```
-    プロジェクトを`/home/<user>/usb_sentinel`以外に置いた場合は`--project`のパスも直す。
-11. **動作を確認する。** 手動で起動し、USBを挿して表示を確かめてから再起動する。
+    If you placed the project somewhere other than `/home/<user>/usb_sentinel`, also fix the `--project` path.
+11. **Check operation.** Start the app manually, plug in a USB drive and check the display, then reboot.
     ```bash
     uv run usb-sentinel-display run --windowed
     ```
-    `Ctrl+Q`で終了する。再起動後は自動起動した全画面に4つのタイルが出る。
+    Press `Ctrl+Q` to quit. After the reboot, the autostarted full-screen app shows four tiles.
 
-## ポートのキャリブレーション
+## Port calibration
 
-結果ディレクトリ名や`result.json`には物理ポートの情報が無い。そこでsysfsのUSBトポロジー（ポートパス）から物理ポートを求める。ポートパスは個体ごとに違い、同じ物理ポートでもUSB 2.0のデバイスとUSB 3.0のデバイスで変わる（Pi 4ではUSB 2.0は`1-1.1`〜`1-1.4`、USB 3.0は`2-1`、`2-2`のように現れる）。
+Neither the results directory name nor `result.json` contains physical port information. The app therefore derives the physical port from the sysfs USB topology (the port path). Port paths differ from machine to machine, and even for the same physical port they differ between a USB 2.0 device and a USB 3.0 device (on the Pi 4, USB 2.0 appears as `1-1.1` to `1-1.4` and USB 3.0 as `2-1`, `2-2`, and so on).
 
-1. キャリブレーションを起動する。GUIは出ない。
+1. Start the calibration. No GUI appears.
    ```bash
    cd frontend
    uv run usb-sentinel-display calibrate
    ```
-2. USBメモリを1本ずつ各ポートに挿す。挿すたびに次の形式で1行印字される。
+2. Plug USB drives into the ports one at a time. Each time you plug one in, one line is printed in the following format.
    ```text
    sda 1-1.3 ABC123456789
    ```
-   左からカーネル名、ポートパス、シリアルである。USB 2.0のメモリとUSB 3.0のメモリを順に挿し、ポートごとに両方のポートパスを控える。`Ctrl+C`で終了する。
-3. `~/.config/usb-sentinel/display.toml`に`[[ports]]`を書く。出現順にタイルの1〜4へ入る。
+   From the left, these are the kernel name, the port path, and the serial. Plug in a USB 2.0 drive and a USB 3.0 drive in turn, and note both port paths for each port. Press `Ctrl+C` to finish.
+3. Write `[[ports]]` in `~/.config/usb-sentinel/display.toml`. The entries go to tiles 1 to 4 in order of appearance.
    ```toml
    [[ports]]
    label = "P1"
@@ -146,199 +148,199 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手
    paths = ["1-1.4"]
    ```
 
-対応表に無いポートパスのディスクは、空いているタイルに`P?`として表示され、カーネル名が添えられる。対応表が空なら全部が`P?`になる。
+A disk whose port path is not in the mapping is shown as `P?` on a free tile, with its kernel name appended. If the mapping is empty, every disk is shown as `P?`.
 
-## 設定ファイル
+## Configuration file
 
-`~/.config/usb-sentinel/display.toml`に置く。無ければ既定値で動く。全キーの例は`deploy/display.example.toml`にある。
+Place it at `~/.config/usb-sentinel/display.toml`. Without it, the app runs with defaults. `deploy/display.example.toml` has an example with all keys.
 
-| キー | 型 | 既定 | 意味と検証 |
+| Key | Type | Default | Meaning and validation |
 |---|---|---|---|
-| `results_dir` | 文字列 | `/var/lib/usb-sentinel/results` | 結果ルート。無くても起動し、情報ストリップに文言を出して毎秒再試行する |
-| `sys_block` | 文字列 | `/sys/block` | sysfsのブロックデバイス一覧。無くても起動する |
-| `unit_template` | 文字列 | `usb-sentinel-docker@{kernel}.service` | 検査ユニット名の雛形。`{kernel}`を含まないと起動しない |
-| `poll_interval_s` | 数値 | `1.0` | 更新周期（秒）。`0.2`〜`10` |
-| `retain_minutes` | 整数 | `60` | 抜去後に結果を表示し続ける時間（分）。`1`以上 |
-| `font_family` | 文字列 | `Noto Sans CJK JP` | 無ければ警告を出してTkの既定フォントを使う |
-| `language` | 文字列 | `en` | 起動時の画面の言語（`en`／`ja`）。画面の言語ボタンかキー`L`で切り替えた言語は状態ファイル（「操作」節）に記録され、設定より優先される。それ以外の値は起動エラー |
-| `sqlite_path` | 文字列 | `/var/lib/usb-sentinel/db/inspections.sqlite` | backendのSQLite索引。読み取り専用で開く。空文字`""`で無効化し、結果ディレクトリの走査だけにする。無い・開けないときは自動で走査にフォールバックする（「SQLite索引の読み取り」節） |
-| `[[ports]]` | `label`文字列、`paths`文字列配列 | 空 | 出現順にタイル1〜4。`label`は1〜4文字の印字可能ASCII。`label`重複、`paths`重複、5件以上は起動エラー |
+| `results_dir` | string | `/var/lib/usb-sentinel/results` | The results root. The app starts even if it is missing; it shows a message on the info strip and retries every second |
+| `sys_block` | string | `/sys/block` | The sysfs list of block devices. The app starts even if it is missing |
+| `unit_template` | string | `usb-sentinel-docker@{kernel}.service` | Template for the inspection unit name. The app does not start unless it contains `{kernel}` |
+| `poll_interval_s` | number | `1.0` | Update interval in seconds. `0.2` to `10` |
+| `retain_minutes` | integer | `60` | How long to keep showing a result after removal, in minutes. `1` or more |
+| `font_family` | string | `Noto Sans CJK JP` | If it is missing, the app prints a warning and uses Tk's default font |
+| `language` | string | `en` | The language of the screen at startup (`en`/`ja`). A language chosen with the on-screen language button or the `L` key is recorded in the state file (the "Controls" section) and takes precedence over this setting. Any other value is a startup error |
+| `sqlite_path` | string | `/var/lib/usb-sentinel/db/inspections.sqlite` | The backend's SQLite index. Opened read-only. The empty string `""` disables it and uses only the results directory scan. If the file is missing or cannot be opened, the app falls back to the scan automatically (the "Reading the SQLite index" section) |
+| `[[ports]]` | `label` string, `paths` string array | empty | Tiles 1 to 4 in order of appearance. `label` is 1 to 4 printable ASCII characters. A duplicate `label`, a duplicate `paths` entry, or 5 or more entries is a startup error |
 
-型違いや未知のキーは起動時に「設定エラー: ...」を標準エラーに出して終了コード1で止まる。
+A wrong type or an unknown key makes the app print "Configuration error: ..." to standard error at startup and stop with exit code 1.
 
-コマンドラインの値は設定ファイルを上書きする。`--config`は共通オプションなのでサブコマンドの前に置く。
+Command-line values override the configuration file. `--config` is a common option, so place it before the subcommand.
 
 ```bash
 uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /path/to/results --sys-block /path/to/sys_block
 ```
 
-`run`のオプションは`--results-dir`、`--sys-block`、`--windowed`または`--kiosk`（排他）、`--no-systemctl`（`systemctl`を呼ばない。開発機用。ユニットの状態が取れないため、SQLite索引に`started`行があるディスクは結果が出るまで「検査中」のまま表示される）。
-`calibrate`のオプションは`--sys-block`と`--interval`（確認間隔の秒数。既定は`1.0`）。
+The options of `run` are `--results-dir`, `--sys-block`, `--windowed` or `--kiosk` (mutually exclusive), and `--no-systemctl` (does not call `systemctl`; for development machines. Because the unit state cannot be obtained, a disk that has a `started` row in the SQLite index stays "Scanning" until a result appears).
+The options of `calibrate` are `--sys-block` and `--interval` (the check interval in seconds; the default is `1.0`).
 
-## 操作
+## Controls
 
-| 操作 | タッチ | キーボード |
+| Action | Touch | Keyboard |
 |---|---|---|
-| ポート選択 | タイルをタップ | `1`〜`4` |
-| 前後へ切り替え | ◀ ▶をタップ | `←` `→`（`↑` `↓`も同じ）。通常QR表示中はポートの前後。詳細QR表示中はページ送り（1/3→2/3→3/3→1/3。◀は逆順）。詳細QR中のポート切替はタイルのタップか`1`〜`4` |
-| 言語切替 | 左下中央のボタン（切替先の言語名を表示） | `L` |
-| 詳細QRと通常QRの切替 | QR領域（右側）をタップ | `Q`。通常QR→詳細QRの1枚目、詳細QR中→通常QR |
-| 強制再読み込み | なし | `F5`。読み込み済みの`result.json`のキャッシュと「結果破損」の記録を捨て、次の更新で全部読み直す |
-| 終了 | なし | `Ctrl+Q`（`--kiosk`では無効） |
+| Select a port | Tap a tile | `1` to `4` |
+| Move backward or forward | Tap ◀ ▶ | `←` `→` (`↑` `↓` do the same). With the normal QR shown, this moves between ports. With a detail QR shown, it turns pages (1/3→2/3→3/3→1/3; ◀ goes in reverse). To change ports while a detail QR is shown, tap a tile or press `1` to `4` |
+| Switch language | The button at the bottom center left (shows the name of the language to switch to) | `L` |
+| Switch between detail QR and normal QR | Tap the QR area (right side) | `Q`. From the normal QR to the first detail QR; from a detail QR back to the normal QR |
+| Force reload | None | `F5`. Discards the cache of loaded `result.json` files and the "Broken" records, and reads everything again on the next update |
+| Quit | None | `Ctrl+Q` (disabled with `--kiosk`) |
 
-タッチはマウスのクリックとして届くので、タッチが動かない環境でもキーボード（USBテンキーでも可）だけで全操作ができる。QRのモード（通常／詳細の何枚目か）はポートを切り替えても保たれる。
+Touch arrives as a mouse click, so even where touch does not work, every operation can be done from the keyboard alone (a USB numeric keypad also works). The QR mode (normal, or which of the detail codes) is kept when you switch ports.
 
-言語は切り替えるたびに状態ファイルに記録され、次回の起動では設定ファイルの`language`より優先される。記録先は`$XDG_STATE_HOME/usb-sentinel-display/language`、`XDG_STATE_HOME`が無ければ`~/.local/state/usb-sentinel-display/language`である。書けないときは標準エラーに警告を1回出すだけで、表示は切り替わる。結果ディレクトリには何も書かない。
+Each time you switch the language, it is recorded in the state file, and at the next startup it takes precedence over `language` in the configuration file. The file is `$XDG_STATE_HOME/usb-sentinel-display/language`, or `~/.local/state/usb-sentinel-display/language` if `XDG_STATE_HOME` is not set. If it cannot be written, the app prints one warning to standard error and the display still switches. Nothing is written to the results directory.
 
-起動モードは3つある。
+There are three startup modes.
 
-- 指定なし: 全画面。`Ctrl+Q`で終了できる。
-- `--kiosk`: 全画面で`Ctrl+Q`を無効にする。`.desktop`はこのモードで起動する。停止は別の端末（SSHなど）から`pkill -f usb-sentinel-display`で行う。アプリはSIGTERMを受けると次の更新で終了する。
-- `--windowed`: 480x320のウィンドウで表示する。開発機用。
+- No option: full screen. `Ctrl+Q` quits.
+- `--kiosk`: full screen with `Ctrl+Q` disabled. The `.desktop` file starts the app in this mode. To stop it, run `pkill -f usb-sentinel-display` from another terminal (SSH, for example). On SIGTERM the app exits at its next update.
+- `--windowed`: shows a 480x320 window. For development machines.
 
-設定ファイルを変えた後の再起動手順は次のとおり。
+To restart after changing the configuration file:
 
-1. `pkill -f usb-sentinel-display`で停止する。
-2. 自動起動（`.desktop`）で動かしているなら再ログインする。手動で起動していたなら再度`uv run usb-sentinel-display run`を実行する。
+1. Stop the app with `pkill -f usb-sentinel-display`.
+2. If it runs through autostart (`.desktop`), log in again. If you had started it manually, run `uv run usb-sentinel-display run` again.
 
-## 画面用QRコード
+## On-screen QR code
 
-画面のQRは`result-qr.png`とは別の短縮形式（`v:2`）である。LCD上で読みやすくするため、上限150バイト、誤り訂正レベルM、QRバージョン8以下に収める。`result-qr.png`（`v:1`、上限2953バイト、誤り訂正L、シグネチャ一覧つき）はそのまま残る。読み取り側は`v`で区別する。
+The on-screen QR code uses a shortened format (`v:2`) that is separate from `result-qr.png`. To make it easy to read on the LCD, it is limited to 150 bytes, error correction level M, and QR version 8 or lower. `result-qr.png` (`v:1`, up to 2953 bytes, error correction L, with the signature list) remains as it is. Readers tell them apart by `v`.
 
 ```json
 {"v":2,"r":"I","s":"ABC123456789","t":"20250601T120000Z","d":"0123456789abcdef","st":"m:P,h:P,c:S,s:S","n":0}
 ```
 
-| キー | 意味 | 値 |
+| Key | Meaning | Value |
 |---|---|---|
-| `v` | 形式バージョン | `2`固定 |
-| `r` | 判定 | `N`=No Defect、`M`=Malware Detected、`C`=Counterfeit Suspected、`S`=Spec Mismatch、`D`=Defective、`I`=Inconclusive、`?`=未知 |
-| `s` | シリアル | `result.json`の`device.serial`をASCII化した先頭32文字。非ASCII文字は`?`になる。空ならカーネル名を入れ`k`を付ける |
-| `k` | `s`がカーネル名であることを示す | `1`。シリアルのときはキー自体が無い |
-| `t` | 検査開始時刻（UTC） | `YYYYmmddTHHMMSSZ`。結果ディレクトリ名の先頭16文字と一致する |
-| `d` | `result.json`のSHA-256先頭16桁 | 小文字hex |
-| `st` | ステップ状態 | `名前:状態`のカンマ区切り。名前は`m`=malware、`h`=hash_inventory、`c`=capacity、`s`=speed、`u`=unmount、その他は先頭3文字。状態は`P`=pass、`F`=fail、`E`=error、`S`=skipped、`N`=not_implemented |
-| `n` | マルウェア検知数 | malwareステップの`details.detections`の要素数 |
+| `v` | Format version | Fixed at `2` |
+| `r` | Verdict | `N`=No Defect, `M`=Malware Detected, `C`=Counterfeit Suspected, `S`=Spec Mismatch, `D`=Defective, `I`=Inconclusive, `?`=unknown |
+| `s` | Serial | The first 32 characters of `device.serial` in `result.json`, converted to ASCII. Non-ASCII characters become `?`. If it is empty, the kernel name is put here and `k` is added |
+| `k` | Indicates that `s` is a kernel name | `1`. When `s` is a serial, the key itself is absent |
+| `t` | Inspection start time (UTC) | `YYYYmmddTHHMMSSZ`. Matches the first 16 characters of the results directory name |
+| `d` | First 16 digits of the SHA-256 of `result.json` | Lowercase hex |
+| `st` | Step states | Comma-separated `name:state`. The names are `m`=malware, `h`=hash_inventory, `c`=capacity, `s`=speed, `u`=unmount, and the first 3 characters for others. The states are `P`=pass, `F`=fail, `E`=error, `S`=skipped, `N`=not_implemented |
+| `n` | Number of malware detections | The number of elements in `details.detections` of the malware step |
 
-### 詳細QR（v:3、3枚）
+### Detail QR (v:3, 3 codes)
 
-容量・速度などの数値を人が読める材料として持ち出すためのQRである。QR領域のタップかキー`Q`で通常QRと切り替え、◀▶でページを送る（お薬手帳のQRと同じ分割方式）。仕様の正本は`doc/qr-payload.md`第5節で、ここでは要点だけ書く。
+This QR code carries numbers such as capacity and speed as material a person can read. Switch between it and the normal QR by tapping the QR area or pressing `Q`, and turn pages with ◀▶ (the same splitting method as the QR codes in a medicine notebook). The authoritative specification is Section 5 of `doc/qr-payload.md`; only the main points are given here.
 
-| 枚 | 内容 |
+| Code | Content |
 |---|---|
-| 1/3 | 同定と判定（開始時刻、シリアル、判定コード、所要秒、検知数、ClamAV DBバージョン） |
-| 2/3 | 容量とデバイス（公称・申告・実測容量、容量の区別、申告超過、消失率、リンク速度、デバイスクラス、台帳行数） |
-| 3/3 | 速度とDB・台帳（読み書き速度と閾値、判定根拠、重大度、ClamAV DB日付、台帳ダイジェスト） |
+| 1/3 | Identification and verdict (start time, serial, verdict code, elapsed seconds, detection count, ClamAV DB version) |
+| 2/3 | Capacity and device (nominal, reported, and measured capacity, capacity classification, excess over the reported capacity, loss rate, link speed, device class, ledger row count) |
+| 3/3 | Speed, DB, and ledger (read and write speeds and thresholds, basis of the verdict, severity, ClamAV DB date, ledger digest) |
 
-- 3枚とも先頭に`v`=`3`、`p`（`1/3`〜`3/3`）、`d`（`result.json`のSHA-256先頭12桁）を持つ。読み取り順は問わず、`d`が同じ3枚を結合する。結合の手順は`doc/qr-payload.md`第5.6節。
-- 制約は通常QRと同じで、各枚150バイト以下、ASCIIのみ、誤り訂正M、QRバージョン8以下。1枚目が150バイトを超えるときはシリアルを16文字に切る。それでも収まらない枚だけ「QR生成失敗」と出し、他の枚は表示する。
-- `result.json`に値が無い項目は`null`になる。第1期のbackendが書いた結果でも3枚とも生成される。
-- 画面の言語はペイロードに影響しない。
+- All three codes start with `v`=`3`, `p` (`1/3` to `3/3`), and `d` (the first 12 digits of the SHA-256 of `result.json`). The reading order does not matter; combine the three codes that share the same `d`. The procedure for combining them is in Section 5.6 of `doc/qr-payload.md`.
+- The constraints are the same as for the normal QR: each code is 150 bytes or less, ASCII only, error correction M, and QR version 8 or lower. If the first code exceeds 150 bytes, the serial is cut to 16 characters. Only a code that still does not fit shows "QR generation failed"; the other codes are displayed.
+- An item without a value in `result.json` becomes `null`. All three codes are generated even for results written by the phase 1 backend.
+- The screen language does not affect the payload.
 
-### 持ち出した結果との照合
+### Verifying against an exported result
 
-`result.json`はファイルのバイト列をそのままハッシュしているので、持ち出し側のPCで次を実行し、画面のQRの`d`と比べる。
+`result.json` is hashed as the raw bytes of the file, so run the following on the PC that receives the file and compare the output with `d` in the on-screen QR.
 
 ```bash
-sha256sum result.json | cut -c1-16   # 通常QRのd（16桁）
-sha256sum result.json | cut -c1-12   # 詳細QRのd（12桁）
+sha256sum result.json | cut -c1-16   # d of the normal QR (16 digits)
+sha256sum result.json | cut -c1-12   # d of the detail QR (12 digits)
 ```
 
-16桁（詳細QRでは12桁）が一致すれば同じ`result.json`である。完全な検証が必要なら`result-qr.png`の64桁の`digest`を使う。
+If the 16 digits (12 digits for the detail QR) match, it is the same `result.json`. If you need full verification, use the 64-digit `digest` in `result-qr.png`.
 
-## 表示の意味
+## Meaning of the display
 
-タイルの1行目はポート名と判定ラベル、背景色は判定色である。色だけに頼らず、文字ラベルとQRの1文字コードを併記する。ラベルは画面の言語で切り替わる。英語ラベルはタイル幅（160px、18px太字）に収めるための短縮形で、`Spec Mismatch`は`Mismatch`になる。
+Line 1 of a tile shows the port name and the verdict label, and the background color is the verdict color. The display does not rely on color alone: it also shows a text label and the one-character code of the QR. The labels switch with the screen language. The English labels are shortened forms that fit the tile width (160px, 18px bold); `Spec Mismatch` becomes `Mismatch`.
 
-| 判定 | 背景色 | ラベル（日本語） | ラベル（英語） | コード |
+| Verdict | Background color | Label (Japanese, romanized) | Label (English) | Code |
 |---|---|---|---|---|
-| No Defect | `#2E7D32`（緑） | 異常なし | No Defect | N |
-| Malware Detected | `#B71C1C`（赤） | マルウェア検知 | Malware | M |
-| Counterfeit Suspected | `#AD1457`（濃いマゼンタ） | 偽装疑い | Counterfeit | C |
-| Spec Mismatch | `#E65100`（橙） | 仕様不一致 | Mismatch | S |
-| Defective | `#6A1B9A`（紫） | 不良 | Defective | D |
-| Inconclusive | `#5D4037`（茶） | 判定不能 | Inconclusive | I |
-| 未知の判定 | `#424242`（濃灰） | 判定不明 | Unknown | ? |
+| No Defect | `#2E7D32` (green) | Ijo nashi | No Defect | N |
+| Malware Detected | `#B71C1C` (red) | Marueya kenchi | Malware | M |
+| Counterfeit Suspected | `#AD1457` (dark magenta) | Gisou utagai | Counterfeit | C |
+| Spec Mismatch | `#E65100` (orange) | Shiyou fuitchi | Mismatch | S |
+| Defective | `#6A1B9A` (purple) | Furyou | Defective | D |
+| Inconclusive | `#5D4037` (brown) | Hantei fuka | Inconclusive | I |
+| Unknown verdict | `#424242` (dark gray) | Hantei fumei | Unknown | ? |
 
-判定が出る前と抜去後は、次の状態文言になる（括弧内は英語表示）。
+Before a verdict appears and after the disk is removed, the tile shows one of the following state texts (the Japanese UI shows the Japanese equivalent).
 
-| 状態 | 条件 | 表示 |
+| State | Condition | Display |
 |---|---|---|
-| 未接続 | ポートにディスクが無く、保持中の結果も無い | 「未接続」（No disk）。灰色 |
-| 起動待ち | ディスクあり、ユニット未起動、結果なし、接続から20秒未満 | 「起動待ち」（Starting）。青 |
-| 検査中 | 検査ユニットが`active`または`activating`。またはSQLite索引に`started`行があり、`systemctl`がユニットの状態を答えない | 「検査中（N分）」（Scanning (N min)）。青。末尾の「…」が1秒ごとに動く |
-| 完了 | 結果が結び付き`result.json`が読めた | 判定色と判定ラベル、3行目に「完了HH:MM」（Done HH:MM） |
-| 結果なし | ディスクあり、ユニットが`inactive`／`failed`／不明、結果なし、接続から20秒以上。SQLite索引に`started`行があってもユニットが停止していれば起動待ちを飛ばしてこの状態になる（USB切断の疑い） | 「結果なし」（No result）。灰色。情報ストリップに`journalctl -u <ユニット名>`で始まる案内が出る。安全ガードによる検査拒否（終了コード2）か起動失敗 |
-| 結果破損 | `result.json`が10秒間読めない（切れたJSON、必須キー欠落）。またはSQLite索引の`result_digest`と`result.json`のSHA-256が一致しない（即時） | 「結果破損」（Broken）。灰色 |
-| 抜去 | 完了後にディスクが消えた | 判定色を暗くし、3行目に「抜去HH:MM」（Removed HH:MM）。QRは引き続き表示する。保持は`retain_minutes`か次のディスクが挿されるまで |
+| Not connected | There is no disk on the port and no retained result | "No disk". Gray |
+| Waiting to start | A disk is present, the unit has not started, there is no result, and less than 20 seconds have passed since connection | "Starting". Blue |
+| Scanning | The inspection unit is `active` or `activating`. Or the SQLite index has a `started` row and `systemctl` does not report the unit's state | "Scanning (N min)". Blue. The trailing "…" moves every second |
+| Done | A result is linked and `result.json` could be read | The verdict color and verdict label, and "Done HH:MM" on line 3 |
+| No result | A disk is present, the unit is `inactive`, `failed`, or unknown, there is no result, and 20 seconds or more have passed since connection. Even if the SQLite index has a `started` row, a stopped unit skips the waiting state and goes straight to this state (the USB drive may have been disconnected) | "No result". Gray. The info strip shows a message that begins with `journalctl -u <unit name>`. Either the safety guard refused the inspection (exit code 2) or the unit failed to start |
+| Broken | `result.json` has been unreadable for 10 seconds (truncated JSON, missing required keys). Or the `result_digest` in the SQLite index does not match the SHA-256 of `result.json` (immediately) | "Broken". Gray |
+| Removed | The disk disappeared after completion | The verdict color is darkened, and line 3 shows "Removed HH:MM". The QR code stays displayed. It is retained for `retain_minutes` or until the next disk is plugged in |
 
-Malware Detectedのタイルは枠を1秒ごとに明赤と背景色で交互に塗る。音は出さない。
+The border of a Malware Detected tile alternates between bright red and the background color every second. No sound is played.
 
-## SQLite索引の読み取り
+## Reading the SQLite index
 
-backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite`の`inspections`テーブルへ1行を書く（開始時に`state='started'`、`result.json`を書いた後に`state='completed'`）。frontendはこのDBを索引として読む。正本は従来どおり`result.json`で、DBの値を画面に出すことはない。
+The backend phase 2 writes one row per inspection to the `inspections` table of `/var/lib/usb-sentinel/db/inspections.sqlite` (`state='started'` at the start, and `state='completed'` after `result.json` is written). The frontend reads this DB as an index. The source of truth remains `result.json` as before, and values from the DB are never shown on the screen.
 
-**何を読むか。** 接続中のディスクの接続時刻以降に始まった行（`started_at`の下限、プレースホルダ付きのSELECT 1文）を候補にする。行ごとに`results_dir/<inspection_id>/result.json`を従来どおり読み、SHA-256を再計算して`result_digest`と比べる。一致すれば完了結果、不一致なら即「結果破損」にする。`state='started'`で`result.json`がまだ無い行は「検査中」か「結果なし」の材料にする（「表示の意味」の状態表）。`inspection_id`は結果ディレクトリ名の形式（`<timestamp>-<serial>`）を通ったものだけを使い、`output_dir`列は使わない。
+**What it reads.** Candidates are the rows that started after the connection time of the connected disk (a lower bound on `started_at`, one SELECT statement with placeholders). For each row, the app reads `results_dir/<inspection_id>/result.json` as before, recomputes the SHA-256, and compares it with `result_digest`. A match gives a completed result; a mismatch immediately gives "Broken". A row with `state='started'` whose `result.json` does not exist yet is used to decide between "Scanning" and "No result" (the state table in "Meaning of the display"). Only an `inspection_id` that passes the results directory name format (`<timestamp>-<serial>`) is used, and the `output_dir` column is not used.
 
-**どう開くか。** `file:...?mode=ro`のURIで接続し、`PRAGMA query_only = ON`と`PRAGMA busy_timeout = 1000`を設定する。SQLはSELECTだけで、DBには書かない。`PRAGMA user_version`が想定（`1`）より大きければ読まない。
+**How it opens the DB.** It connects with a `file:...?mode=ro` URI and sets `PRAGMA query_only = ON` and `PRAGMA busy_timeout = 1000`. The only SQL is SELECT, and it never writes to the DB. If `PRAGMA user_version` is greater than the expected value (`1`), it does not read the DB.
 
-**フォールバック。** 次の場合は索引を使わず、従来の結果ディレクトリの走査に切り替える。表示は止まらず、情報ストリップに理由を出す。
+**Fallback.** In the following cases the app does not use the index and switches to the results directory scan as before. The display does not stop, and the info strip shows the reason.
 
-| 情報ストリップ（日本語／英語） | 条件 |
+| Info strip (Japanese/English) | Condition |
 |---|---|
-| SQLite索引が無いため結果ディレクトリを走査／No SQLite index; scanning results dir | `sqlite_path`のファイルが無い、または`user_version`が0の空のDB |
-| SQLite索引を開けないため結果ディレクトリを走査／SQLite index unreadable; scanning results dir | 接続・PRAGMA・SELECTのいずれかが失敗した。壊れたファイル、テーブル無し、権限なし、WALの`-shm`を作れないなど |
-| SQLite索引が新しい形式のため結果ディレクトリを走査／SQLite index schema is newer; scanning results dir | `user_version`が`1`より大きい。frontendを更新する |
+| The Japanese text meaning "No SQLite index; scanning results dir" / No SQLite index; scanning results dir | The file at `sqlite_path` is missing, or the DB is empty with `user_version` 0 |
+| The Japanese text meaning "SQLite index unreadable; scanning results dir" / SQLite index unreadable; scanning results dir | The connection, a PRAGMA, or the SELECT failed. For example a corrupted file, a missing table, no permission, or being unable to create the WAL `-shm` file |
+| The Japanese text meaning "SQLite index schema is newer; scanning results dir" / SQLite index schema is newer; scanning results dir | `user_version` is greater than `1`. Update the frontend |
 
-結果ディレクトリやsysfsの文言（「結果ディレクトリが見つからない」など）があるときはそちらが優先され、SQLiteの文言は出ない。
+When a message about the results directory or sysfs is present (such as "Results directory not found"), that message takes priority and the SQLite message is not shown.
 
-**権限。** 表示ユーザーが`usb-sentinel`グループに入り、`/var/lib/usb-sentinel/db`（`2770`）を読めること。backendはWALモードで書くので、読み取り専用で開く側も`-shm`ファイルを作る必要があり、ディレクトリにグループの書き込み権限が要る。DBファイル自体には書かない。グループに入っていなければ「SQLite索引を開けない」になり、走査にフォールバックする（「ディスプレイの設置」手順7）。
+**Permissions.** The display user must belong to the `usb-sentinel` group and be able to read `/var/lib/usb-sentinel/db` (`2770`). The backend writes in WAL mode, so even a read-only reader must create the `-shm` file, which requires group write permission on the directory. The app never writes to the DB file itself. If the user is not in the group, the result is "SQLite index unreadable" and the app falls back to the scan (step 7 of "Display setup").
 
-**`started`行の扱い。** `state='started'`の行が接続中のディスク（ポートパス、無ければカーネル名で突き合わせる）に結び付くと、`systemctl`がユニットの状態を答えない間は「検査中」にする。ユニットが`inactive`／`failed`なら接続直後でも起動待ちを飛ばして「結果なし」にする。`result.json`があれば`started`のままでも完了として扱う（完了記録の失敗）。
+**Handling of `started` rows.** When a row with `state='started'` is linked to a connected disk (matched by port path, or by kernel name if there is none), the app shows "Scanning" while `systemctl` does not report the unit's state. If the unit is `inactive` or `failed`, it skips the waiting state even right after connection and shows "No result". If `result.json` exists, the inspection is treated as completed even when the row is still `started` (a failure to record completion).
 
-**索引に行が無い結果。** 索引が読めるときは索引の行だけを候補にし、走査結果は混ぜない。backendが開始記録に失敗した検査（`result.json`の`warnings`とbackendの標準出力（journal）に「SQLite記録失敗（開始）」が残る）は、`result.json`があっても索引に行が無いため表示されず、ディスクは起動待ちの後に「結果なし」になる。この場合はbackendのjournalを確認し、必要なら`sqlite_path = ""`で索引を切って走査に戻す。
+**Results with no row in the index.** While the index is readable, only the rows of the index are candidates, and scan results are not mixed in. An inspection for which the backend failed to record the start (the `warnings` in `result.json` and the backend's standard output (journal) keep the message "SQLite record failed (start)") has no row in the index even if `result.json` exists, so it is not displayed, and the disk goes from the waiting state to "No result". In this case, check the backend's journal and, if necessary, turn off the index with `sqlite_path = ""` to go back to the scan.
 
-## backendとの同時配備
+## Deploying together with the backend
 
-`Counterfeit Suspected`の判定、詳細QR（`v:3`）の数値、SQLite索引はbackend第2期が書く。frontendもbackendと同時に第2期へ更新する。古いfrontendのまま新しいbackendを動かすと、`Counterfeit Suspected`は判定コード`?`・ラベル「判定不明」になり、SQLite索引は読まれない。逆に新しいfrontendと古いbackendでは、詳細QRの数値が`null`になり、SQLite索引が無い旨の文言が情報ストリップに出続ける（`sqlite_path = ""`で消せる）。
+The `Counterfeit Suspected` verdict, the numbers in the detail QR (`v:3`), and the SQLite index are written by backend phase 2. Update the frontend to phase 2 at the same time as the backend. If an old frontend runs against a new backend, `Counterfeit Suspected` gets the verdict code `?` and the label "Unknown", and the SQLite index is not read. Conversely, with a new frontend and an old backend, the numbers in the detail QR become `null`, and the info strip keeps showing the message that there is no SQLite index (`sqlite_path = ""` removes it).
 
-## トラブルシュート
+## Troubleshooting
 
-情報ストリップの文言ごとの原因と対処。
+The cause and remedy for each message on the info strip.
 
-| 文言 | 原因 | 対処 |
+| Message | Cause | Remedy |
 |---|---|---|
-| 結果ディレクトリを読む権限がない（README手順7。usb-sentinelグループと再ログインを確認） | 表示ユーザーが`usb-sentinel`グループに入っていない、または再ログインしていない | 「ディスプレイの設置」手順7。`id`でグループを確認する |
-| 結果ディレクトリが見つからない | `results_dir`のディレクトリが無い | backendの導入（`install-docker.sh`）を確認する。開発機では`--results-dir`で指す |
-| sysfsが見つからない（sys_blockの設定を確認） | `sys_block`のディレクトリが無い | 設定の`sys_block`を確認する。開発機（macOS）では`--sys-block`で偽ツリーを指す |
-| sysfsを読む権限がない | `sys_block`が読めない | ディレクトリの権限を確認する |
-| `journalctl -u usb-sentinel-docker@sdX.service`で始まる案内 | ディスクはあるが検査ユニットが動いておらず結果も無い | `journalctl -u usb-sentinel-docker@sdX.service`で検査拒否（終了コード2）か起動失敗かを見る。自動マウントが有効だと拒否される（手順5） |
-| 結果破損 | `result.json`が10秒以上読めない | `cat result.json`で内容を確認する。backendが書き込み中なら待つ。`F5`で再読み込み |
-| 内部エラー: <例外名> | 更新処理で例外が出た。前回の表示は保持される | 標準エラー出力（自動起動なら`journalctl --user -b`）のスタックトレースを見る |
-| 内部エラーが継続中。標準エラー出力を確認 | 同じ例外が30秒連続した | 同上 |
-| 画面解像度WxH（480x320を想定） | 解像度が480x320に固定されていない | 「ディスプレイの設置」手順1 |
-| 他N台 | 5台以上接続している | タイルは先頭4台だけ表示する |
-| SQLite索引が無い／開けない／新しい形式のため結果ディレクトリを走査（SQLiteの文言が出続ける） | 索引が読めず走査にフォールバックしている。表示は続く | 表示ユーザーが`usb-sentinel`グループに入っているか（`id`）、`sqlite_path`のパスにbackendがDBを作っているか（`ls -l /var/lib/usb-sentinel/db`）、ディレクトリが`2770`かを確認する。backend第2期を導入していない機や開発機では`sqlite_path = ""`で索引を無効にすれば文言は消える。「新しい形式」はfrontendの更新で直す |
+| No permission to read results dir (README step 7: usb-sentinel group, re-login) | The display user is not in the `usb-sentinel` group, or has not logged in again | Step 7 of "Display setup". Check the groups with `id` |
+| Results directory not found | The directory in `results_dir` does not exist | Check the backend installation (`install-docker.sh`). On a development machine, point to it with `--results-dir` |
+| sysfs not found (check sys_block setting) | The directory in `sys_block` does not exist | Check `sys_block` in the settings. On a development machine (macOS), point to a fake tree with `--sys-block` |
+| No permission to read sysfs | `sys_block` is not readable | Check the directory permissions |
+| A message starting with `journalctl -u usb-sentinel-docker@sdX.service` | A disk is present, but the inspection unit is not running and there is no result | Use `journalctl -u usb-sentinel-docker@sdX.service` to see whether the inspection was refused (exit code 2) or failed to start. With automount enabled, the inspection is refused (step 5) |
+| Broken | `result.json` has been unreadable for 10 seconds or more | Check the contents with `cat result.json`. If the backend is still writing, wait. Reload with `F5` |
+| Internal error: <exception name> | An exception occurred during an update. The previous display is kept | Look at the stack trace in standard error (`journalctl --user -b` for autostart) |
+| Internal error persists; check stderr | The same exception occurred for 30 seconds in a row | Same as above |
+| Resolution WxH (expected 480x320) | The resolution is not fixed at 480x320 | Step 1 of "Display setup" |
+| +N more | 5 or more disks are connected | Only the first 4 are shown as tiles |
+| No SQLite index / SQLite index unreadable / SQLite index schema is newer; scanning results dir (the SQLite message keeps appearing) | The index cannot be read and the app has fallen back to the scan. The display continues | Check whether the display user is in the `usb-sentinel` group (`id`), whether the backend has created the DB at the `sqlite_path` path (`ls -l /var/lib/usb-sentinel/db`), and whether the directory is `2770`. On a machine without backend phase 2 or on a development machine, disable the index with `sqlite_path = ""` and the message goes away. Fix "newer schema" by updating the frontend |
 
-文言は英語表示でも同じ順で対応する（「SQLite索引の読み取り」節の表）。
+The messages correspond in the same order in English (the table in the "Reading the SQLite index" section).
 
-標準エラー出力にだけ出るもの。
+Messages that appear only on standard error.
 
-| 文言 | 原因 | 対処 |
+| Message | Cause | Remedy |
 |---|---|---|
-| Failed to save language: <パス> (<例外>) | 言語の記録先（`$XDG_STATE_HOME/usb-sentinel-display/language`か`~/.local/state/…`）に書けない。表示の切替自体は行われ、警告は1回だけ出る | ディレクトリの権限を確認する。記録しなくても起動時は設定ファイルの`language`で動く |
+| Failed to save language: <path> (<exception>) | The language record location (`$XDG_STATE_HOME/usb-sentinel-display/language` or `~/.local/state/…`) cannot be written. The display still switches, and the warning appears only once | Check the directory permissions. Even without the record, the app starts with `language` from the configuration file |
 
-タイルの表示に関するもの。
+Problems with the tile display.
 
-| 症状 | 原因 | 対処 |
+| Symptom | Cause | Remedy |
 |---|---|---|
-| ポート名が`P?`でカーネル名が添えられる | ポートパスが対応表に無い | 「ポートのキャリブレーション」節。対応表が空なら全部`P?`になる |
-| 日本語が豆腐（□）になる、または起動時に「フォントNoto Sans CJK JPが無いため...」が出る | フォント未導入 | 手順3 |
-| 全画面にならない、起動しない | `.desktop`のパスが違う、`uv sync`未実行 | `~/.config/autostart/usb-sentinel-display.desktop`の`Exec`を端末で直接実行して標準エラーを見る |
+| The port name is `P?` with the kernel name appended | The port path is not in the mapping | The "Port calibration" section. If the mapping is empty, every disk is `P?` |
+| Japanese text appears as tofu (□), or the startup message "Font Noto Sans CJK JP not found ..." appears | The font is not installed | Step 3 |
+| The app does not go full screen or does not start | The path in the `.desktop` file is wrong, or `uv sync` has not been run | Run `Exec` from `~/.config/autostart/usb-sentinel-display.desktop` directly in a terminal and look at standard error |
 
-## 開発
+## Development
 
-コマンドはすべて`frontend/`で実行する。macOSで開発とテストが完結する。sysfsは`tmp_path`の偽ツリー、`systemctl`は`FakeRunner`で差し替える。
+Run every command in `frontend/`. Development and testing are completed on macOS. sysfs is replaced with a fake tree in `tmp_path`, and `systemctl` with `FakeRunner`.
 
 ```bash
 cd frontend
@@ -350,46 +352,46 @@ uv run pytest -q
 uv run python -m usb_sentinel_display --help
 ```
 
-すべて終了コード0であること。tyは警告1件でも終了コード1になる。
+Every command must exit with code 0. ty exits with code 1 even for a single warning.
 
-- `ui/`以外は`tkinter`をimportしない。ロジック層（`libs/`直下）はGUIなしで`pytest`が通る。`ui/i18n.py`と`ui/strip.py`も`tkinter`を読まない。
-- UIの文言は`ui/i18n.py`にja／enの2組で持ち、GUI層はキーで参照する。QRペイロード（`qr_payload.py`）は言語に依存しない。
-- SQLite索引（`store.py`）のテストは`tests/test_store.py`で、backendのスキーマv1を文字列でコピーして使う。backendを`import`しない。
-- `tk.Tk()`を必要とする煙テストは`@pytest.mark.gui`が付いている。`uv run pytest -m gui`で選べる。`DISPLAY`が無い環境では自動でskipする。
+- Nothing outside `ui/` imports `tkinter`. The logic layer (directly under `libs/`) passes `pytest` without a GUI. `ui/i18n.py` and `ui/strip.py` also do not import `tkinter`.
+- UI text is kept in two sets, ja and en, in `ui/i18n.py`, and the GUI layer refers to it by key. The QR payload (`qr_payload.py`) does not depend on the language.
+- The tests for the SQLite index (`store.py`) are in `tests/test_store.py`, which uses a string copy of the backend's schema v1. It does not `import` the backend.
+- Smoke tests that need `tk.Tk()` carry `@pytest.mark.gui`. You can select them with `uv run pytest -m gui`. They are skipped automatically where `DISPLAY` is not set.
 
-### 画面の確認
+### Checking the screen
 
-偽のsysfsツリーとサンプル結果を作り、ウィンドウ表示で確認する。
+Create a fake sysfs tree and sample results, and check the screen in a window.
 
 ```bash
-# 偽ツリーとサンプル結果を/tmp/usb-sentinel-fixturesに作る（--scene a|b）
+# Create a fake tree and sample results in /tmp/usb-sentinel-fixtures (--scene a|b)
 uv run python scripts/make-fixtures.py /tmp/usb-sentinel-fixtures --scene a
 
-# ウィンドウで起動する
+# Start in a window
 uv run usb-sentinel-display --config /tmp/usb-sentinel-fixtures/display.toml run --windowed --no-systemctl
 
-# 12秒後にスクリーンショットを撮る（macOSのscreencaptureを使う）
+# Take a screenshot after 12 seconds (uses macOS screencapture)
 uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --scene a --select 1 --out /tmp/scene-a.png
 ```
 
-シーンAは4台（異常なし、マルウェア検知、検査中、結果破損）、シーンBは2台（仕様不一致、不良）とP3・P4の未接続である。`dev-screenshot.py`は`systemctl`の出力を偽装して「検査中」を出す。`--geometry 640x400`で解像度警告、`--results-dir /nonexistent`で「結果ディレクトリが見つからない」を確認できる。`make-fixtures.py`が書く`display.toml`は`sqlite_path = ""`で索引を無効にしているので、開発機でSQLiteの文言は出ない。
+Scene A has four disks (No Defect, Malware Detected, scanning, broken result), and scene B has two disks (Spec Mismatch, Defective) with P3 and P4 not connected. `dev-screenshot.py` fakes the output of `systemctl` to show "Scanning". With `--geometry 640x400` you can check the resolution warning, and with `--results-dir /nonexistent` you can check "Results directory not found". The `display.toml` written by `make-fixtures.py` disables the index with `sqlite_path = ""`, so no SQLite message appears on a development machine.
 
-## 実機確認項目
+## On-device checks
 
-開発機（macOS）では確認できず、Pi（aarch64、Ubuntu Desktop）で確かめる事項。
+Items that cannot be checked on the development machine (macOS) and must be verified on the Pi (aarch64, Ubuntu Desktop).
 
-1. uv管理のPython 3.13で`import tkinter`が通ること。通らなければ手順8のapt構成に切り替える。
-2. 解像度固定が効く層。手順1の(a)(b)(c)のどれで480x320になるか。アプリの解像度警告が出ないことで判定する。
-3. タッチドライバがUbuntuで動き、タップが`<Button-1>`として届いてタイルと◀▶で選択が変わること。動かなくてもキーボードで運用できる。
-4. sysfsのポートパスのディレクトリ（例`/sys/bus/usb/devices/1-1.3`の実体）の`st_mtime`がUSBを挿した時刻になること。`stat`で挿入前後を比べる。ならない場合はシステム起動時刻へフォールバックするため、起動後に書かれた結果はすべて候補になる（起動前の結果は拾わない）。
-5. `systemctl show -p Id -p ActiveState`に複数ユニットを渡したときの出力が、`Id=`で始まるブロックの空行区切りであること。
-6. 検査拒否（終了コード2）を「結果なし」と区別できるか。`systemctl show -p ExecMainStatus`が終了後も残れば「検査拒否」の表示を分けられる。
-7. コンテナが作る結果ディレクトリとファイルの権限が`0755`／`0644`で、`usb-sentinel`グループの表示ユーザーが`result.json`を読めること。
-8. Noto Sans CJK JPでの行送り。18px太字と14px×2行の合計が58pxを超えると2行構成（時刻を2行目末尾へ、シリアルを短縮）に切り替わる。その見え方。
-9. `--kiosk`で`Ctrl+Q`が効かず、`pkill -f usb-sentinel-display`で次の更新に終了すること。開発機では`--windowed`でSIGTERM終了（終了コード0）まで確認した。
-10. 全画面時のフォーカス維持（`<FocusOut>`後の再取得）とカーソル非表示。
-11. 情報ストリップの`journalctl -u usb-sentinel-docker@sdX.service`の案内（約50文字）が320pxに収まること。収まらなければ右側が切れる。
-12. スマートフォンでQRを読み取り、`sha256sum result.json | cut -c1-16`と`d`が一致すること。読み取りが安定しなければ誤り訂正をQに上げる案がある（その場合は上限を108バイトに下げる）。
-13. 詳細QRの3枚（最大QRバージョン8、285px）がLCD上で読めること。
-14. Noto Sans CJK JPで判定ラベルがタイル幅に収まること。`uv run pytest -q -m gui -k verdict_labels_fit_tile`を実機で1回走らせる。開発機の計測では「マルウェア検知」（141px、上限144px）の余裕が最も少ない。
-15. `usb-sentinel`グループの表示ユーザーで`inspections.sqlite`が`mode=ro`で開け、情報ストリップにSQLiteの文言が出ないこと。出る場合は`/var/lib/usb-sentinel/db`の権限（`2770`）を確認する。
+1. `import tkinter` works with uv-managed Python 3.13. If it does not, switch to the apt setup in step 8.
+2. Which layer of the resolution fix takes effect. Which of (a), (b), and (c) in step 1 produces 480x320. Judge by the absence of the app's resolution warning.
+3. The touch driver works on Ubuntu, taps arrive as `<Button-1>`, and the selection changes with the tiles and ◀▶. The system can be operated from the keyboard even if it does not work.
+4. The `st_mtime` of the port-path directory in sysfs (for example the real target of `/sys/bus/usb/devices/1-1.3`) becomes the time the USB drive was plugged in. Compare before and after insertion with `stat`. If it does not, the app falls back to the system boot time, so every result written after boot becomes a candidate (results from before boot are not picked up).
+5. When several units are passed to `systemctl show -p Id -p ActiveState`, the output is blocks that begin with `Id=`, separated by blank lines.
+6. Whether an inspection refusal (exit code 2) can be told apart from "No result". If `systemctl show -p ExecMainStatus` remains available after the unit exits, the display of "inspection refused" can be separated.
+7. The permissions of the results directories and files created by the container are `0755`/`0644`, and a display user in the `usb-sentinel` group can read `result.json`.
+8. Line spacing in Noto Sans CJK JP. When the sum of the 18px bold line and two 14px lines exceeds 58px, the layout switches to two lines (the time goes to the end of line 2 and the serial is shortened). How that looks.
+9. With `--kiosk`, `Ctrl+Q` does not work, and the app exits at the next update after `pkill -f usb-sentinel-display`. On a development machine, exit by SIGTERM (exit code 0) was confirmed with `--windowed`.
+10. Keeping focus in full screen (reacquiring it after `<FocusOut>`) and hiding the cursor.
+11. The `journalctl -u usb-sentinel-docker@sdX.service` message on the info strip (about 50 characters) fits in 320px. If it does not fit, the right side is cut off.
+12. Scan the QR code with a smartphone and confirm that `sha256sum result.json | cut -c1-16` matches `d`. If scanning is not stable, one option is to raise error correction to Q (in that case, lower the limit to 108 bytes).
+13. The three detail QR codes (maximum QR version 8, 285px) are readable on the LCD.
+14. The verdict labels fit the tile width in Noto Sans CJK JP. Run `uv run pytest -q -m gui -k verdict_labels_fit_tile` once on the device. In measurements on the development machine, the Japanese label for Malware Detected (141px, limit 144px) has the least margin.
+15. With a display user in the `usb-sentinel` group, `inspections.sqlite` opens with `mode=ro` and the info strip shows no SQLite message. If it does, check the permissions (`2770`) of `/var/lib/usb-sentinel/db`.

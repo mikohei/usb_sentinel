@@ -1,9 +1,10 @@
-"""ファイル用QR（result-qr.png）のペイロードv:3（設計書第6節）。
+"""Payload v:3 for the file QR code (result-qr.png) (design doc section 6).
 
-v:1のキーは全て残し、容量・速度・台帳・理由コードなど人が判断する材料を足す。
-`v:2`は画面用の通常QR（frontend）が使っているため、ファイル用は`3`にする。
-ステップの`details`の新キーはERROR経路やSKIPPEDでは無いことがあるので、必ず`.get()`で読み
-`KeyError`を出さない。仕様は`doc/qr-payload.md`に記す。
+All v:1 keys are kept, and material for human judgment is added: capacity, speed, inventory,
+reason codes, and so on. `v:2` is used by the regular on-screen QR code (frontend), so the file
+QR code uses `3`. New keys in a step's `details` may be missing on ERROR paths or for SKIPPED,
+so always read them with `.get()` and never raise `KeyError`. The spec is in
+`doc/qr-payload.md`.
 """
 
 import json
@@ -12,9 +13,9 @@ from typing import Any
 from ..models import InspectionResult, StepResult, StepStatus
 from .json_report import digest
 
-# QRバイトモード（バージョン40、誤り訂正L）の上限。
+# Limit for QR byte mode (version 40, error correction L).
 MAX_PAYLOAD_BYTES = 2953
-# 省略順序（設計書第6.3節）の定数。
+# Constants for the truncation order (design doc section 6.3).
 SIGNATURE_LIMIT = 3
 REASON_CHARS = 120
 SERIAL_CHARS = 128
@@ -39,17 +40,17 @@ _SPEED_KEYS = (
 
 
 def _encode(payload: dict[str, Any]) -> str:
-    """区切り文字を詰めたUTF-8のJSONにする（日本語はエスケープしない）。"""
+    """Encode as compact UTF-8 JSON without separator spaces (non-ASCII is not escaped)."""
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _size(payload: dict[str, Any]) -> int:
-    """UTF-8でのバイト数。"""
+    """Size in bytes as UTF-8."""
     return len(_encode(payload).encode("utf-8"))
 
 
 def _mb_s(value: object) -> float | None:
-    """`details.read`／`details.write`の辞書から`mb_s`を取り出す。辞書でなければNone。"""
+    """Extract `mb_s` from the `details.read` / `details.write` dict. None if not a dict."""
     if isinstance(value, dict):
         mb_s = value.get("mb_s")
         return mb_s if isinstance(mb_s, int | float) else None
@@ -57,14 +58,14 @@ def _mb_s(value: object) -> float | None:
 
 
 def _capacity_payload(step: StepResult | None) -> dict[str, Any] | None:
-    """容量ステップがPASSまたはFAILのときだけ辞書を組む。それ以外はNone。"""
+    """Build the dict only when the capacity step is PASS or FAIL. None otherwise."""
     if step is None or step.status not in (StepStatus.PASS, StepStatus.FAIL):
         return None
     return {key: step.details.get(key) for key in _CAPACITY_KEYS}
 
 
 def _speed_payload(step: StepResult | None) -> dict[str, Any] | None:
-    """速度ステップの`details`に`read`があるときだけ辞書を組む。それ以外はNone。"""
+    """Build the dict only when the speed step's `details` has `read`. None otherwise."""
     if step is None or "read" not in step.details:
         return None
     payload: dict[str, Any] = {
@@ -76,65 +77,67 @@ def _speed_payload(step: StepResult | None) -> dict[str, Any] | None:
 
 
 def _clamav_db_date(database: dict[str, Any]) -> str | None:
-    """`db_date`（ISO 8601）の先頭10文字（YYYY-MM-DD）。無ければNone。"""
+    """First 10 characters (YYYY-MM-DD) of `db_date` (ISO 8601). None if absent."""
     db_date = database.get("db_date")
     return db_date[:10] if isinstance(db_date, str) else None
 
 
 def _clip_reason(reason: str) -> str:
-    """理由文を120文字に切り、切ったら末尾に「…」を付ける。"""
+    """Cut a reason to 120 characters, appending "…" when cut."""
     if len(reason) <= REASON_CHARS:
         return reason
     return reason[:REASON_CHARS] + ELLIPSIS
 
 
 def _shrink(payload: dict[str, Any], serial: str) -> None:
-    """設計書第6.3節の順で縮める。各段階の後に再計算し、上限以下になれば止める。
+    """Shrink in the order of design doc section 6.3. Recompute after each stage and stop
+    once within the limit.
 
     Raises:
-        ValueError: 全段階を適用しても上限を超えるとき。
+        ValueError: If the limit is still exceeded after applying every stage.
     """
 
     def over() -> bool:
-        """現在のpayloadが上限を超えているか。"""
+        """Whether the current payload exceeds the limit."""
         return _size(payload) > MAX_PAYLOAD_BYTES
 
     if not over():
         return
     payload["truncated"] = True
-    # 1. シグネチャを3件に切る。
+    # 1. Cut signatures to 3.
     payload["signatures"] = payload["signatures"][:SIGNATURE_LIMIT]
-    # 2. 理由の各要素を120文字に切る。
+    # 2. Cut each reason to 120 characters.
     if over():
         payload["reasons"] = [_clip_reason(reason) for reason in payload["reasons"]]
-    # 3. シグネチャを1件ずつ0件まで減らす。
+    # 3. Remove signatures one at a time, down to 0.
     while over() and payload["signatures"]:
         payload["signatures"].pop()
-    # 4. 理由を空にする（reason_codesは残す）。
+    # 4. Empty reasons (reason_codes is kept).
     if over():
         payload["reasons"] = []
-    # 5. シリアルを128文字に切る。
+    # 5. Cut the serial to 128 characters.
     if over():
         payload["serial"] = serial[:SERIAL_CHARS]
-    # 6. capacity.probe_verdict_lineを落とす。
+    # 6. Drop capacity.probe_verdict_line.
     if over() and isinstance(payload.get("capacity"), dict):
         payload["capacity"]["probe_verdict_line"] = None
-    # 7. それでも超えれば呼び出し元（write_all）で終了コード3になる。
+    # 7. If still too large, the caller (write_all) ends with exit code 3.
     if over():
         raise ValueError("QR payload too large")
 
 
 def build_payload(result: InspectionResult) -> str:
-    """ファイル用QRのペイロード（v:3）を作る。
+    """Build the file QR code payload (v:3).
 
     Args:
-        result: 検査結果。`digest()`を取るので`write_all()`が書くresult.jsonと対応する。
+        result: Inspection result. Its `digest()` is taken, so it matches the result.json written
+            by `write_all()`.
 
     Returns:
-        2953バイト以下のJSON文字列（UTF-8、区切り文字なし）。
+        JSON string of at most 2953 bytes (UTF-8, no separator spaces).
 
     Raises:
-        ValueError: 省略順序を全て適用しても上限を超えるとき。
+        ValueError: If the limit is still exceeded after applying the full truncation order.
     """
     malware = result.step("malware")
     details = malware.details if malware else {}

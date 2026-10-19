@@ -1,196 +1,198 @@
+[日本語版](README.ja.md)
+
 # usb_sentinel
 
-USBドライブを挿すだけで検査が自動実行される、Linux向けの検査ツールである。
+An inspection tool for Linux that runs automatically when you plug in a USB drive.
 
-従来はWindows PCでH2testw / CrystalDiskMark / BitDefenderなどを手作業で実行しており、1検体あたり数時間かかっていた。本ツールではネットワーク非接続のRaspberry Pi 4（Ubuntu）上でコマンドベースの自動検査を行い、4ポートで同時に検査する。検査員はUSBを挿すだけでよい。
+Previously, inspectors ran H2testw, CrystalDiskMark, BitDefender, and similar tools by hand on a Windows PC, and each sample took several hours. This tool runs a command-based automatic inspection on a Raspberry Pi 4 (Ubuntu) with no network connection, and inspects four ports at the same time. The inspector only has to plug in the USB drive.
 
-| 検査項目 | 使用するツール |
+| Inspection item | Tool used |
 |---|---|
-| マルウェア | ClamAV |
-| 容量 | f3write / f3read / f3probe |
-| 速度 | fio |
+| Malware | ClamAV |
+| Capacity | f3write / f3read / f3probe |
+| Speed | fio |
 | OS | Ubuntu Linux |
 
-## 検査シーケンス
+## Inspection sequence
 
 ```
-Step 0  USB挿入検知（ホストudev → systemd → DockerのPythonバックエンド）
-Step 1  ★ マルウェアスキャン（ClamAV）← 最初に実施して安全を確保する
-          → 検知してもStep 2の台帳は作る。Step 4以降はSKIPPED。
-Step 2  ハッシュ台帳の作成（SHA-256 → hash-inventory.tsv）
-Step 3  アンマウント（以降の破壊的検査の前提）
-Step 4  容量検証（f3write + f3read / f3probe）
-Step 5  速度検証（fio）
-Step 6  結果出力（result.json / result.txt / result-qr.png）、SQLiteへ1行記録
-Step 7  判定分類（No Defect / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive）
+Step 0  Detect USB insertion (host udev → systemd → Python backend in Docker)
+Step 1  ★ Malware scan (ClamAV) ← run first to ensure safety
+          → Even on a detection, the Step 2 inventory is still created. Step 4 and later are SKIPPED.
+Step 2  Create the hash inventory (SHA-256 → hash-inventory.tsv)
+Step 3  Unmount (prerequisite for the destructive inspections that follow)
+Step 4  Capacity verification (f3write + f3read / f3probe)
+Step 5  Speed verification (fio)
+Step 6  Write results (result.json / result.txt / result-qr.png), record one row in SQLite
+Step 7  Classify the verdict (No Defect / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive)
 ```
 
-### 安全設計
+### Safety design
 
-- ClamAVを最初に走らせる。ClamAVがスキャンを実行した後は、結果（検知・エラー・タイムアウト）にかかわらずハッシュ台帳を作成する（照合用の証跡）。ClamAVがファイルを開いていない状態（clamscan不在、定義DBなし）では台帳も作らない。破壊的検査（f3 / fio）へは絶対に進まない。タイムアウトやスキャン失敗（終了コード2）の後に作る台帳は、ClamAVが開いていないファイルも`ro,noexec,nosuid,nodev`の下でバイト列として読むだけで、実行も解釈もしない。
-- read-onlyマウント。スキャンとハッシュ計算のためのマウントは`ro,noexec,nosuid,nodev`で行い、感染ファイルがホスト側で実行される余地を残さない。
-- 破壊的検査は多重にブロックする。マルウェアがFAILまたはERROR、`allow_destructive = false`、マウントが残っている、のいずれかであれば書き込みを行わない。
-- 「検知なし」を「クリーン」と混同しない。clamscanの終了コードが0/1以外、タイムアウト、読み取り不能ファイルの混在、ファイルシステム不在は全てERRORとして扱う。未実装ステップが残る限り`No Defect`とは判定しない。
-- 安全ガード。USBバス経由・リムーバブル・ルートディスクでない・容量が非ゼロ、を満たさないデバイスは検査開始前に拒否する（終了コード2）。
+- ClamAV runs first. Once ClamAV has run the scan, the hash inventory is created regardless of the result (detection, error, or timeout), as evidence for later comparison. If ClamAV has not opened any file (clamscan is missing, or there is no definition DB), no inventory is created either. The tool never proceeds to the destructive inspections (f3 / fio). An inventory created after a timeout or a scan failure (exit code 2) only reads the bytes of files that ClamAV did not open, under `ro,noexec,nosuid,nodev`; it neither executes nor interprets them.
+- Read-only mount. The mount for scanning and hash computation uses `ro,noexec,nosuid,nodev`, leaving no room for an infected file to run on the host.
+- Destructive inspections are blocked in several ways. No write is made if any of the following holds: malware is FAIL or ERROR, `allow_destructive = false`, or a mount remains.
+- "No detection" is not confused with "clean". A clamscan exit code other than 0/1, a timeout, a mix of unreadable files, and a missing filesystem are all treated as ERROR. While any step remains unimplemented, the verdict is never `No Defect`.
+- Safety guard. A device that does not satisfy all of the following is refused before the inspection starts (exit code 2): it is on the USB bus, it is removable, it is not the root disk, and its capacity is non-zero.
 
-## 構成
+## Layout
 
 ```
 backend/
   usb_sentinel/
-    __main__.py            python -m usb_sentinelのエントリポイント
+    __main__.py            Entry point for python -m usb_sentinel
     libs/
-      __init__.py          公開API
-      cli.py               inspect / selftest、終了コード定義
-      config.py            /etc/usb-sentinel/config.tomlの読み込み
-      models.py            デバイス情報・ステップ結果・判定
-      runner.py            外部コマンド実行とFakeRunner
-      device.py            デバイス識別と安全ガード
-      mounter.py           read-onlyマウント
-      hashing.py           SHA-256ハッシュ台帳
-      orchestrator.py      検査シーケンスと判定分類
-      speed_floor.py       デバイス種別ごとの業界最低速度（steps/の外。config.pyが参照）
+      __init__.py          Public API
+      cli.py               inspect / selftest, exit code definitions
+      config.py            Loads /etc/usb-sentinel/config.toml
+      models.py            Device information, step results, verdicts
+      runner.py            External command execution and FakeRunner
+      device.py            Device identification and the safety guard
+      mounter.py           Read-only mount
+      hashing.py           SHA-256 hash inventory
+      orchestrator.py      Inspection sequence and verdict classification
+      speed_floor.py       Industry minimum speed per device class (outside steps/; referenced by config.py)
       steps/
-        malware.py         ClamAVスキャン
-        capacity.py        容量検証（f3write + f3read / f3probe）の入口と判定の書き込み
-        capacity_write.py  容量検証のf3writeモード（rwマウントしてf3write→f3read）
-        capacity_fs.py     容量検証用のrwマウントとf3パーサ
-        capacity_probe.py  f3probeモード
-        capacity_judge.py  容量の判定（±7%帯、偽装疑い、申告容量の非破壊チェック）
-        speed.py           速度検証（fio）の入口と判定
-        speed_fio.py       fioのargv組み立てとJSON出力のパーサ
-        speed_judge.py     速度の参照値・重大度・警告文
-        common.py          両ステップの共通部品（残り時間、権限判定、lsblk問い合わせ、コマンド実行と失敗文言）
+        malware.py         ClamAV scan
+        capacity.py        Entry point of capacity verification (f3write + f3read / f3probe) and verdict writing
+        capacity_write.py  f3write mode of capacity verification (rw mount, then f3write → f3read)
+        capacity_fs.py     rw mount for capacity verification and the f3 parser
+        capacity_probe.py  f3probe mode
+        capacity_judge.py  Capacity verdict (±7% band, counterfeit suspicion, non-destructive check of the advertised capacity)
+        speed.py           Entry point and verdict of speed verification (fio)
+        speed_fio.py       Builds the fio argv and parses its JSON output
+        speed_judge.py     Speed reference values, severity, and warning messages
+        common.py          Parts shared by both steps (remaining time, permission checks, lsblk queries, command execution and failure messages)
       report/
-        json_report.py     result.jsonとSHA-256ダイジェスト
-        text.py            result.txt / コンソール表示
-        qr.py              result-qr.png（v:3）
+        json_report.py     result.json and the SHA-256 digest
+        text.py            result.txt / console output
+        qr.py              result-qr.png (v:3)
       store/
-        schema.py          SQLiteのスキーマとマイグレーション
-        sqlite_row.py      result.jsonと同じ値からinspectionsの1行を組む
-        sqlite_store.py    検査1件につき1行の記録（開始・完了）
-  tests/                   外部コマンドをモックしたテスト
-  pyproject.toml           Python依存・開発ツールの設定
-  uv.lock                  Python依存のロックファイル
-  .python-version          Pythonバージョン
-  Dockerfile               Python・ClamAV・f3・fioの実行環境
-  .dockerignore            Dockerビルドの除外設定
-  README.md                バックエンドの開発手順
+        schema.py          SQLite schema and migrations
+        sqlite_row.py      Builds one inspections row from the same values as result.json
+        sqlite_store.py    Records one row per inspection (start and completion)
+  tests/                   Tests with external commands mocked
+  pyproject.toml           Python dependencies and development tool settings
+  uv.lock                  Python dependency lock file
+  .python-version          Python version
+  Dockerfile               Runtime environment with Python, ClamAV, f3, and fio
+  .dockerignore            Docker build exclusions
+  README.md                Backend development instructions
 frontend/
   usb_sentinel_display/
-    __main__.py            python -m usb_sentinel_displayのエントリポイント
+    __main__.py            Entry point for python -m usb_sentinel_display
     libs/
-      __init__.py          公開API
-      cli.py               run / calibrate、設定の上書き
-      config.py            ~/.config/usb-sentinel/display.tomlの読み込みと検証
-      models.py            スロット状態・接続ディスク・結果サマリ、QR用の対応表
-      sysfs.py             /sys/blockの列挙、ポートパス・シリアル・接続時刻の抽出
-      result_file.py       結果ディレクトリ名の解析、時刻変換、result.jsonの要約
-      results.py           結果ディレクトリの走査とSQLite索引の突き合わせ（ResultStore）
-      result_detail.py     result.jsonのsteps[*].detailsから詳細QRの材料（ResultDetail）を組む
-      store.py             inspections.sqliteの読み取り専用索引（SqliteIndex）
-      units.py             systemctl showの呼び出しと出力解析、Runner
-      mapper.py            ディスク・結果・ユニット状態から4スロットを組む
-      monitor.py           1秒周期の更新本体と例外規則
-      qr_payload.py        画面用QRペイロード（通常QR v:2、詳細QR v:3の3枚）
-      qr_render.py         QR行列からPPM画像を作る
+      __init__.py          Public API
+      cli.py               run / calibrate, configuration overrides
+      config.py            Loads and validates ~/.config/usb-sentinel/display.toml
+      models.py            Slot state, attached disk, result summary, mapping table for the QR
+      sysfs.py             Enumerates /sys/block, extracts port path, serial, and connection time
+      result_file.py       Parses result directory names, converts times, summarizes result.json
+      results.py           Scans the results directory and matches it against the SQLite index (ResultStore)
+      result_detail.py     Builds the material for the detail QR (ResultDetail) from steps[*].details of result.json
+      store.py             Read-only index of inspections.sqlite (SqliteIndex)
+      units.py             Calls systemctl show and parses its output, Runner
+      mapper.py            Builds the 4 slots from disks, results, and unit states
+      monitor.py           The 1-second update body and exception rules
+      qr_payload.py        On-screen QR payload (normal QR v:2, detail QR v:3 in 3 codes)
+      qr_render.py         Builds a PPM image from the QR matrix
       ui/
-        theme.py           判定色・寸法・フォント
-        i18n.py            ja／enの文言と言語の記録
-        strip.py           情報ストリップの文言
-        tiles.py           タイル4つと◀／言語／▶の描画
-        qr_view.py         QRキャンバス（通常QR／詳細QR）と情報ストリップ
-        keys.py            キーバインド（1〜4、矢印、F5、L、Q、Ctrl+Q）
-        app.py             tkルート、全画面、解像度チェック、SIGTERM
-  tests/                   偽sysfsツリーとFakeRunnerで外部依存を差し替えたテスト
+        theme.py           Verdict colors, dimensions, fonts
+        i18n.py            ja/en text and language recording
+        strip.py           Info strip text
+        tiles.py           Drawing of the 4 tiles and the ◀ / language / ▶ buttons
+        qr_view.py         QR canvas (normal QR / detail QR) and the info strip
+        keys.py            Key bindings (1 to 4, arrows, F5, L, Q, Ctrl+Q)
+        app.py             tk root, full screen, resolution check, SIGTERM
+  tests/                   Tests with external dependencies replaced by a fake sysfs tree and FakeRunner
   scripts/
-    make-fixtures.py       開発用の偽sysfsツリーとサンプル結果
-    dev-screenshot.py      開発機でのスクリーンショット撮影
+    make-fixtures.py       Fake sysfs tree and sample results for development
+    dev-screenshot.py      Takes screenshots on the development machine
   deploy/
-    usb-sentinel-display.desktop  XDG autostart用
-    display.example.toml   表示設定の全キー
-  pyproject.toml           Python依存・開発ツールの設定
-  uv.lock                  Python依存のロックファイル
-  .python-version          Pythonバージョン
-  README.md                表示フロントエンドの導入手順と開発手順
-  AGENTS.md                表示フロントエンドの規約
+    usb-sentinel-display.desktop  For XDG autostart
+    display.example.toml   All keys of the display settings
+  pyproject.toml           Python dependencies and development tool settings
+  uv.lock                  Python dependency lock file
+  .python-version          Python version
+  README.md                Setup and development instructions for the display frontend
+  AGENTS.md                Conventions for the display frontend
 doc/
-  qr-payload.md            QRペイロード（ファイル用v:3、通常QR v:2、詳細QR v:3）とSQLiteの仕様
+  qr-payload.md            QR payloads (file v:3, normal QR v:2, detail QR v:3) and the SQLite specification
 deploy/
-  99-usb-sentinel-docker.rules  Docker用udevルール（ホスト側）
-  usb-sentinel-docker@.service Docker起動用systemdユニット（ホスト側）
-  config.example.toml      設定の全キー
+  99-usb-sentinel-docker.rules  udev rules for Docker (host side)
+  usb-sentinel-docker@.service systemd unit that starts Docker (host side)
+  config.example.toml      All configuration keys
 scripts/
-  install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、自動起動、ClamAV DB）
-  install-docker.sh        Docker構成の導入（install-all.shから呼ばれる。単独でも使える）
-  run-docker.sh            USBごとに検査コンテナを起動
-README.md                  プロジェクト全体の説明と導入手順
-LICENSE                    プロジェクト全体のライセンス
+  install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, autostart, ClamAV DB)
+  install-docker.sh        Docker setup (called from install-all.sh; can also be used alone)
+  run-docker.sh            Starts an inspection container per USB drive
+README.md                  Overview and setup of the whole project
+LICENSE                    License of the whole project
 ```
 
-外部コマンド（clamscan / f3 / fio / mount / lsblk / udevadm / findmnt）は全て`CommandRunner`の背後に隠してあるため、Linux専用の挙動をmacOSの開発機でテストできる。
+All external commands (clamscan / f3 / fio / mount / lsblk / udevadm / findmnt) are hidden behind `CommandRunner`, so Linux-only behavior can be tested on a macOS development machine.
 
-### なぜudevから直接スクリプトを実行しないのか
+### Why not run a script directly from udev
 
-udevはイベントハンドラの子プロセスを既定180秒でkillする。f3write / f3readは容量次第で数十分〜数時間かかるため、必ず途中で殺される。そこでudevルールは`ENV{SYSTEMD_WANTS}`で`usb-sentinel@%k.service`の起動を要求するだけにし、`TimeoutStartSec=0`のsystemdテンプレートユニットに実行を委ねている。テンプレートなので`usb-sentinel@sda`〜`@sdd`が独立ユニットとして並行実行され、ポートごとに`journalctl -u usb-sentinel@sda`でログを分離できる。
+udev kills the child processes of an event handler after 180 seconds by default. f3write / f3read take tens of minutes to several hours depending on capacity, so they would always be killed midway. The udev rule therefore only requests the start of `usb-sentinel@%k.service` through `ENV{SYSTEMD_WANTS}`, and leaves the execution to a systemd template unit with `TimeoutStartSec=0`. Because it is a template, `usb-sentinel@sda` to `@sdd` run in parallel as independent units, and the logs of each port can be separated with `journalctl -u usb-sentinel@sda`.
 
-## Dockerセットアップ（Raspberry Pi 4 / Ubuntu 26系）
+## Docker setup (Raspberry Pi 4 / Ubuntu 26 series)
 
-実行対象は64bit（arm64）のUbuntu Server、systemd、rootful Docker Engine。
-macOSはPythonの開発・テスト用で、USB自動検査はPi上で動かす。
-イメージ内のDebianと、ホストのUbuntuは別々の環境。
-Pi上でビルドすればarm64用のイメージになる。
+The target is 64-bit (arm64) Ubuntu Server, systemd, and a rootful Docker Engine.
+macOS is for Python development and testing; the automatic USB inspection runs on the Pi.
+The Debian inside the image and the Ubuntu on the host are separate environments.
+Building on the Pi produces an arm64 image.
 
 ```text
-USB接続
-  → Ubuntuホストのudev
+USB connected
+  → udev on the Ubuntu host
   → usb-sentinel-docker@sda.service
-  → docker run（USBごとに独立した検査コンテナ）
+  → docker run (an independent inspection container per USB drive)
   → python -m usb_sentinel inspect /dev/sda
-  → ホストの/var/lib/usb-sentinel/resultsに結果を保存
-  → ホストの/var/lib/usb-sentinel/db/inspections.sqliteに1行記録
+  → results saved to /var/lib/usb-sentinel/results on the host
+  → one row recorded in /var/lib/usb-sentinel/db/inspections.sqlite on the host
 ```
 
-Pythonはsystemdに登録したバックエンドとして、接続イベントごとに起動する。
-HTTP APIや常駐Webサーバーは使用しない。USB 4本を挿した場合は、
-ディスクごとに独立したsystemdユニットとコンテナで実行する。
+Python is started as a backend registered with systemd, once per connection event.
+No HTTP API or resident web server is used. When four USB drives are plugged in,
+each disk runs in its own systemd unit and container.
 
-#### SQLiteの記録
+#### SQLite records
 
-`run-docker.sh`はホストの`/var/lib/usb-sentinel/db`をコンテナの同じパスにbind mountし、
-backendは検査1件につき`inspections.sqlite`へ1行を書く（開始時に`state = 'started'`、
-`result.json`を書いた後に`state = 'completed'`へ更新）。`install-docker.sh`がこのディレクトリを
-`root:usb-sentinel`の`2770`（setgid）で作るので、DB本体とWALの`-wal`・`-shm`は
-`usb-sentinel`グループで読める。`result.json`が正本で、DBは一覧と検索のための索引である。
-記録に失敗しても検査は続き、終了コードも変わらない（開始時の失敗は`result.json`の`warnings`、
-完了時の失敗はjournalのstderrに「SQLite記録失敗」として残る）。
-列の意味は[doc/qr-payload.md](doc/qr-payload.md)の第8節にある。
+`run-docker.sh` bind-mounts the host's `/var/lib/usb-sentinel/db` to the same path in the container,
+and the backend writes one row to `inspections.sqlite` per inspection (`state = 'started'` at the start,
+updated to `state = 'completed'` after `result.json` is written). `install-docker.sh` creates this directory as
+`root:usb-sentinel` with `2770` (setgid), so the DB itself and the WAL files `-wal` and `-shm` can be read
+by the `usb-sentinel` group. `result.json` is the source of truth; the DB is an index for listing and searching.
+If recording fails, the inspection continues and the exit code does not change (a failure at the start is left in `warnings` of `result.json`,
+and a failure at completion is left in the journal's stderr as "SQLite record failed").
+The meaning of the columns is in Section 8 of [doc/qr-payload.md](doc/qr-payload.md).
 
-DBが壊れたときは、検査が走っていないことを確認してから`inspections.sqlite`と`-wal`・`-shm`を
-別名に退避する。次の検査で空のDBが作り直される。退避前の結果は`result.json`が全て残っているので
-失われない。`result.json`からDBを作り直す`reindex`サブコマンドは第3期で扱う。
+If the DB is corrupted, confirm that no inspection is running, and then move `inspections.sqlite` and `-wal` and `-shm`
+aside under another name. An empty DB is recreated at the next inspection. Results from before the move are not
+lost, because all of them remain in `result.json`. The `reindex` subcommand, which rebuilds the DB from `result.json`, is planned for phase 3.
 
-### 0. 一括導入（推奨）
+### 0. One-shot setup (recommended)
 
-ネットワーク接続中のPi上で、リポジトリをcloneしたあと1回だけ実行する。
-Docker、uv、表示アプリ、自動ログイン、自動起動、ClamAV定義DBの取得までをまとめて行い、
-最後に残る手作業と「LANを外す前のチェックリスト」を表示する。再実行しても既存の設定は保持する。
+Run this once on a Pi that is connected to the network, after cloning the repository.
+It performs everything together: Docker, uv, the display app, automatic login, autostart, and fetching the ClamAV definition DB.
+At the end it prints the remaining manual work and a "checklist before unplugging the LAN". Re-running it keeps existing settings.
 
 ```bash
 sudo bash scripts/install-all.sh
-# 表示ユーザーをsudoの実行者以外にする場合
+# When the display user is someone other than the user running sudo
 sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 ```
 
-uvの公式インストーラは取得後にSHA-256を表示して実行前に確認を求める（`INSTALL_YES=1`で省略できる）。
-タッチパネルのドライバ導入、画面解像度480x320の設定、ポートのキャリブレーション、
-容量・速度検査の有効化（検体を消去する）は自動化せず、終了時に手順として案内する。
-手順1〜3は`install-all.sh`が内部で行う内容の説明で、個別にやり直すときに使う。
+After fetching the official uv installer, the script shows its SHA-256 and asks for confirmation before running it (`INSTALL_YES=1` skips this).
+Installing the touch panel driver, setting the 480x320 screen resolution, port calibration, and
+enabling the capacity and speed inspections (which erase the sample) are not automated; the script describes them as steps at the end.
+Steps 1 to 3 explain what `install-all.sh` does internally, and are used to redo individual parts.
 
-### 1. Dockerとサービスの導入
+### 1. Install Docker and the services
 
-ネットワーク接続中にPi上で実行する。以下はUbuntuのパッケージを使う例。
-Docker Engine導入済みの場合、aptの手順は不要。
+Run this on the Pi while it is connected to the network. The following is an example that uses Ubuntu packages.
+If Docker Engine is already installed, the apt steps are not needed.
 
 ```bash
 sudo apt-get update
@@ -198,21 +200,21 @@ sudo apt-get install -y docker.io
 sudo systemctl enable --now docker
 sudo docker info
 
-# プロジェクトのルートで実行（イメージのビルドとudev/systemd登録）
+# Run in the project root (builds the image and registers udev/systemd)
 sudo bash scripts/install-docker.sh
 ```
 
-設定は`/etc/usb-sentinel/config.toml`、イメージなどの起動設定は
-`/etc/usb-sentinel/docker.env`に置く。再導入時は既存設定を保持する。
-イメージを変更する場合は`docker.env`の`USB_SENTINEL_IMAGE`も合わせて更新する。
-従来の直接Python実行用udevルールは導入時に削除するので、二重起動しない。
-導入前から接続していたUSBは、導入後に挿し直す。
+Settings go in `/etc/usb-sentinel/config.toml`, and startup settings such as the image go in
+`/etc/usb-sentinel/docker.env`. A reinstall keeps the existing settings.
+When you change the image, also update `USB_SENTINEL_IMAGE` in `docker.env`.
+The old udev rule for direct Python execution is removed during installation, so nothing starts twice.
+Re-plug any USB drive that was already connected before the installation.
 
-### 2. ClamAV定義DBの準備
+### 2. Prepare the ClamAV definition DB
 
-DBはホストに保存し、検査コンテナへ読み取り専用で渡す。
-ネットワーク接続中に以下で取得・更新してから隔離環境へ持ち込む。
-USB検査中は更新しない。
+The DB is stored on the host and passed to the inspection container read-only.
+Fetch and update it with the following while connected to the network,
+and then bring it into the isolated environment. Do not update it during a USB inspection.
 
 ```bash
 sudo docker run --rm --entrypoint freshclam \
@@ -224,161 +226,161 @@ sudo docker run --rm --network none \
   usb-sentinel:local selftest
 ```
 
-DB未取得や依存コマンド不足の場合、`selftest`は終了コード3を返す。
-隔離環境ではイメージとDBが準備済みなら起動時のネットワーク接続は不要。
+If the DB has not been fetched or a dependent command is missing, `selftest` returns exit code 3.
+In the isolated environment, no network connection is needed at startup as long as the image and the DB are ready.
 
-### 3. USBを挿して実行確認
+### 3. Plug in a USB drive and check operation
 
 ```bash
 sudo journalctl -f -u 'usb-sentinel-docker@*'
 sudo docker ps
 sudo ls /var/lib/usb-sentinel/results/
 
-# 特定USBのログ
+# Logs of a specific USB drive
 sudo journalctl -u usb-sentinel-docker@sda.service
 
-# 自動起動と同じ経路で手動実行（未マウントの検体に限定）
+# Run manually through the same path as autostart (limited to unmounted samples)
 sudo systemctl start usb-sentinel-docker@sda.service
 ```
 
-ホストでマウント済みのディスクは拒否する。GUIの自動マウントを無効にした
-専用のUbuntu Server検査機で運用する。システムディスクの自動アンマウントは行わない。
-検査中の抜去時はsystemdがコンテナも停止する。再接続すれば新しい検査を開始する。
+A disk that is already mounted on the host is refused. Operate this on a dedicated
+Ubuntu Server inspection machine with GUI automount disabled. The tool does not automatically unmount a system disk.
+If the drive is removed during an inspection, systemd also stops the container. Reconnecting starts a new inspection.
 
-コンテナは`--network none`、ルートファイルシステム読み取り専用、
-`--cap-drop ALL`を基本とし、対象ディスクとパーティションだけを
-`--device ...:r`（既定）または`:rw`で渡す。`/sys`と`/run/udev`は読み取り専用で渡し、
-USB判定に利用する。結果ディレクトリだけをホストへ書き込む。
-mountのため`SYS_ADMIN`、ファイル読み取りのため`DAC_OVERRIDE`を付け、
-コンテナのAppArmor制限を解除する。マウントはコンテナの名前空間内で行う。
-`--privileged`やDockerソケットのコンテナ共有は使わない。
+The container basically runs with `--network none`, a read-only root filesystem, and
+`--cap-drop ALL`, and receives only the target disk and its partitions with
+`--device ...:r` (the default) or `:rw`. `/sys` and `/run/udev` are passed read-only and used
+for the USB check. Only the results directory is writable on the host.
+`SYS_ADMIN` is added for mount and `DAC_OVERRIDE` for reading files,
+and the container's AppArmor restriction is lifted. Mounting takes place inside the container's namespace.
+`--privileged` and sharing the Docker socket with the container are not used.
 
-破壊的検査（容量・速度）を有効にするには、`/etc/usb-sentinel/docker.env`で
-`USB_SENTINEL_DEVICE_ACCESS=rw`、`config.toml`で`allow_destructive = true`の両方を設定する。
-どちらか一方だけではデバイスは読み取り専用のまま渡される。`allow_destructive = false`なら
-両ステップは`SKIPPED`、`docker.env`だけ`ro`のままなら`ERROR`（権限不足）になり、
-いずれも総合判定は`Inconclusive`になる。`rw`にすると検体の内容は消去される。
+To enable the destructive inspections (capacity and speed), set both
+`USB_SENTINEL_DEVICE_ACCESS=rw` in `/etc/usb-sentinel/docker.env` and `allow_destructive = true` in `config.toml`.
+If only one of them is set, the device is still passed read-only. With `allow_destructive = false`,
+both steps are `SKIPPED`; if only `docker.env` stays at `ro`, they are `ERROR` (insufficient permission),
+and in both cases the overall verdict is `Inconclusive`. Setting `rw` erases the contents of the sample.
 
-`scripts/install-docker.sh`は再導入時に既存の`docker.env`を保持するため、以前の導入で
-作られた`docker.env`に`USB_SENTINEL_DEVICE_ACCESS`は含まれない（`run-docker.sh`は
-未定義を`ro`と扱う）。有効にするには手で追記する。
+`scripts/install-docker.sh` keeps the existing `docker.env` on reinstall, so a `docker.env`
+created by an earlier installation does not contain `USB_SENTINEL_DEVICE_ACCESS` (`run-docker.sh` treats
+an undefined value as `ro`). To enable it, append it by hand.
 
 ```bash
-# docker.envに書き込み許可を追記（既存環境）
+# Append the write permission to docker.env (existing environment)
 echo 'USB_SENTINEL_DEVICE_ACCESS=rw' | sudo tee -a /etc/usb-sentinel/docker.env
 
-# config.tomlのallow_destructiveをtrueにする
+# Set allow_destructive in config.toml to true
 sudo sed -i 's/^allow_destructive = false/allow_destructive = true/' /etc/usb-sentinel/config.toml
 
-# 反映確認（次にUSBを挿したときから有効）
+# Confirm the change (takes effect the next time a USB drive is plugged in)
 grep USB_SENTINEL_DEVICE_ACCESS /etc/usb-sentinel/docker.env
 grep allow_destructive /etc/usb-sentinel/config.toml
 ```
 
-元に戻すには`docker.env`の値を`ro`にするか、`allow_destructive = false`にする。
-どちらか一方で読み取り専用に戻る。
+To revert, set the value in `docker.env` to `ro` or set `allow_destructive = false`.
+Either one alone returns the device to read-only.
 
-### 更新・停止
+### Updating and stopping
 
 ```bash
-# ソース更新後、検査していないタイミングで再ビルド
+# After updating the source, rebuild while no inspection is running
 sudo docker build -t usb-sentinel:local backend
 
-# 自動起動を解除
+# Disable autostart
 sudo rm /etc/udev/rules.d/99-usb-sentinel-docker.rules
 sudo udevadm control --reload
 
-# 実行中の検査を停止
+# Stop running inspections
 sudo systemctl stop 'usb-sentinel-docker@*.service'
 ```
 
-## 表示フロントエンド（3.5インチタッチディスプレイ）
+## Display frontend (3.5-inch touch display)
 
-Piに接続した480x320のタッチディスプレイに、4ポートの検査状態と選択中ポートのQRコードを表示する。
-ホスト上で動くtkinterアプリ（`frontend/`）で、backendの出力を読むだけで検査処理には関与しない。
-読むのは`result.json`、`inspections.sqlite`（読み取り専用）、`/sys/block`、`systemctl show`だけで、HTTP APIや常駐サーバーは無い。
+A 480x320 touch display connected to the Pi shows the inspection status of four ports and the QR code of the selected port.
+It is a tkinter app (`frontend/`) that runs on the host. It only reads the backend's output and takes no part in the inspection itself.
+It reads only `result.json`, `inspections.sqlite` (read-only), `/sys/block`, and `systemctl show`. There is no HTTP API or resident server.
 
-画面用のQRは`result-qr.png`とは別の短縮形式（`v:2`、上限150バイト、誤り訂正M）で、
-`result.json`のSHA-256先頭16桁を載せる。持ち出し側のPCで
-`sha256sum result.json | cut -c1-16`と突き合わせる。`result-qr.png`（`v:3`）はそのまま残る。
+The on-screen QR uses a shortened format (`v:2`, up to 150 bytes, error correction M) that is separate from `result-qr.png`,
+and carries the first 16 digits of the SHA-256 of `result.json`. On the PC that receives the file, compare it with
+`sha256sum result.json | cut -c1-16`. `result-qr.png` (`v:3`) remains as it is.
 
-通常QRに加えて、容量・速度の数値まで入れた詳細QR（`v:3`、3枚固定、各150バイト以下）を
-ページ送りで表示する（お薬手帳のQRと同じ方式）。3枚は共通の`d`（ダイジェスト先頭12桁）で結合し、
-読み取り順は問わない。ファイル用QR、通常QR、詳細QRの3形式の仕様と、読み取りアプリ側の
-スキーマ推奨は[doc/qr-payload.md](doc/qr-payload.md)にまとめてある。
+In addition to the normal QR, a detail QR (`v:3`, always 3 codes, 150 bytes or less each) that includes the capacity and speed numbers
+is shown with page turning (the same method as the QR codes in a medicine notebook). The three codes are combined by the common `d` (the first 12 digits of the digest),
+and the reading order does not matter. The specifications of the three formats (file QR, normal QR, and detail QR) and the recommended
+schema for the reader app are collected in [doc/qr-payload.md](doc/qr-payload.md).
 
-画面の文言は英語と日本語を切り替えられる（既定は英語）。左下中央のボタンかキー`L`で切り替え、
-選んだ言語は`$XDG_STATE_HOME/usb-sentinel-display/language`（無ければ`~/.local/state/…`）に
-記録されて次回以降も優先される。通常QRと詳細QRの切替はQR領域のタップかキー`Q`、詳細QR表示中は
-◀▶がページ送りになる。判定`Counterfeit Suspected`（偽装疑い、コード`C`、`#AD1457`）はbackend第2期と
-同時に配備する。
+The screen text can be switched between English and Japanese (English by default). Switch with the button at the bottom center left or the `L` key.
+The chosen language is recorded in `$XDG_STATE_HOME/usb-sentinel-display/language` (or `~/.local/state/…` if that is not set)
+and takes precedence from the next start. Switching between the normal QR and the detail QR is done by tapping the QR area or pressing `Q`, and while a detail QR is shown,
+◀▶ turn the pages. The verdict `Counterfeit Suspected` (counterfeit suspected, code `C`, `#AD1457`) is deployed
+together with backend phase 2.
 
-backendが書くSQLite索引（`/var/lib/usb-sentinel/db/inspections.sqlite`）は`mode=ro`で読み取り専用に開き、
-候補の一覧と「検査中」の判断にだけ使う。正本は`result.json`で、SHA-256が索引の`result_digest`と
-合わなければ「結果破損」にする。索引が無い・開けない・スキーマ版が新しいときは従来の結果ディレクトリの
-走査にフォールバックし、情報ストリップに理由を出す。`sqlite_path = ""`で索引を使わない構成にもできる。
+The SQLite index written by the backend (`/var/lib/usb-sentinel/db/inspections.sqlite`) is opened read-only with `mode=ro`
+and used only for the list of candidates and for deciding "Scanning". The source of truth is `result.json`; if its SHA-256 does not match
+`result_digest` in the index, the result is shown as "Broken". If the index is missing, cannot be opened, or has a newer schema version, the app falls back to the previous
+scan of the results directory and shows the reason on the info strip. A setup that does not use the index at all is also possible with `sqlite_path = ""`.
 
-導入手順、ポートのキャリブレーション、設定、操作、トラブルシュートは
-[frontend/README.md](frontend/README.md)を参照。有効化に必要なホスト設定の要点は次のとおり。
+For setup, port calibration, settings, controls, and troubleshooting, see
+[frontend/README.md](frontend/README.md). The main host settings required to enable it are as follows.
 
-- 画面解像度を480x320に固定する（GNOMEの設定または`~/.config/monitors.xml`）。
-- GNOMEの自動マウントを無効にする。Desktop版では必須で、有効のままだと`run-docker.sh`が
-  host-mounted diskとして検査を拒否する。
-- スリープとスクリーンセーバーを止める（`gsettings`）。
-- 表示ユーザーを`usb-sentinel`グループに追加して再ログインする。`install-docker.sh`が
-  結果ルートを`root:usb-sentinel`の`0750`で作るため、グループに入れば読める。SQLite索引の
-  ディレクトリ（`2770`）も同じグループで読める。
-- `fonts-noto-cjk`を導入する。
-- `frontend/deploy/usb-sentinel-display.desktop`をXDG autostart（`~/.config/autostart/`）に登録する。
+- Fix the screen resolution at 480x320 (GNOME settings or `~/.config/monitors.xml`).
+- Disable GNOME automount. This is required on the Desktop edition; if it stays enabled, `run-docker.sh` refuses the inspection
+  as a host-mounted disk.
+- Stop sleep and the screensaver (`gsettings`).
+- Add the display user to the `usb-sentinel` group and log in again. `install-docker.sh` creates the
+  results root as `root:usb-sentinel` with `0750`, so group members can read it. The SQLite index
+  directory (`2770`) is also readable by the same group.
+- Install `fonts-noto-cjk`.
+- Register `frontend/deploy/usb-sentinel-display.desktop` for XDG autostart (`~/.config/autostart/`).
 
-## 結果の持ち出し（air gap越し）
+## Carrying out results (across the air gap)
 
-`result-qr.png`にコンパクトサマリ（`v:3`）を入れてある。内容は判定・シリアル・開始／終了時刻・所要時間・各ステップの状態・ClamAV DBバージョンと日付・`result.json`のSHA-256ダイジェスト・マルウェア検知数とシグネチャ・申告容量の超過（`advertised_over`）・容量の数値（公称／申告／実測、区別、消失比率、偽装理由）・USBリンク速度・デバイス種別・速度の数値（実測／閾値、根拠、重大度）・判定理由（コードと文）・ハッシュ台帳のダイジェストと行数である。キーの一覧は[doc/qr-payload.md](doc/qr-payload.md)にある。
+`result-qr.png` contains a compact summary (`v:3`). Its content is the verdict, serial, start and end times, elapsed time, the state of each step, the ClamAV DB version and date, the SHA-256 digest of `result.json`, the malware detection count and signatures, the excess over the advertised capacity (`advertised_over`), capacity numbers (nominal / advertised / measured, classification, loss ratio, counterfeit reason), the USB link speed, the device class, speed numbers (measured / threshold, basis, severity), the reasons for the verdict (codes and sentences), and the digest and row count of the hash inventory. The list of keys is in [doc/qr-payload.md](doc/qr-payload.md).
 
-QRはバイトモードで最大2953バイトしか入らないため全文は入らない。超えるときは、シグネチャを3件に切る → 理由文を各120文字に切る → シグネチャを0件まで減らす → 理由文を空にする（`reason_codes`は残す）→ シリアルを128文字に切る → `capacity.probe_verdict_line`を落とす、の順で縮め、どこかで削ったら`truncated: true`を立てる。典型的な検査では1.2KB前後で、削られるのはシグネチャが大量のときだけである。
+A QR code holds at most 2953 bytes in byte mode, so the full text does not fit. When the content exceeds that, it is shrunk in this order: cut signatures to 3, cut each reason sentence to 120 characters, reduce signatures to 0, empty the reason sentences (`reason_codes` stays), cut the serial to 128 characters, and drop `capacity.probe_verdict_line`. If anything is cut, `truncated: true` is set. A typical inspection comes to about 1.2KB, and cutting happens only when there are very many signatures.
 
-ネットワーク接続PCでは、`sha256sum result.json`とQRの`digest`、`sha256sum hash-inventory.tsv`とQRの`hash_inventory_digest`を突き合わせる。前者で結果ファイルの、後者で台帳ファイルの改変を検出できる。
+On a PC connected to the network, compare `sha256sum result.json` with `digest` in the QR, and `sha256sum hash-inventory.tsv` with `hash_inventory_digest` in the QR. The former detects tampering with the result file, and the latter detects tampering with the inventory file.
 
-## 終了コード
+## Exit codes
 
-| コード | 意味 |
+| Code | Meaning |
 |---|---|
 | 0 | `No Defect` |
-| 1 | 判定がcleanでない（`Malware Detected` / `Counterfeit Suspected` / `Spec Mismatch` / `Defective` / `Inconclusive`） |
-| 2 | 危険なデバイス（検査を拒否した） |
-| 3 | 実行エラー（依存コマンド不在など） |
+| 1 | The verdict is not clean (`Malware Detected` / `Counterfeit Suspected` / `Spec Mismatch` / `Defective` / `Inconclusive`) |
+| 2 | Dangerous device (the inspection was refused) |
+| 3 | Runtime error (a dependent command is missing, and so on) |
 
-## 判定分類
+## Verdict classification
 
-| 判定 | 条件 |
+| Verdict | Condition |
 |---|---|
-| `Malware Detected` | マルウェア検知（他の失敗より優先） |
-| `Counterfeit Suspected` | 容量偽装の疑い。(1)申告容量または実容量が公称容量（`nominal_bytes`）の107%超、(2)f3probeが`Bad news`を報告、(3)f3readで消失セクタが50%以上、のいずれか。「疑い」であり断定ではない |
-| `Defective` | 容量は申告どおりだが、f3readが消失・破損・変化・上書きされたセクタを検知した |
-| `Spec Mismatch` | いずれかのステップがFAIL（容量不足、速度不足） |
-| `Inconclusive` | ERROR、またはSKIPPED / 未実装ステップが残る |
-| `No Defect` | 全ステップPass |
+| `Malware Detected` | Malware was detected (takes priority over other failures) |
+| `Counterfeit Suspected` | Suspected capacity counterfeiting. Any of: (1) the advertised or real capacity exceeds 107% of the nominal capacity (`nominal_bytes`), (2) f3probe reports `Bad news`, (3) f3read finds 50% or more lost sectors. This is a suspicion, not a conclusion |
+| `Defective` | The capacity is as advertised, but f3read detected lost, corrupted, changed, or overwritten sectors |
+| `Spec Mismatch` | Any step is FAIL (insufficient capacity, insufficient speed) |
+| `Inconclusive` | ERROR, or SKIPPED / unimplemented steps remain |
+| `No Defect` | All steps Pass |
 
-優先順位は`Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect`で、ERRORやSKIPPEDが残れば`Inconclusive`になる。判定の根拠は`result.json`の`reasons`（文）と`reason_codes`（`m:found`、`c:over`、`c:probe`、`c:lost`、`c:short`、`c:defect`、`s:severe`、`s:minor`、`<ステップ略号>:timeout`／`error`／`skipped`）に残る。
+The priority is `Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect`, and if any ERROR or SKIPPED remains the verdict is `Inconclusive`. The basis for a verdict is kept in `reasons` (sentences) and `reason_codes` (`m:found`, `c:over`, `c:probe`, `c:lost`, `c:short`, `c:defect`, `s:severe`, `s:minor`, and `<step abbreviation>:timeout` / `error` / `skipped`) in `result.json`.
 
-`Counterfeit Suspected`は、f3probeが不良ブロックの多い正規品にも`Bad news`を出し得ること、GB／GiBの混同で107%を超え得ることから、エスカレーションの合図として扱う。公称・申告・実測の各値とその比率が`result.json`、QR、SQLiteに残るので、人が最終判断する。
+`Counterfeit Suspected` is treated as a signal to escalate, because f3probe can output `Bad news` even for a genuine product with many bad blocks, and mixing up GB and GiB can push a value over 107%. The nominal, advertised, and measured values and their ratios are kept in `result.json`, the QR, and SQLite, so a person makes the final decision.
 
-#### 容量
+#### Capacity
 
-容量不足は常に`Spec Mismatch`で、`Defective`は容量が閾値以上のときだけ使う。f3probeモード（`use_probe = true`）では非OKセクタの情報が得られないため`Defective`にはならない。
+Insufficient capacity is always `Spec Mismatch`, and `Defective` is used only when the capacity is at or above the threshold. In f3probe mode (`use_probe = true`), information on non-OK sectors is not available, so the verdict is never `Defective`.
 
-`[capacity] nominal_bytes`に商品ページの公称容量をバイトで設定すると、判定の分母が申告容量（lsblkの値）から公称容量に変わり、93%未満を容量不足、107%超（`over_ratio = 1.07`）を偽装疑いとする±7%の帯で判定する。未設定なら従来どおり申告容量基準の93%判定だけを行い、超過は判定しない。
+When `[capacity] nominal_bytes` is set to the nominal capacity from the product page in bytes, the denominator of the verdict changes from the advertised capacity (the lsblk value) to the nominal capacity, and the verdict uses a ±7% band: below 93% is insufficient capacity and above 107% (`over_ratio = 1.07`) is counterfeit suspected. If it is not set, only the previous 93% check against the advertised capacity is made, and excess is not judged.
 
-- `nominal_bytes`は10進表記をそのままバイトに直した値にする（32GB → `32000000000`）。GiB表記（32GiB = `34359738368`）はGBの1.0737倍なので、混同すると正規品が偽装疑いになる。GiB申告の正規品が多ければ`over_ratio = 1.10`に緩める。
-- 申告容量の非破壊チェック。`nominal_bytes`が設定されていれば、マウントもスキャンもしていない検査開始直後にlsblkの申告容量だけを公称容量と比べ、`result.json`の`advertised_check`に記録する。`allow_destructive = false`でも、マルウェア検知で止まっても記録され、超過なら`Counterfeit Suspected`になる。書き込みは一切せず、破壊的検査に進む条件（ゲート）には影響しない。
-- 容量ステップが走ったときは、実測容量も同じ帯で判定する。f3readの消失セクタが50%以上（`lost_ratio`）なら偽装疑いとする。正規品の不良は数%以下にとどまるためである。
-- `config.toml`はホストで1つなので、4ポートで異なる商品を同時に検査する場合は全員に同じ公称値が当たる。ケースごとの公称値は読み取りアプリ側で管理する。
+- `nominal_bytes` is the decimal notation converted directly to bytes (32GB → `32000000000`). A GiB notation (32GiB = `34359738368`) is 1.0737 times the GB value, so mixing them up turns a genuine product into a counterfeit suspect. If many genuine products are advertised in GiB, relax it to `over_ratio = 1.10`.
+- Non-destructive check of the advertised capacity. If `nominal_bytes` is set, right at the start of the inspection, before any mounting or scanning, only the advertised capacity from lsblk is compared with the nominal capacity and recorded in `advertised_check` of `result.json`. It is recorded even with `allow_destructive = false` and even when a malware detection stops the inspection, and an excess gives `Counterfeit Suspected`. It writes nothing and does not affect the condition (gate) for proceeding to the destructive inspections.
+- When the capacity step has run, the measured capacity is judged with the same band. If f3read reports 50% or more lost sectors (`lost_ratio`), it is counterfeit suspected. This is because defects in genuine products stay at a few percent or less.
+- `config.toml` is one per host, so when you inspect different products on the four ports at the same time, the same nominal value applies to all of them. Manage the nominal value for each case on the reader app side.
 
-#### 速度
+#### Speed
 
-速度は`[speed]`の`nominal_read_mb_s`・`nominal_write_mb_s`（MB/s）と比較する。公称値が未設定のとき、デバイス種別（`[speed] device_class`）の業界最低値で判定する。公称値が設定されていればそれが優先される。片方だけ設定した場合は設定側だけを判定し、未設定側は測定値の記録のみ（summaryに`（判定対象外）`）。
+Speed is compared with `nominal_read_mb_s` and `nominal_write_mb_s` (MB/s) in `[speed]`. When no nominal value is set, the verdict uses the industry minimum for the device class (`[speed] device_class`). If a nominal value is set, it takes priority. If only one side is set, only that side is judged and the unset side is only recorded as a measured value (the summary says the side is excluded from the verdict).
 
-| `device_class` | 種別 | 読み取り（MB/s） | 書き込み（MB/s） |
+| `device_class` | Class | Read (MB/s) | Write (MB/s) |
 |---|---|---|---|
 | `hdd_5400` | HDD 5400rpm | 80 | 80 |
 | `hdd_7200` | HDD 7200rpm | 120 | 120 |
@@ -386,72 +388,72 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 | `nvme_ssd` | NVMe / USB3.2 SSD | 500 | 500 |
 | `sd_c10` | SD Class10 / U1 | 25 | 10 |
 | `sd_u3` | SD U3 / V30 | 90 | 30 |
-| `usb2_flash` | USB2.0フラッシュ | 15 | 5 |
-| `usb3_flash` | USB3.0フラッシュ | 50 | 15 |
+| `usb2_flash` | USB2.0 flash | 15 | 5 |
+| `usb3_flash` | USB3.0 flash | 50 | 15 |
 
-- `device_class`が未設定なら、sysfsのUSBリンク速度から`usb2_flash`（480Mbps）または`usb3_flash`（5000Mbps以上）を推定する。推定したときは`warnings`に「種別未設定」を必ず残す。HDD・SSD・SDはリンク速度から判別できないので、扱う運用では`device_class`を設定する。
-- `nvme_ssd`はホストがUSB3.2 Gen2（10Gbps）以上のときに使う。Raspberry Pi 4のUSB3ポートはGen1（5Gbps）で実効約400〜450MB/sが上限のため、500MB/sの最低値では判定できない。この場合は`nominal_*`を設定する。基準値がリンク速度の実効上限に近いときは`warnings`に「実効上限」の警告が出る。
-- USB1.1リンク（12Mbps・1.5Mbps）の検体は判定基準を持たない。`device_class`も公称値も無ければ速度ステップは`SKIPPED`になり、`warnings`に「判定基準なし」を残す。
-- 両方未設定でリンク速度も読めなければ速度ステップは`SKIPPED`になり総合判定は`Inconclusive`。
-- 速度不足の重大度。測定値が基準値の50%未満なら`severe`（summaryは「速度不足（著しく下回る）」）、50〜79%なら`minor`（「速度不足（わずかに下回る）」）、80%以上（`pass_ratio`）でPASS。`details.severity`と`reason_codes`の`s:severe`／`s:minor`に出る。
+- If `device_class` is not set, the tool infers `usb2_flash` (480Mbps) or `usb3_flash` (5000Mbps or more) from the sysfs USB link speed. When it infers, it always leaves a "class not set" message in `warnings`. HDD, SSD, and SD cannot be told apart from the link speed, so set `device_class` in operations that handle them.
+- Use `nvme_ssd` when the host has USB3.2 Gen2 (10Gbps) or faster. The USB3 ports of the Raspberry Pi 4 are Gen1 (5Gbps) and top out at about 400 to 450MB/s in practice, so a 500MB/s minimum cannot be judged. In this case, set `nominal_*`. When the reference value is close to the effective upper limit of the link speed, `warnings` gets an "effective upper limit" warning.
+- Samples on a USB1.1 link (12Mbps or 1.5Mbps) have no verdict criterion. If neither `device_class` nor a nominal value is set, the speed step is `SKIPPED`, and a "no verdict criterion" message is left in `warnings`.
+- If neither is set and the link speed cannot be read, the speed step is `SKIPPED` and the overall verdict is `Inconclusive`.
+- Severity of insufficient speed. A measured value below 50% of the reference is `severe` (the summary says the speed is far below), 50 to 79% is `minor` (the summary says it is slightly below), and 80% or more (`pass_ratio`) is PASS. It appears in `details.severity` and in `s:severe` / `s:minor` of `reason_codes`.
 
-### 速度の公称値
+### Nominal speed
 
-`/etc/usb-sentinel/config.toml`の`[speed]`に、メーカー公表値をMB/s（10^6バイト/秒）で設定する。
+In `[speed]` of `/etc/usb-sentinel/config.toml`, set the manufacturer's published values in MB/s (10^6 bytes/second).
 
 ```toml
 [speed]
-nominal_read_mb_s = 90.0    # 読み取りの公称速度。未設定なら判定対象外
-nominal_write_mb_s = 20.0   # 書き込みの公称速度。未設定なら判定対象外
-pass_ratio = 0.80           # 公称値×pass_ratio以上でPASS
-# device_class = "usb3_flash"  # 公称値が無いときに使う種別。上の表のキーから選ぶ
+nominal_read_mb_s = 90.0    # Nominal read speed. If unset, not judged
+nominal_write_mb_s = 20.0   # Nominal write speed. If unset, not judged
+pass_ratio = 0.80           # PASS at nominal value × pass_ratio or more
+# device_class = "usb3_flash"  # Class used when there is no nominal value. Choose a key from the table above
 ```
 
-測定値は`result.json`の`steps.speed.details.read.mb_s`・`write.mb_s`に、閾値は`threshold_read_mb_s`・`threshold_write_mb_s`に記録される。判定の根拠（`basis_read`・`basis_write`: `nominal`／`class`／`none`）、決定した種別（`device_class`）とその由来（`device_class_basis`: `config`／`link_speed`／`unknown`）、重大度（`severity`）も同じ`details`に入る。
+Measured values are recorded in `steps.speed.details.read.mb_s` and `write.mb_s` of `result.json`, and thresholds in `threshold_read_mb_s` and `threshold_write_mb_s`. The basis of the verdict (`basis_read` and `basis_write`: `nominal` / `class` / `none`), the determined class (`device_class`) and its origin (`device_class_basis`: `config` / `link_speed` / `unknown`), and the severity (`severity`) are in the same `details`.
 
 ### `result.txt`
 
-`result.txt`は`result.json`を人が読む形にしたもので、判定・デバイス・公称容量の3行の後にリンク速度・所要時間・申告容量超過・警告を、各ステップの行の後に公称（商品）容量・区別・重大度を出す。第2期で足した項目は値が無ければ行ごと省く（ERRORで終わったステップには無い）ので、行の有無で欠損を判断できる。
+`result.txt` is `result.json` in a human-readable form. After the three lines of verdict, device, and nominal capacity, it shows the link speed, elapsed time, excess over the advertised capacity, and warnings, and after the line of each step it shows the nominal (product) capacity, classification, and severity. Items added in phase 2 are omitted together with their line when there is no value (a step that ended in ERROR has none), so you can judge missing data by the presence of the line.
 
-### f3writeモードの制限
+### Limits of the f3write mode
 
-既定（`use_probe = false`）はf3write + f3readで空き領域を検証し、既使用量（`statvfs`）を加算して実容量を見積もる。次の検体は`use_probe = true`（f3probe）で検査する。
+The default (`use_probe = false`) verifies free space with f3write + f3read and estimates the real capacity by adding the used amount (`statvfs`). Inspect the following samples with `use_probe = true` (f3probe).
 
-- (a) ほぼ満杯の検体。検証済み領域が閾値に届かないため`ERROR`になる（既使用量だけでは合格させない）。
-- (b) NTFSの検体。Docker構成ではrwマウントできない（`ntfs-3g`はFUSEを使うが`run-docker.sh`は`/dev/fuse`を渡していない）。
-- (c) 容量偽装品は多くの場合`Spec Mismatch`になるが、巻き戻し書き込みでFAT領域が壊れるとf3readの出力を解析できず`ERROR`（`Inconclusive`）になる。既使用量を過大に申告する検体も同様に`Inconclusive`になる。summaryが「f3readの出力を解析できない」または「検証済み領域…が閾値…に届かない」の検体は`use_probe = true`で再検査する。
+- (a) A nearly full sample. The verified area does not reach the threshold, so the result is `ERROR` (the used amount alone never makes a sample pass).
+- (b) An NTFS sample. It cannot be mounted rw in the Docker setup (`ntfs-3g` uses FUSE, but `run-docker.sh` does not pass `/dev/fuse`).
+- (c) A counterfeit product usually becomes `Spec Mismatch`, but if the rewinding writes break the FAT area, the output of f3read cannot be parsed and the result is `ERROR` (`Inconclusive`). A sample that over-reports its used amount also becomes `Inconclusive`. Re-inspect a sample whose summary says that the f3read output cannot be parsed, or that the verified area does not reach the threshold, with `use_probe = true`.
 
-f3probeはファイルシステムを介さずデバイスに直接書くため、上記の影響を受けない。いずれのモードでも検体の内容は消去される。
+f3probe writes to the device directly without going through the filesystem, so it is not affected by the above. In either mode the contents of the sample are erased.
 
-## 開発
+## Development
 
 ```bash
 cd backend
 uv sync --frozen
 uv run pytest -q
 uv run ruff check . && uv run ty check
-uv run python -m usb_sentinel selftest   # 依存コマンドがMISSと報告されるのが正常
+uv run python -m usb_sentinel selftest   # It is normal for dependent commands to be reported as MISS
 ```
 
-## 未確定事項
+## Open items
 
-容量（f3）と速度（fio）のステップは実装済みだが、次が実機キャリブレーション待ちである。
+The capacity (f3) and speed (fio) steps are implemented, but the following are waiting for calibration on the real device.
 
-1. fioのパラメータ（`block_size` / `queue_depth` / `duration_s`）— 既定の1M / 8 / 30秒は暫定値。CrystalDiskMarkと数値を突き合わせるキャリブレーションが必要
-2. 公称速度の入手元と設定運用— `nominal_read_mb_s` / `nominal_write_mb_s`を検体ごとに誰がどう設定するか
-3. 既使用領域を実容量に加算する扱いの妥当性— f3writeモードでは検体の申告値（`statvfs`）を足している
-4. ClamAV定義DBのオフライン更新手順— 隔離環境への持ち込み方法と頻度
-5. Raspberry Pi 4での実機確認— f3read / f3probe / fioの実出力とパーサの一致、Docker `rw`でのコンテナ内書き込み、`mount -w`の挙動（詳細は`.agents/tasks/f3-fio-steps/final-report.md`の実機確認項目）
+1. fio parameters (`block_size` / `queue_depth` / `duration_s`): the defaults of 1M / 8 / 30 seconds are provisional. Calibration against CrystalDiskMark numbers is needed
+2. Source of the nominal speed and how it is configured: who sets `nominal_read_mb_s` / `nominal_write_mb_s` for each sample, and how
+3. Whether adding the used area to the real capacity is appropriate: in f3write mode, the sample's reported value (`statvfs`) is added
+4. Offline update procedure for the ClamAV definition DB: how to bring it into the isolated environment, and how often
+5. Confirmation on a real Raspberry Pi 4: agreement between the real output of f3read / f3probe / fio and the parsers, writing inside the container with Docker `rw`, and the behavior of `mount -w` (see the on-device checks in `.agents/tasks/f3-fio-steps/final-report.md` for details)
 
-第2期（ハッシュ台帳の分離、±7%帯、リンク速度、SQLite、QR v:3）で加わった実機確認項目は次のとおり。
+The on-device checks added in phase 2 (hash inventory separation, ±7% band, link speed, SQLite, QR v:3) are as follows.
 
-1. `/sys/bus/usb/devices/<port_path>/speed`がコンテナ内から読めるか（`/sys`は読み取り専用bind mount）。読めなければ`link_speed_mbps`は`null`になり、`device_class`未設定の検体は速度が`SKIPPED`になる。
-2. bind mount上のSQLite WAL。4コンテナ同時書き込みで`database is locked`が出ないこと（`busy_timeout`で吸収されること）、Linux実機で`ls -l`により`-wal`・`-shm`が本体と同じモード（`usb-sentinel`グループ・`0660`）で作られること、表示ユーザーが`mode=ro`で読めること。
-3. clamscanの集計行の実出力（キー名、`Time:`の形式、`Data scanned:`の単位）。
-4. f3probeの`Bad news`行の実際の文言（limbo／wraparound／chainの3型）。
-5. USBリンク速度の値。USB3.2 Gen2ポートに挿したUSB2.0デバイスで`480`が返ること、USB3.0デバイスで`5000`になること。Raspberry Pi 4のUSB3ポートはGen1（5000）まで。
-6. 容量超過の検証。実容量が公称を超える正規品（GiB申告）があるか。あれば`over_ratio`の既定を見直す。
-7. `elapsed_s`とclamscanの`Time:`の整合（`elapsed_s`はマウント・バージョン確認を含むので大きくなる）。
-8. 感染検体（EICAR）での台帳作成。clamscan FAIL後に`hash-inventory.tsv`が作られ、`details.digest`が`sha256sum`と一致すること。逆に、定義DBを一時的に外した状態では`hash-inventory.tsv`が作られないこと。
+1. Whether `/sys/bus/usb/devices/<port_path>/speed` can be read from inside the container (`/sys` is a read-only bind mount). If it cannot, `link_speed_mbps` is `null`, and for a sample without `device_class`, speed is `SKIPPED`.
+2. SQLite WAL on the bind mount. That `database is locked` does not appear with 4 containers writing at the same time (that `busy_timeout` absorbs it), that `ls -l` on a real Linux machine shows `-wal` and `-shm` created with the same mode as the main file (`usb-sentinel` group, `0660`), and that the display user can read them with `mode=ro`.
+3. The real output of the clamscan summary lines (key names, the format of `Time:`, the unit of `Data scanned:`).
+4. The actual wording of the f3probe `Bad news` line (the three types: limbo / wraparound / chain).
+5. The value of the USB link speed. That a USB2.0 device plugged into a USB3.2 Gen2 port returns `480`, and a USB3.0 device gives `5000`. The USB3 ports of the Raspberry Pi 4 go up to Gen1 (5000).
+6. Verification of excess capacity. Whether there are genuine products whose real capacity exceeds the nominal one (GiB advertising). If there are, review the default of `over_ratio`.
+7. Consistency between `elapsed_s` and the clamscan `Time:` (`elapsed_s` includes mounting and the version check, so it is larger).
+8. Inventory creation with an infected sample (EICAR). That `hash-inventory.tsv` is created after a clamscan FAIL and `details.digest` matches `sha256sum`. Conversely, that `hash-inventory.tsv` is not created with the definition DB temporarily removed.
 
-判定式「実容量 ≥ 公称容量の93%」は[capacity_judge.py](backend/usb_sentinel/libs/steps/capacity_judge.py)の`evaluate()`に実装済みである（`capacity.py`から再公開）。
+The verdict formula "real capacity ≥ 93% of the nominal capacity" is implemented in `evaluate()` of [capacity_judge.py](backend/usb_sentinel/libs/steps/capacity_judge.py) (re-exported from `capacity.py`).

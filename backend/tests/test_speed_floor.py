@@ -1,6 +1,7 @@
-"""業界最低値表と種別決定（speed_floor）。
+"""Industry minimum speed table and device kind resolution (speed_floor).
 
-表の値はSOPで固定されている。変えるときはこのテストの期待値も合わせて直す。
+The table values are fixed by the SOP. When changing them, update this test's expected values
+as well.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class TestFloors:
         ],
     )
     def test_table_matches_sop(self, key: str, expected: Floor) -> None:
-        """8種の読み・書き・label・codeが設計書第4.2節と一致する。"""
+        """Read, write, label, and code for all 8 kinds match section 4.2 of the design doc."""
         assert DEVICE_FLOORS[key] == expected
 
     def test_exactly_eight_classes(self) -> None:
@@ -49,7 +50,7 @@ class TestFloors:
 
 class TestResolveDeviceClass:
     def test_config_takes_priority(self) -> None:
-        """設定があればリンク速度に関係なく設定を使う。"""
+        """If configured, use the setting regardless of link speed."""
         assert resolve_device_class("nvme_ssd", 480) == ("nvme_ssd", "config")
         assert resolve_device_class("sd_c10", None) == ("sd_c10", "config")
 
@@ -67,7 +68,7 @@ class TestResolveDeviceClass:
 
     @pytest.mark.parametrize("link", [None, 12, 1, 0, 481, 4999])
     def test_unknown_when_no_basis(self, link: int | None) -> None:
-        """USB1.1、規格外の値、不明はすべて(None, "unknown")。"""
+        """USB 1.1, non-standard values, and unknown all map to (None, "unknown")."""
         assert resolve_device_class(None, link) == (None, "unknown")
 
 
@@ -83,7 +84,7 @@ class TestEffectiveMbS:
 
 class TestReference:
     def test_is_frozen_and_hashable(self) -> None:
-        """frozenなので値が同じなら等しく、ハッシュ可能（辞書のキーにできる）。"""
+        """Being frozen, equal values compare equal and are hashable (usable as dict keys)."""
         ref = Reference(50.0, "class", "usb3_flash")
         assert ref == Reference(50.0, "class", "usb3_flash")
         assert hash(ref) == hash(Reference(50.0, "class", "usb3_flash"))
@@ -94,7 +95,7 @@ class TestReference:
 
 
 def test_module_imports_only_dataclasses() -> None:
-    """config.pyから参照されるため、usb_sentinel内の他モジュールをimportしない。"""
+    """Referenced from config.py, so it must not import other modules in usb_sentinel."""
     tree = ast.parse(inspect.getsource(speed_floor))
     imported: list[str] = []
     for node in ast.walk(tree):

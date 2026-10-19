@@ -1,4 +1,4 @@
-"""画面文言のja／en 2組と言語の記録。GUIライブラリを読まないのでcli.pyからもimportできる。"""
+"""ja/en screen text sets and the saved language. No GUI library, so cli.py can import it."""
 
 import os
 from pathlib import Path
@@ -7,14 +7,14 @@ from ..models import SlotState
 
 LANGUAGES: tuple[str, ...] = ("en", "ja")
 DEFAULT_LANGUAGE = "en"
-# 言語の記録先（$XDG_STATE_HOME、無ければ~/.local/state）。結果ディレクトリには書かない。
+# Where the language is saved ($XDG_STATE_HOME, else ~/.local/state). Never the results directory.
 STATE_DIR_NAME = "usb-sentinel-display"
 STATE_FILE_NAME = "language"
 
-# 文言。enとjaは同じキー集合を持つ（tests/test_i18n.pyで確認する）。
+# Screen text. en and ja have the same key set (checked by tests/test_i18n.py).
 MESSAGES: dict[str, dict[str, str]] = {
     "en": {
-        # タイトル行は"P4 "付きで144pxに収める必要があるため短い語を選ぶ（18px太字で実測）。
+        # The title row must fit 144 px with "P4 ", so use short words (measured in 18 px bold).
         "state.empty": "No disk",
         "state.waiting": "Starting",
         "state.inspecting": "Scanning",
@@ -82,13 +82,15 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
 }
 
-# 判定ラベル（設計書8節）。英語はタイル1行目（幅160px、18px太字）に収まる短縮形。
+# Verdict labels (design doc section 8). English uses short forms that fit tile line 1
+# (160 px wide, 18 px bold).
 VERDICT_LABELS: dict[str, dict[str, str]] = {
     "en": {
         "No Defect": "No Defect",
         "Malware Detected": "Malware",
         "Counterfeit Suspected": "Counterfeit",
-        # "Spec Mismatch"は"P1 "付きで157px（18px太字、macOS実測）となり144pxを超えるので短縮。
+        # "Spec Mismatch" with "P1 " is 157 px (18 px bold, measured on macOS), over 144 px,
+        # so it is shortened.
         "Spec Mismatch": "Mismatch",
         "Defective": "Defective",
         "Inconclusive": "Inconclusive",
@@ -106,49 +108,49 @@ UNKNOWN_VERDICT_LABEL: dict[str, str] = {"en": "Unknown", "ja": "判定不明"}
 
 
 def text(lang: str, key: str, **kwargs: object) -> str:
-    """文言を取り出し、プレースホルダをstr.formatで埋める。
+    """Look up a text and fill its placeholders with str.format.
 
     Args:
-        lang: 'en'または'ja'。
-        key: MESSAGESのキー。
-        **kwargs: プレースホルダの値。
+        lang: 'en' or 'ja'.
+        key: A MESSAGES key.
+        **kwargs: Placeholder values.
 
     Returns:
-        言語に応じた文言。
+        The text for the language.
     """
     template = MESSAGES[lang][key]
     return template.format(**kwargs) if kwargs else template
 
 
 def verdict_label(lang: str, verdict: str) -> str:
-    """判定文字列に対応するラベル。未知の判定は「判定不明」／「Unknown」。"""
+    """Label for a verdict string. Unknown verdicts get the "unknown verdict" label."""
     return VERDICT_LABELS[lang].get(verdict, UNKNOWN_VERDICT_LABEL[lang])
 
 
 def state_label(lang: str, state: SlotState) -> str:
-    """スロット状態の文言。"""
+    """Text for a slot state."""
     return text(lang, "state." + state.value)
 
 
 def other_language(lang: str) -> str:
-    """切替先の言語。"""
+    """The language to switch to."""
     return "ja" if lang == "en" else "en"
 
 
 def language_button_label(lang: str) -> str:
-    """言語ボタンに描く切替先の名前（英語表示中は「日本語」、日本語表示中は「EN」）。"""
+    """Target language name on the language button (Japanese name while in English, "EN" in ja)."""
     return text(lang, "language_button")
 
 
 def state_file() -> Path:
-    """言語の記録ファイルのパス。$XDG_STATE_HOMEが空でなければそれ、無ければ~/.local/state。"""
+    """Path of the saved-language file: $XDG_STATE_HOME if not empty, else ~/.local/state."""
     xdg = os.environ.get("XDG_STATE_HOME")
     base = Path(xdg) if xdg else Path.home() / ".local" / "state"
     return base / STATE_DIR_NAME / STATE_FILE_NAME
 
 
 def load_saved_language(path: Path) -> str | None:
-    """記録された言語を読む。読めない・不正な値ならNone。"""
+    """Read the saved language. None if unreadable or invalid."""
     try:
         value = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
@@ -157,22 +159,22 @@ def load_saved_language(path: Path) -> str | None:
 
 
 def save_language(path: Path, lang: str) -> str | None:
-    """言語を記録する。
+    """Save the language.
 
     Returns:
-        成功ならNone、失敗なら理由の文字列（例外は出さない）。
+        None on success, or a reason string on failure (never raises).
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(lang + "\n", encoding="utf-8")
     except OSError as exc:
-        # 切り替え先の言語で理由を返す（journalを読む運用者の言語に揃える）。
+        # Return the reason in the target language (matching the operator reading the journal).
         return f"{text(lang, 'language_save_failed', path=path)} ({exc})"
     return None
 
 
 def initial_language(configured: str | None, saved: str | None) -> str:
-    """起動時の言語。優先順は記録→設定→既定（LANGUAGES外の値は無視する）。"""
+    """Startup language. Priority: saved -> config -> default (values outside LANGUAGES ignored)."""
     if saved is not None and saved in LANGUAGES:
         return saved
     if configured is not None and configured in LANGUAGES:

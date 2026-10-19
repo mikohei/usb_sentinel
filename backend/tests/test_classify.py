@@ -1,6 +1,6 @@
-"""判定分類（classify）。
+"""Verdict classification (classify).
 
-マルウェア > Defective > Spec Mismatch > No Defect > Inconclusive の優先順位を確認する。
+Verify the priority order: malware > Defective > Spec Mismatch > No Defect > Inconclusive.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ class TestClassify:
 
         verdict, reasons = classify(result)
 
-        # マルウェアは他の失敗より優先される。
+        # Malware takes priority over other failures.
         assert verdict is Verdict.MALWARE_DETECTED
         assert reasons == ["マルウェアを 1 件検知"]
 
@@ -124,7 +124,7 @@ class TestClassify:
         assert classify(result)[0] is Verdict.INCONCLUSIVE
 
     def test_not_implemented_is_inconclusive(self) -> None:
-        """未実装ステップが残る限り No Defect とは判定しない。"""
+        """Never judge No Defect while unimplemented steps remain."""
         result = self._result(
             StepResult(name="malware", status=StepStatus.PASS),
             StepResult(name="capacity", status=StepStatus.NOT_IMPLEMENTED, summary="未実装"),
@@ -183,7 +183,8 @@ class TestClassifyCounterfeit:
         assert classify(result)[0] is Verdict.MALWARE_DETECTED
 
     def test_advertised_check_alone_is_counterfeit(self) -> None:
-        """容量ステップがSKIPPEDでも非破壊チェックの超過だけで偽装疑いになる。"""
+        """Even with the capacity step SKIPPED, an overrun in the non-destructive check alone
+        means suspected counterfeit."""
         result = _result(
             StepResult(name="malware", status=StepStatus.PASS),
             StepResult(name="capacity", status=StepStatus.SKIPPED, summary="allow_destructive"),

@@ -25,7 +25,7 @@ from usb_sentinel_display.libs.ui.tiles import TEXT_X, TilesView, serial_text, t
 pytestmark = pytest.mark.gui
 
 NOW = 1_750_000_000.0
-# 詳細QRの2枚目が127バイト（v8）になる材料（tests/test_qr_payload.pyのTYPICAL_DETAILと同じ）。
+# Input that makes detail QR page 2 127 bytes (v8) (same as TYPICAL_DETAIL in test_qr_payload).
 DETAIL = ResultDetail(
     elapsed_s=312.5,
     clamav_db_version="27650",
@@ -64,10 +64,10 @@ def summary(
     serial: str = "ABC123456789XYZ",
     detail: ResultDetail | None = None,
 ) -> ResultSummary:
-    """典型ペイロード（109バイト、v7）になる結果要約。"""
+    """Result summary that yields the typical payload (109 bytes, v7)."""
     return ResultSummary(
         dir_name=f"20250601T120000Z-{serial}",
-        path=Path("/tmp/result.json"),  # noqa: S108 -- 読まないダミー
+        path=Path("/tmp/result.json"),  # noqa: S108 -- dummy, never read
         mtime=NOW,
         verdict=verdict,
         serial=serial,
@@ -89,7 +89,7 @@ def disk(kernel: str, port: str, serial: str) -> AttachedDisk:
 
 
 def scene_a_slots() -> list[Slot]:
-    """シーンA相当（異常なし・マルウェア・検査中・結果破損）。"""
+    """Equivalent of scene A (clean, malware, inspecting, corrupt result)."""
     return [
         Slot(
             0, "P1", SlotState.DONE, disk("sda", "1-1.1", "ABC123456789XYZ"), summary(), None, False
@@ -117,7 +117,7 @@ def scene_a_slots() -> list[Slot]:
 
 
 class FakeMonitor:
-    """固定のSnapshotを返す偽Monitor。"""
+    """Fake Monitor that returns a fixed Snapshot."""
 
     def __init__(self, snapshot: Snapshot) -> None:
         self.snapshot = snapshot
@@ -132,13 +132,13 @@ class FakeMonitor:
 
 @pytest.fixture(autouse=True)
 def state_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """言語の記録先をtmp_pathに向け、開発機の実ファイルを読み書きしない。"""
+    """Point the language store at tmp_path so the dev machine's real file is untouched."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     return tmp_path
 
 
 def make_app(monitor: FakeMonitor, language: str = "en") -> App:
-    """windowedでAppを組む。tk.Tk()が作れなければskip。"""
+    """Build App windowed. Skip if tk.Tk() cannot be created."""
     try:
         return App(
             DisplayConfig(
@@ -156,7 +156,7 @@ def make_app(monitor: FakeMonitor, language: str = "en") -> App:
 
 @pytest.fixture
 def root() -> Iterator[tk.Tk]:
-    """tk.Tk()を作る。作れない環境ではskip。"""
+    """Create tk.Tk(). Skip where it cannot be created."""
     try:
         window = tk.Tk()
     except tk.TclError as exc:
@@ -173,7 +173,7 @@ def fonts(root: tk.Tk) -> Fonts:
 
 class TestQrView:
     def test_v7_image_width_is_265(self, root: tk.Tk, fonts: Fonts) -> None:
-        """典型ペイロード（v7）のPhotoImageの幅は設計表の265px。"""
+        """The PhotoImage width for the typical payload (v7) is 265 px per the design table."""
         canvas = tk.Canvas(root, width=320, height=320)
         view = QrView(canvas, fonts, lambda: None)
         view.render(scene_a_slots()[0], "P1", 0, "ja")
@@ -183,7 +183,7 @@ class TestQrView:
         assert image.height() == 265
 
     def test_v8_detail_page_width_is_285(self, root: tk.Tk, fonts: Fonts) -> None:
-        """詳細QRの2枚目（v8）のPhotoImageの幅は設計表の285px。"""
+        """The PhotoImage width for detail QR page 2 (v8) is 285 px per the design table."""
         canvas = tk.Canvas(root, width=320, height=320)
         view = QrView(canvas, fonts, lambda: None)
         slot = Slot(0, "P1", SlotState.DONE, None, summary(detail=DETAIL), None, False)
@@ -206,7 +206,7 @@ class TestTilesView:
     def test_render_all_states(
         self, root: tk.Tk, fonts: Fonts, rows: int, selected: int, lang: str
     ) -> None:
-        """Malware選択中・非選択、fallback、抜去、未接続、2行構成、両言語で例外が出ない。"""
+        """No errors: Malware (un)selected, fallback, removed, empty, 2 lines, both languages."""
         canvas = tk.Canvas(root, width=160, height=320)
         view = TilesView(canvas, fonts, lambda _i: None, lambda _d: None, lambda: None, rows)
         slots = scene_a_slots()
@@ -220,7 +220,7 @@ class TestTilesView:
         view.render(empty, 0, False, 1, NOW, lang)
 
     def test_verdict_labels_fit_tile(self, fonts: Fonts) -> None:
-        """両言語の全判定ラベル（未知値含む）が「P1 」付きでタイル幅（160−8×2）に収まる。"""
+        """All verdict labels (incl. unknown), both langs, fit tile width (160-8x2) with "P1 "."""
         limit = theme.TILE_W - TEXT_X * 2
         for lang in i18n.LANGUAGES:
             labels = [i18n.verdict_label(lang, v) for v in VERDICT_CODES]
@@ -230,7 +230,7 @@ class TestTilesView:
                 assert width <= limit, f"{lang} {label!r} {width}px > {limit}px"
 
     def test_state_labels_fit_tile(self, fonts: Fonts) -> None:
-        """タイトル行に出る状態ラベル（未接続・検査中など）も「P4 」付きでタイル幅に収まる。"""
+        """Title-row state labels (empty, inspecting, etc.) also fit the tile width with "P4 "."""
         limit = theme.TILE_W - TEXT_X * 2
         state_keys = [k for k in i18n.MESSAGES["en"] if k.startswith("state.")]
         for lang in i18n.LANGUAGES:
@@ -240,7 +240,7 @@ class TestTilesView:
                 assert width <= limit, f"{lang} {key} {label!r} {width}px > {limit}px"
 
     def test_serial_text_rules(self) -> None:
-        """シリアル表示の切り詰め規則（設計書1.2）。"""
+        """Serial display truncation rules (design doc 1.2)."""
         long = Slot(0, "P1", SlotState.DONE, disk("sda", "1-1.1", "x"), summary(), None, False)
         assert serial_text(long, 3) == "ABC123456789X…"
         assert serial_text(long, 2) == "ABC1234567…"
@@ -257,7 +257,7 @@ class TestTilesView:
 
 class TestKeys:
     def test_keypad_keys_are_bound(self, root: tk.Tk) -> None:
-        """USBテンキーのキーシンボル（KP_1〜KP_4、KP_Left等）とL、Qも束縛される。"""
+        """USB keypad keysyms (KP_1-KP_4, KP_Left, etc.) and L and Q are also bound."""
 
         class Target:
             def select(self, index: int) -> None: ...
@@ -276,7 +276,7 @@ class TestKeys:
         bound = set(root.bind())
         for name in ("KP_1", "KP_2", "KP_3", "KP_4", "KP_Left", "KP_Right", "KP_Up", "KP_Down"):
             assert f"<Key-{name}>" in bound
-        # Tkは1文字のキーシンボルを「<Key-l>」でなく「l」の形で一覧に出す。
+        # Tk lists one-char keysyms as "l", not "<Key-l>".
         for name in ("l", "L", "q", "Q"):
             assert name in bound
         assert "<Control-Key-q>" not in bound

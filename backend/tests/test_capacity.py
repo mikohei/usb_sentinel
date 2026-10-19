@@ -1,7 +1,8 @@
-"""容量ステップ（CapacityStep）のf3write+f3readモード。
+"""f3write+f3read mode of the capacity step (CapacityStep).
 
-判定の4分岐（PASS / 容量不足 / データ破損 / 検証不足）、合算、.h2w残骸の扱いを確認する。
-ERROR経路とumount失敗はtest_capacity_errors.pyにある。
+Verify the four judgment branches (PASS / short capacity / data corruption / insufficient
+verification), summation, and handling of leftover .h2w files. ERROR paths and umount failures
+are in test_capacity_errors.py.
 """
 
 from __future__ import annotations
@@ -88,7 +89,7 @@ class TestPass:
         ]
 
     def test_exact_threshold_passes(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
-        # 既使用0で検証済み領域がちょうど93%なら合格（境界値）。
+        # With 0 used and exactly 93% verified, it passes (boundary value).
         f3_runner.register(["f3read"], stdout=f3read_output(THRESHOLD_SECTORS))
         stat = make_statvfs(f_blocks=100, f_bfree=100)
 
@@ -130,7 +131,8 @@ class TestFail:
     def test_short_capacity_with_large_lost_ratio_is_counterfeit(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
-        # 偽装品: 8GB相当しか読めず、残りはLOST。消失比率が50%以上なので偽装疑いになる。
+        # Counterfeit: only about 8 GB is readable and the rest is LOST. The loss ratio is 50% or
+        # more, so it is suspected counterfeit.
         f3_runner.register(["f3read"], stdout=f3read_output(15_625_000, lost_sectors=44_000_000))
 
         result = capacity_step().run(ctx)
@@ -171,7 +173,7 @@ class TestNominal:
     def test_pass_details_have_new_keys_and_unchanged_old_values(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
-        """nominal未設定のPASSでは既存キーの値が変わらず、新キーが加わる。"""
+        """On PASS without nominal, existing key values are unchanged and new keys are added."""
         result = capacity_step().run(ctx)
 
         d = result.details
@@ -203,14 +205,14 @@ class TestNominal:
         assert d["threshold_bytes"] == math.ceil(nominal * 0.93)
         assert d["over_threshold_bytes"] == 33_170_000_000
         assert d["advertised_ratio"] == round(32_000_000_000 / nominal, 4)
-        # ratioは従来どおりactual / advertised。
+        # ratio is actual / advertised, as before.
         assert d["ratio"] == round(d["actual_bytes"] / 32_000_000_000, 4)
         assert "公称31.00GB" in result.summary
 
     def test_advertised_over_nominal_is_counterfeit(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
-        # 申告32GBが公称29GBの107%（31.03GB）を超える。
+        # The advertised 32 GB exceeds 107% of the nominal 29 GB (31.03 GB).
         result = capacity_step().run(_with_nominal(ctx, 29_000_000_000))
 
         assert result.status is StepStatus.FAIL
@@ -219,7 +221,7 @@ class TestNominal:
         assert result.summary.startswith("偽装疑い: 申告容量32.00GB > 上限31.03GB")
 
     def test_short_against_nominal(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
-        # 申告32GBだが公称64GBなら、実容量31.2GBは不足。
+        # Advertised 32 GB but nominal 64 GB, so an actual 31.2 GB is short.
         result = capacity_step().run(_with_nominal(ctx, 64_000_000_000))
 
         assert result.status is StepStatus.FAIL

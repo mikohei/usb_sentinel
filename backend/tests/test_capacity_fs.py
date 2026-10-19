@@ -1,7 +1,7 @@
-"""容量ステップのf3パーサとrwマウント（capacity_fs.py）。
+"""f3 parsers and the rw mount of the capacity step (capacity_fs.py).
 
-rwマウントは検体に書き込む唯一のマウントなので、後片付け（.h2w削除→umount）が
-例外経路でも必ず行われることを`runner.calls`で確かめる。
+The rw mount is the only mount that writes to the sample, so verify via `runner.calls`
+that cleanup (delete .h2w, then umount) always happens, even on exception paths.
 """
 
 from __future__ import annotations
@@ -148,7 +148,7 @@ class TestRemoveH2w:
         warnings: list[str] = []
         assert remove_h2w(tmp_path, warnings) == 0
         assert warnings == ["1.h2wを削除できない: Permission denied"]
-        # 「前回の」という警告は呼び出し側の責務なのでここでは出ない。
+        # The "previous run" warning is the caller's responsibility, so it is not emitted here.
         assert not any("前回" in w for w in warnings)
 
 
@@ -212,7 +212,7 @@ class TestRwMounted:
         assert any(c[0] == "umount" for c in runner.calls)
 
     def test_mkdir_failure_does_not_mount(self, ctx: StepContext, runner: FakeRunner) -> None:
-        # mount_root を通常ファイルにして mkdir を失敗させる。
+        # Make mount_root a regular file so that mkdir fails.
         blocker = ctx.config.mount_root.parent / "blocker"
         blocker.write_text("not a directory")
         ctx.config = replace(ctx.config, mount_root=blocker)

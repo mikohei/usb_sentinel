@@ -1,8 +1,8 @@
-"""Appを--windowed相当で起動し、一定時間後にスクリーンショットを撮る（plan.md D16）。
+"""Launch the App in a --windowed style and take a screenshot after a fixed delay (plan.md D16).
 
-使い方: uv run python scripts/dev-screenshot.py --fixtures OUT --scene a|b --select N --out PNG
-systemctlはFakeRunnerで差し替え、sdcのユニットだけactivatingを返す。screencaptureが失敗
-したら各Canvasのpostscriptに落とす。
+Usage: uv run python scripts/dev-screenshot.py --fixtures OUT --scene a|b|c --select N --out PNG
+systemctl is replaced with a fake runner that reports only the sdc unit as activating.
+If screencapture fails, each Canvas is dumped to PostScript instead.
 """
 
 import argparse
@@ -15,20 +15,20 @@ from usb_sentinel_display.libs.config import load_config
 from usb_sentinel_display.libs.ui.app import App, AppOptions
 from usb_sentinel_display.libs.units import SHOW_ARGV, CommandOutput
 
-DEFAULT_FIXTURES = Path("/tmp/usb-sentinel-fixtures")  # noqa: S108 -- 開発機専用の既定入力先
+DEFAULT_FIXTURES = Path("/tmp/usb-sentinel-fixtures")  # noqa: S108 -- default input location, development machines only
 INSPECTING_KERNELS = frozenset({"sdc"})
 WINDOW_POSITION = "+100+100"
 
 
 class ShowRunner:
-    """systemctl showの出力を偽装するRunner。sdcのユニットだけactivating。"""
+    """Runner that fakes the output of systemctl show. Only the sdc unit is activating."""
 
     def __init__(self) -> None:
-        """呼び出し記録を空で始める。"""
+        """Start with an empty call log."""
         self.calls: list[list[str]] = []
 
     def run(self, argv: list[str], *, timeout_s: float) -> CommandOutput:
-        """argvに並んだユニット名ごとにId/ActiveStateのブロックを返す。"""
+        """Return an Id/ActiveState block for each unit name in argv."""
         self.calls.append(list(argv))
         if tuple(argv[: len(SHOW_ARGV)]) != SHOW_ARGV:
             return CommandOutput(1, "", False)
@@ -41,39 +41,45 @@ class ShowRunner:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """コマンドライン引数を解析する。"""
+    """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
     parser.add_argument("--scene", choices=["a", "b", "c"], default="a")
     parser.add_argument("--select", type=int, choices=[1, 2, 3, 4], default=1)
-    parser.add_argument("--out", type=Path, required=True, help="出力PNG")
-    parser.add_argument("--after-ms", type=int, default=12000, help="撮影までの待ち時間")
-    parser.add_argument("--geometry", default=None, help="WxH（省略時480x320）")
-    parser.add_argument("--results-dir", type=Path, default=None, help="結果ルートの上書き")
-    parser.add_argument("--sys-block", type=Path, default=None, help="sys_blockの上書き")
+    parser.add_argument("--out", type=Path, required=True, help="output PNG")
     parser.add_argument(
-        "--unlink", default=None, help="after_ms/2経過時にOUT/sys_block/KERNELのsymlinkを外す"
+        "--after-ms", type=int, default=12000, help="delay before taking the screenshot (ms)"
+    )
+    parser.add_argument("--geometry", default=None, help="WxH (default 480x320)")
+    parser.add_argument("--results-dir", type=Path, default=None, help="override the results root")
+    parser.add_argument("--sys-block", type=Path, default=None, help="override sys_block")
+    parser.add_argument(
+        "--unlink", default=None, help="remove the OUT/sys_block/KERNEL symlink after after_ms/2"
     )
     parser.add_argument(
         "--language",
         choices=["en", "ja"],
         default=None,
-        help="起動時の表示言語（記録は上書きしない）",
+        help="display language at startup (the saved choice is not overwritten)",
     )
     parser.add_argument(
-        "--qr-mode", type=int, choices=[0, 1, 2, 3], default=0, help="0=通常QR、1〜3=詳細QRの枚目"
+        "--qr-mode",
+        type=int,
+        choices=[0, 1, 2, 3],
+        default=0,
+        help="0 = summary QR, 1 to 3 = page of the detail QR",
     )
     return parser.parse_args(argv)
 
 
 def shoot(app: App, out: Path) -> None:
-    """ウィンドウの位置から480x320をscreencaptureで撮り、失敗ならpostscriptに落とす。"""
+    """Capture the 480x320 window with screencapture; on failure dump to PostScript."""
     root = app.root
     root.update_idletasks()
     x, y = root.winfo_rootx(), root.winfo_rooty()
     region = f"{x},{y},{root.winfo_width()},{root.winfo_height()}"
     try:
-        # macOS標準のscreencaptureをPATHから呼ぶ。
+        # Call the macOS screencapture from PATH.
         argv = ["screencapture", "-x", "-R", region, str(out)]  # noqa: S607
         completed = subprocess.run(argv, check=False)
         code = completed.returncode
@@ -94,7 +100,7 @@ def shoot(app: App, out: Path) -> None:
 
 
 def unlink_fixture(fixtures: Path, kernel: str) -> None:
-    """フィクスチャ内の自作symlinkだけを外して抜去を再現する。"""
+    """Remove only the symlink created by the fixtures to simulate unplugging."""
     link = fixtures / "sys_block" / kernel
     if link.is_symlink():
         link.unlink()
@@ -102,7 +108,7 @@ def unlink_fixture(fixtures: Path, kernel: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """エントリポイント。"""
+    """Entry point."""
     args = parse_args(argv)
     config = load_config(args.fixtures / "display.toml")
     config = replace(
@@ -111,17 +117,17 @@ def main(argv: list[str] | None = None) -> int:
         sys_block=args.sys_block or args.fixtures / "sys_block",
     )
     app = App(config, AppOptions(windowed=True, kiosk=False), runner=ShowRunner())
-    # 画面端で切れないよう、ウィンドウの位置を固定する。
+    # Pin the window position so it is not clipped at the screen edge.
     app.root.geometry(f"{args.geometry or '480x320'}{WINDOW_POSITION}")
     if args.language is not None:
-        # 記録ファイルに触らず、この起動だけ言語を固定する。
+        # Fix the language for this launch only, without touching the saved choice.
         app.language = args.language
     app.qr_mode = args.qr_mode
     app.select(args.select - 1)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
     def finish() -> None:
-        """撮影してウィンドウを閉じる（after_ms後に1回呼ばれる）。"""
+        """Take the screenshot and close the window (called once after after_ms)."""
         shoot(app, args.out)
         app.root.destroy()
 

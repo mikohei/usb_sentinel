@@ -1,8 +1,8 @@
-"""速度検証ステップ（fio）。
+"""Speed verification step (fio).
 
-アンマウント状態のブロックデバイスに順次読み取り→順次書き込みを行う。
-破壊的検査であり、orchestratorのゲートを通過したときだけ呼ばれる。
-run()冒頭のis_mounted確認は自衛であり、ゲートの代替ではない。
+Runs a sequential read, then a sequential write, on the unmounted block device. A destructive
+test, called only after passing the orchestrator gate. The is_mounted check at the start of
+run() is self-defense, not a replacement for the gate.
 """
 
 import time
@@ -37,10 +37,10 @@ from .speed_judge import (
     severity_for,
 )
 
-# FioJob・parse_fioはspeed_fio.pyへ移した。既存の参照先として名前を残す。
+# FioJob and parse_fio moved to speed_fio.py. The names are kept here for existing importers.
 __all__ = ["DEFAULT_MONOTONIC", "FioJob", "SpeedStep", "parse_fio"]
 
-# 統合テストからmonkeypatchで差し替えるためのモジュール変数。
+# Module variable that integration tests replace with monkeypatch.
 DEFAULT_MONOTONIC: Callable[[], float] = time.monotonic
 
 _LABELS: dict[Mode, str] = {"read": "読み取り", "write": "書き込み"}
@@ -48,25 +48,27 @@ _LABELS: dict[Mode, str] = {"read": "読み取り", "write": "書き込み"}
 
 class SpeedStep:
     def __init__(self, monotonic: Callable[[], float] | None = None) -> None:
-        """依存を注入する。Noneなら呼び出し時点のモジュール変数を使う。"""
+        """Inject dependencies. If None, the module variable at call time is used."""
         self.monotonic = monotonic or DEFAULT_MONOTONIC
 
     def run(self, ctx: StepContext) -> StepResult:
-        """速度検証を実行する。読み取り（--readonly）→書き込みの順にfioを回し、参照値と比べる。
+        """Run speed verification: fio read (--readonly), then write, compared to references.
 
-        冒頭のis_mounted確認は自衛で、マウントが残っていればfioを起動せずERRORにする。
+        The is_mounted check at the start is self-defense: if a mount remains, fio is not
+        started and the result is ERROR.
 
         Args:
-            ctx: ステップ文脈。
+            ctx: Step context.
 
         Returns:
-            PASS／FAIL／SKIPPED（参照値なし）／ERRORのいずれかを持つステップ結果。
+            Step result with PASS, FAIL, SKIPPED (no reference), or ERROR.
         """
         result = StepResult("speed", StepStatus.ERROR)
         speed = ctx.config.speed
         commands: list[list[str]] = []
         try:
-            # 自衛の確認: 直前の容量ステップがumountに失敗していればfioを起動しない。
+            # Self-defense check: do not start fio if the preceding capacity step failed to
+            # umount.
             if is_mounted(query_block_info(ctx.runner, ctx.device.path)):
                 result.summary = "マウントが残っているためfioを実行しない"
                 return result
@@ -119,7 +121,7 @@ class SpeedStep:
         mode: Mode,
         commands: list[list[str]],
     ) -> FioJob | None:
-        """fioを1回実行する。失敗時はresultをERRORにしてNoneを返す。"""
+        """Run fio once. On failure, leave result as ERROR and return None."""
         run = run_within_budget(ctx, budget, fio_argv(ctx, mode), commands)
         if run is None:
             result.summary = TIMEOUT_SUMMARY
@@ -128,7 +130,7 @@ class SpeedStep:
         result.details[mode] = entry
         if run.timed_out:
             entry["timed_out"] = True
-            # 理由コード（s:timeout）はトップレベルのtimed_outを見る。
+            # The reason code (s:timeout) looks at the top-level timed_out.
             mark_timed_out(result)
             return None
         try:
@@ -162,10 +164,11 @@ class SpeedStep:
         read: FioJob,
         write: FioJob,
     ) -> StepResult:
-        """参照値（公称 > 種別の最低値）と実測を比べてPASS / FAIL / SKIPPEDを決める。
+        """Compare measurements with references (nominal > class minimum) to decide
+        PASS / FAIL / SKIPPED.
 
-        FAILには重大度（実測/基準が50%未満でsevere、それ以外minor）を付ける。
-        参照値が読み・書きとも無ければSKIPPED。
+        A FAIL gets a severity (severe if measured/reference is under 50%, otherwise minor).
+        SKIPPED if there is no reference for either read or write.
         """
         speed = ctx.config.speed
         pass_ratio = speed.pass_ratio

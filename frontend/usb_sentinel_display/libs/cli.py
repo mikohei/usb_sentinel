@@ -8,16 +8,16 @@ from .config import DisplayConfig, default_config_path, load_config
 from .monitor import NOTICE_SYSFS_MISSING, NOTICE_SYSFS_PERMISSION
 from .sysfs import SysfsMissingError, SysfsPermissionError, boot_time, list_usb_disks
 
-# ui/__init__.pyは空なので、i18nのimportでGUIライブラリ（tkinter）は読み込まれない。
+# ui/__init__.py is empty, so importing i18n does not load the GUI library (tkinter).
 from .ui.i18n import text
 from .units import Runner, SubprocessRunner
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """コマンドライン引数の定義を組み立てる。
+    """Build the command-line argument definitions.
 
     Returns:
-        run／calibrateサブコマンドを持つパーサ。
+        A parser with the run and calibrate subcommands.
     """
     parser = argparse.ArgumentParser(
         prog="usb-sentinel-display", description="USB Sentinel表示フロントエンド"
@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _apply_overrides(config: DisplayConfig, args: argparse.Namespace) -> DisplayConfig:
-    """CLIで指定された値で設定を上書きする。"""
+    """Override the config with values given on the CLI."""
     overrides: dict[str, Path] = {}
     if getattr(args, "results_dir", None) is not None:
         overrides["results_dir"] = args.results_dir
@@ -50,20 +50,20 @@ def _apply_overrides(config: DisplayConfig, args: argparse.Namespace) -> Display
 
 
 def calibrate(config: DisplayConfig, interval: float) -> int:
-    """USBを挿すたびに「カーネル名 ポートパス シリアル」を印字する。Ctrl+Cで終わる。
+    """Print "kernel-name port-path serial" each time a USB is inserted. Ends on Ctrl+C.
 
     Args:
-        config: sys_blockを使う。
-        interval: 確認間隔（秒）。
+        config: Uses sys_block.
+        interval: Polling interval (seconds).
 
     Returns:
-        終了コード（常に0）。
+        Exit code (always 0).
     """
     seen: set[tuple[str, str, float]] = set()
     first_seen: dict[str, float] = {}
 
     def fallback_time(kernel_name: str) -> float:
-        """st_mtimeが取れないときの接続時刻。起動時刻、無ければ初見時刻。"""
+        """Connect time when st_mtime is unavailable: boot time, else first-seen time."""
         booted = boot_time()
         return booted if booted is not None else first_seen.setdefault(kernel_name, time.time())
 
@@ -88,13 +88,13 @@ def calibrate(config: DisplayConfig, interval: float) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """エントリポイント。
+    """Entry point.
 
     Args:
-        argv: コマンドライン引数。Noneならsys.argvを使う。
+        argv: Command-line arguments. Uses sys.argv if None.
 
     Returns:
-        終了コード。設定のValueError（TOML構文エラーを含む）と読み込みのOSErrorは1。
+        Exit code. 1 for config ValueError (including TOML syntax errors) and load OSError.
     """
     args = build_parser().parse_args(argv)
     config_path = args.config if args.config is not None else default_config_path()
@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.command == "calibrate":
         return calibrate(config, args.interval)
-    # calibrateがGUIライブラリを読み込まないよう、ui層はrunの分岐内で遅延importする。
+    # Lazily import the ui layer inside the run branch so calibrate does not load the GUI library.
     from .ui.app import AppOptions, run_app
 
     runner: Runner | None = None if args.no_systemctl else SubprocessRunner()

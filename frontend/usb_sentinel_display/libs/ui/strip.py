@@ -1,4 +1,4 @@
-"""情報ストリップ（320x24）の文言を組む純関数。GUIライブラリを読まない。"""
+"""Pure functions that build the info strip (320x24) text. Does not load the GUI library."""
 
 from ..models import Slot, SlotState
 from ..monitor import Snapshot
@@ -12,19 +12,19 @@ STRIP_DIGEST_HEAD = 16
 
 
 def resolution_warning(width: int, height: int) -> tuple[int, int] | None:
-    """480x320でなければ実測の(幅, 高さ)、そうならNone（設計書1.1）。文章化は呼び出し側。"""
+    """Measured (width, height) if not 480x320, else None (design doc 1.1). Caller writes text."""
     if (width, height) == (SCREEN_W, SCREEN_H):
         return None
     return (width, height)
 
 
 def _slot_label(slot: Slot, lang: str) -> str:
-    """ポート名。対応付け不能なら「P?」。"""
+    """Port name, or "P?" if it cannot be mapped."""
     return text(lang, "fallback_label") if slot.fallback else slot.label
 
 
 def normal_strip_text(slot: Slot, lang: str) -> str:
-    """通常QR表示中の文言。結果があればシリアル先頭とダイジェスト先頭16桁。"""
+    """Text during normal QR. With a result: serial prefix and first 16 digest chars."""
     label = _slot_label(slot, lang)
     result = slot.result
     if result is None:
@@ -36,7 +36,7 @@ def normal_strip_text(slot: Slot, lang: str) -> str:
 
 
 def detail_strip_text(slot: Slot, lang: str, page: int) -> str:
-    """詳細QR表示中の文言。モードとページ、◀▶の役割、ダイジェスト先頭12桁。"""
+    """Text during detail QR: mode and page, the arrow keys' role, and first 12 digest chars."""
     label = _slot_label(slot, lang)
     mode = text(lang, "qr_mode_detail", page=page, total=DETAIL_PAGES)
     hint = text(lang, "qr_detail_hint")
@@ -53,17 +53,17 @@ def strip_text(
     lang: str,
     qr_mode: int,
 ) -> str:
-    """情報ストリップの文言を優先順で選ぶ。
+    """Pick the info strip text by priority.
 
-    優先: 解像度警告 > 内部エラー > notice > 「他N台」とjournalctlの案内 > 通常表示。
+    Priority: resolution warning > internal error > notice > "N others" + journalctl hint > normal.
 
     Args:
-        snapshot: 直近のtickの内容。
-        selected: 選択中のスロット番号。
-        unit_template: journalctlの案内に使うユニット名の雛形。
-        resolution: 480x320でない実測値。Noneなら警告なし。
-        lang: 'en'または'ja'。
-        qr_mode: 0が通常QR、1〜3が詳細QRのページ。
+        snapshot: Contents of the latest tick.
+        selected: Index of the selected slot.
+        unit_template: Unit name template used in the journalctl hint.
+        resolution: Measured size if not 480x320. None means no warning.
+        lang: 'en' or 'ja'.
+        qr_mode: 0 for normal QR, 1-3 for detail QR pages.
     """
     if resolution is not None:
         width, height = resolution

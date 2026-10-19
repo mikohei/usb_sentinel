@@ -1,9 +1,9 @@
-"""backendのSQLite索引（inspections.sqlite）の読み取り専用利用（doc/qr-payload.md第8節）。
+"""Read-only use of the backend SQLite index (inspections.sqlite) (doc/qr-payload.md section 8).
 
-result.jsonが正本で、DBは候補を素早く引くための索引に過ぎない。ここではSELECTしか実行せず、
-mode=roのURIとPRAGMA query_only=ONの二重の守りで書き込みを封じる。DBが無い・開けない・
-スキーマ版が新しいときは理由キーを返し、呼び出し側（results.ResultStore）が結果ディレクトリの
-走査にフォールバックする。
+result.json is the source of truth; the DB is only an index for finding candidates fast. Only
+SELECT runs here, and writes are blocked twice: a mode=ro URI and PRAGMA query_only=ON. If the DB
+is missing, cannot be opened, or has a newer schema, a reason key is returned and the caller
+(results.ResultStore) falls back to scanning the result directories.
 """
 
 import sqlite3
@@ -11,15 +11,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-# 読める最大のスキーマ版。backendのschema.SCHEMA_VERSIONと同じ値を手で合わせる。
+# Highest readable schema version. Kept equal to backend schema.SCHEMA_VERSION by hand.
 EXPECTED_SCHEMA_VERSION = 1
 
-# 情報ストリップの通知キー（文章はui/i18n.pyの"notice." + キー）。
+# Info strip notice keys (text is "notice." + key in ui/i18n.py).
 NOTICE_DB_MISSING = "db_missing"
 NOTICE_DB_OPEN_FAILED = "db_open_failed"
 NOTICE_DB_SCHEMA_NEW = "db_schema_new"
 
-# SELECTで読む列（DbRowのフィールド順）。
+# Columns read by SELECT (in DbRow field order).
 QUERY_COLUMNS: tuple[str, ...] = (
     "inspection_id",
     "state",
@@ -29,19 +29,20 @@ QUERY_COLUMNS: tuple[str, ...] = (
     "started_at",
     "result_digest",
 )
-# 列名は上の定数と同じ固定文字列で、外部入力を含まない。値はプレースホルダだけで渡す。
+# Column names are fixed strings like the constants above, with no external input.
+# Values are passed only via placeholders.
 _QUERY_SQL = (
     "SELECT inspection_id, state, serial, kernel_name, port_path, started_at, result_digest"
     " FROM inspections WHERE started_at >= ? ORDER BY started_at"
 )
-# 接続の待ち時間（秒）とbusy_timeout（ミリ秒）。backendの書き込みと重なっても1秒で諦める。
+# Connect wait (seconds) and busy_timeout (ms). Give up after 1 second if a backend write overlaps.
 _CONNECT_TIMEOUT_S = 1.0
 _BUSY_TIMEOUT_MS = 1000
 
 
 @dataclass(frozen=True)
 class DbRow:
-    """inspectionsテーブル1行のうち、結び付けに使う列だけを持つ。"""
+    """Only the columns of one inspections row that are used for binding."""
 
     inspection_id: str
     state: str
@@ -53,7 +54,7 @@ class DbRow:
 
 
 def _row_from_tuple(values: tuple[object, ...]) -> DbRow | None:
-    """SELECTの1行をDbRowにする。列の型が想定と違う行はNone（捨てる）。"""
+    """Turn one SELECT row into a DbRow. Rows with unexpected column types give None (dropped)."""
     if len(values) != len(QUERY_COLUMNS):
         return None
     inspection_id, state, serial, kernel_name, port_path, started_at, result_digest = values
@@ -75,7 +76,7 @@ def _row_from_tuple(values: tuple[object, ...]) -> DbRow | None:
 
 
 class SqliteIndex:
-    """inspections.sqliteを読み取り専用で開き、開始時刻の下限で候補行を引く。"""
+    """Open inspections.sqlite read-only and fetch candidate rows by a start-time lower bound."""
 
     def __init__(
         self,
@@ -85,24 +86,24 @@ class SqliteIndex:
     ) -> None:
         """
         Args:
-            path: inspections.sqliteのパス。
-            connect: 接続を作る関数（テストで差し替える）。sqlite3.connectと同じ引数を受ける。
+            path: Path to inspections.sqlite.
+            connect: Creates the connection (swapped in tests). Takes the sqlite3.connect args.
         """
         self.path = path
         self._connect = connect
 
     def query(self, min_started_at: str) -> tuple[list[DbRow], str | None]:
-        """started_atがmin_started_at以上の行をstarted_at順で返す。
+        """Return rows with started_at >= min_started_at, in started_at order.
 
         Args:
-            min_started_at: ISO 8601（UTC）の下限。文字列比較なのでbackendと同じ形式で渡す。
+            min_started_at: ISO 8601 (UTC) lower bound. Compared as strings; use the backend format.
 
         Returns:
-            (行の一覧、通知キー)。通知キーがNoneでなければ行は空で、呼び出し側は走査に戻る。
+            (rows, notice key). If the notice key is not None, rows is empty and the caller rescans.
         """
         try:
-            # Path.exists()はENOENT等以外のOSError（親ディレクトリに実行権限が無いEACCESなど）を
-            # 再送出するので、tryの中で呼び「開けない」に落とす。
+            # Path.exists() re-raises OSErrors other than ENOENT etc. (e.g. EACCES when the parent
+            # lacks exec permission), so call it inside try and treat it as "cannot open".
             if not self.path.exists():
                 return [], NOTICE_DB_MISSING
             uri = f"{self.path.resolve().as_uri()}?mode=ro"
@@ -116,7 +117,7 @@ class SqliteIndex:
             if version > EXPECTED_SCHEMA_VERSION:
                 return [], NOTICE_DB_SCHEMA_NEW
             if version == 0:
-                # テーブルを作る前のファイル（backendが一度も書いていない）。
+                # A file before the table was created (backend has never written to it).
                 return [], NOTICE_DB_MISSING
             fetched = conn.execute(_QUERY_SQL, (min_started_at,)).fetchall()
         except (sqlite3.Error, OSError, ValueError):

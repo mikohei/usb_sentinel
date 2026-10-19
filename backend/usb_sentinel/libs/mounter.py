@@ -8,16 +8,18 @@ from .steps import StepContext
 
 @contextmanager
 def mounted(ctx: StepContext) -> Generator[list[Path]]:
-    """デバイスの全ファイルシステムを`ro,noexec,nosuid,nodev`でマウントし、抜けるときにumountする。
+    """Mount every filesystem on the device with `ro,noexec,nosuid,nodev`; umount on exit.
 
-    このマウントオプションは安全規則であり外さない。マウント先は`mount_root/<kernel_name>/<n>`。
-    mountまたはumountが失敗するとRuntimeError（CommandResult.check()）を伝える。
+    These mount options are a safety rule and must not be removed. Mount targets are
+    `mount_root/<kernel_name>/<n>`. If mount or umount fails, a RuntimeError
+    (from CommandResult.check()) propagates.
 
     Args:
-        ctx: ステップ文脈。マウント中は`ctx.mountpoints`にマウント先を入れ、抜けるときに空にする。
+        ctx: Step context. While mounted, `ctx.mountpoints` holds the mount targets; it is
+            emptied on exit.
 
     Yields:
-        マウント先のパス一覧（ファイルシステムの順）。
+        List of mount target paths (in filesystem order).
     """
     paths: list[Path] = []
     try:

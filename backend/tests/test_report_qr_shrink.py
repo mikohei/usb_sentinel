@@ -1,4 +1,4 @@
-"""QR v:3の省略順序（設計書第6.3節）。材料はtest_report_v3.pyから借りる。"""
+"""Shrink order of QR v:3 (design doc section 6.3). Fixtures are borrowed from test_report_v3.py."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from usb_sentinel.libs.report.qr import MAX_PAYLOAD_BYTES, build_payload
 
 
 class TestQrTruncationOrder:
-    """設計書第6.3節の省略順序。各段階の後に再計算し、2953バイト以下で止める。"""
+    """Shrink order from design doc section 6.3. Recompute after each stage and stop at 2953
+    bytes or less."""
 
     def _infected(self, count: int) -> InspectionResult:
         detections = [
@@ -32,7 +33,7 @@ class TestQrTruncationOrder:
         return result
 
     def test_signatures_cut_to_three(self) -> None:
-        """段階1: シグネチャ60件→3件で収まり、truncatedが立つ。"""
+        """Stage 1: 60 signatures cut to 3 fit, and truncated is set."""
         text = build_payload(self._infected(60))
         payload = json.loads(text)
 
@@ -40,11 +41,11 @@ class TestQrTruncationOrder:
         assert payload["truncated"] is True
         assert payload["malware_count"] == 60
         assert len(payload["signatures"]) == 3
-        # 段階2には進んでいない。
+        # It did not proceed to stage 2.
         assert payload["reasons"] == ["全ステップ Pass"]
 
     def test_reasons_clipped_to_120_chars(self) -> None:
-        """段階2: 理由3件×600文字→各120文字＋「…」。"""
+        """Stage 2: 3 reasons x 600 chars cut to 120 chars each plus "…"."""
         result = _full_result()
         result.reasons = ["あ" * 600, "い" * 600, "う" * 600]
 
@@ -56,7 +57,7 @@ class TestQrTruncationOrder:
         assert payload["reasons"] == ["あ" * 120 + "…", "い" * 120 + "…", "う" * 120 + "…"]
 
     def test_short_reasons_are_not_clipped(self) -> None:
-        """120文字以下の理由には「…」を付けない。"""
+        """Reasons of 120 chars or less get no "…"."""
         result = self._infected(60)
         result.reasons = ["短い理由", "え" * 600]
 
@@ -66,10 +67,10 @@ class TestQrTruncationOrder:
         assert payload["reasons"][1] == "え" * 120 + "…"
 
     def test_serial_cut_to_128_chars(self) -> None:
-        """段階5: シリアル200文字→128文字。
+        """Stage 5: serial cut from 200 chars to 128 chars.
 
-        シグネチャと理由は空にして段階1〜4を素通りさせ、port_path（省略対象外）で
-        「シリアル128文字ならちょうど上限」になるよう埋める。
+        Leave signatures and reasons empty so stages 1-4 pass through, and pad port_path
+        (not subject to shrinking) so that a 128-char serial lands exactly at the limit.
         """
         base = _full_result(serial="S" * 128)
         base.reasons = []
@@ -89,7 +90,7 @@ class TestQrTruncationOrder:
         assert payload["serial"] == "S" * 128
 
     def test_probe_verdict_line_dropped_last(self) -> None:
-        """段階6: 他を削っても超えるときはcapacity.probe_verdict_lineを落とす。"""
+        """Stage 6: if still over after trimming the rest, drop capacity.probe_verdict_line."""
         result = _full_result()
         result.reasons = []
         capacity = result.step("capacity")
@@ -104,7 +105,7 @@ class TestQrTruncationOrder:
         assert payload["capacity"]["probe_verdict_line"] is None
 
     def test_still_too_large_raises(self) -> None:
-        """段階7: 省略対象外のキーだけで超えるときはValueError。"""
+        """Stage 7: ValueError when the non-shrinkable keys alone exceed the limit."""
         result = _full_result()
         result.device.port_path = "p" * 3000
 

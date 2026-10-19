@@ -1,4 +1,4 @@
-"""`FakeRunner` の挙動。テスト基盤自体が正しく動くことを保証する。"""
+"""Behavior of `FakeRunner`. Ensures the test infrastructure itself works correctly."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from usb_sentinel.libs import CommandNotFoundError, FakeRunner
 
 
 def test_longer_prefix_wins() -> None:
-    """より具体的（長い）prefix の登録が優先される。"""
+    """A more specific (longer) registered prefix takes priority."""
     fake = FakeRunner()
     fake.register(["clamscan"], returncode=1, stdout="scan output")
     fake.register(["clamscan", "--version"], stdout="ClamAV 1.0.3/27200/Mon Feb 12 09:23:12 2024")
@@ -23,7 +23,8 @@ def test_longer_prefix_wins() -> None:
 
 
 def test_later_registration_overrides_same_prefix() -> None:
-    """同じ prefix を再登録すると後の方が勝つ。フィクスチャの既定を上書きするため。"""
+    """Re-registering the same prefix lets the later one win, so fixture defaults can be
+    overridden."""
     fake = FakeRunner()
     fake.register(["lsblk"], stdout="first")
     fake.register(["lsblk"], stdout="second")
@@ -32,7 +33,7 @@ def test_later_registration_overrides_same_prefix() -> None:
 
 
 def test_returns_actual_argv() -> None:
-    """返される CommandResult の argv は実際に呼ばれたものになる。"""
+    """The argv of the returned CommandResult is the one actually called."""
     fake = FakeRunner()
     fake.register(["lsblk"])
 
@@ -41,7 +42,7 @@ def test_returns_actual_argv() -> None:
 
 
 def test_records_calls_in_order() -> None:
-    """呼び出し順序が記録される。オーケストレータの検証に使う。"""
+    """Call order is recorded. Used to verify the orchestrator."""
     fake = FakeRunner()
     fake.register(["mount"])
     fake.register(["umount"])
@@ -53,7 +54,7 @@ def test_records_calls_in_order() -> None:
 
 
 def test_missing_command_raises() -> None:
-    """`missing` に入れたコマンドは which() が None を返し、実行で例外になる。"""
+    """For commands in `missing`, which() returns None and running them raises."""
     fake = FakeRunner(missing={"f3probe"})
     fake.register(["f3probe"])
 
@@ -64,14 +65,14 @@ def test_missing_command_raises() -> None:
 
 
 def test_unregistered_command_raises() -> None:
-    """未登録のコマンドは黙って成功させず、テストを失敗させる。"""
+    """Unregistered commands do not silently succeed; they fail the test."""
     fake = FakeRunner()
     with pytest.raises(AssertionError, match="unregistered"):
         fake.run(["fio", "--version"])
 
 
 def test_check_raises_on_failure() -> None:
-    """`check()` は異常終了で例外を投げる。"""
+    """`check()` raises on abnormal exit."""
     fake = FakeRunner()
     fake.register(["lsblk"], returncode=32, stderr="no such device")
 
@@ -82,7 +83,7 @@ def test_check_raises_on_failure() -> None:
 
 
 def test_timed_out_is_not_ok() -> None:
-    """タイムアウトは returncode に関わらず失敗として扱う。"""
+    """A timeout is treated as failure regardless of returncode."""
     fake = FakeRunner()
     fake.register(["clamscan"], returncode=0, timed_out=True)
 

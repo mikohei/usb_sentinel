@@ -74,7 +74,7 @@ def started(
     mtime: float = 1050.0,
     name: str = "20250601T120000Z-ABC123",
 ) -> ResultRecord:
-    """DB経路だけが作るstarted行のレコード。"""
+    """A started-row record, which only the DB path produces."""
     return ResultRecord(
         name,
         mtime,
@@ -101,33 +101,33 @@ def states(slots: list[Slot]) -> list[SlotState]:
 
 class TestBindResult:
     def test_kernel_name_key(self) -> None:
-        """port_pathが無い結果はkernel_nameで結び付く。"""
+        """A result without port_path is bound by kernel_name."""
         assert bind_result(disk(), [record()]) is not None
 
     def test_older_than_attached_not_bound(self) -> None:
-        """接続時刻より古い結果は拾わない。"""
+        """Results older than the connect time are not picked up."""
         assert bind_result(disk(at=2000.0), [record(mtime=1500.0)]) is None
 
     def test_rebooted_frontend_still_binds(self) -> None:
-        """attached_atが結果より前なら（フロントエンド再起動後でも）結び付く。"""
+        """If attached_at precedes the result, it binds (even after a frontend restart)."""
         assert bind_result(disk(at=900.0), [record(mtime=1500.0)]) is not None
 
     def test_serial_mismatch_binds_by_kernel(self) -> None:
-        """sysfsのserialがABC 123、ディレクトリ名がABC_123でもkernel_nameで結び付く。"""
+        """sysfs serial ABC 123 and directory name ABC_123 still bind via kernel_name."""
         found = bind_result(disk(serial="ABC 123"), [record(serial="ABC_123")])
         assert found is not None
 
     def test_port_path_preferred_over_kernel(self) -> None:
-        """port_path付きの結果はport_pathで結び付き、kernel_nameが違っても採用する。"""
+        """A result with port_path binds by port_path and is used even if kernel_name differs."""
         rec = record(kernel="sdb", port_path="1-1.1")
         assert bind_result(disk(kernel="sda", port="1-1.1"), [rec]) is rec
 
     def test_port_path_mismatch_not_bound(self) -> None:
-        """port_path付きの結果はkernel_nameが同じでもport_pathが違えば採用しない。"""
+        """A result with port_path is rejected if port_path differs, even with same kernel_name."""
         assert bind_result(disk(port="1-1.2"), [record(port_path="1-1.1")]) is None
 
     def test_prefers_matching_serial_then_newest(self) -> None:
-        """複数候補ではディレクトリ名のシリアル一致を優先し、同点なら名前最大。"""
+        """With several candidates, prefer a dir-name serial match; on a tie, the max name."""
         other = record(serial="OTHER", mtime=1200.0, name="20250601T130000Z-OTHER")
         mine_old = record(mtime=1100.0, name="20250601T120000Z-ABC123")
         mine_new = record(mtime=1150.0, name="20250601T120500Z-ABC123")
@@ -151,23 +151,23 @@ class TestBindBroken:
 
 class TestBindStarted:
     def test_kernel_name_when_no_port_path(self) -> None:
-        """port_pathが無いstarted行はkernel_nameで結び付く。"""
+        """A started row without port_path binds by kernel_name."""
         rec = started()
         assert bind_started(disk(), [rec]) is rec
         assert bind_started(disk(kernel="sdb"), [rec]) is None
 
     def test_port_path_mismatch_not_bound(self) -> None:
-        """port_path付きのstarted行はport_pathが違えばkernel_nameが同じでも結び付かない。"""
+        """A started row with port_path does not bind on a port_path mismatch, even same kernel."""
         assert bind_started(disk(port="1-1.2"), [started(port_path="1-1.1")]) is None
         rec = started(kernel="sdz", port_path="1-1.1")
         assert bind_started(disk(port="1-1.1"), [rec]) is rec
 
     def test_requires_mtime_after_attached(self) -> None:
-        """開始時刻が接続時刻より前なら結び付かない。"""
+        """No binding if the start time precedes the connect time."""
         assert bind_started(disk(at=2000.0), [started(mtime=1500.0)]) is None
 
     def test_ignores_non_started_and_picks_newest(self) -> None:
-        """started以外は無視し、複数なら名前最大。"""
+        """Ignore anything but started; with several, take the max name."""
         assert bind_started(disk(), [record(), record(broken=True)]) is None
         old = started(name="20250601T120000Z-ABC123")
         new = started(name="20250601T120500Z-ABC123")

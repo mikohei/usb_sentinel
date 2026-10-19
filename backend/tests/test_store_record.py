@@ -1,6 +1,6 @@
-"""SqliteStoreの開始・完了記録、同時書き込み、ファイルモード。
+"""SqliteStore start and completion records, concurrent writes, and file modes.
 
-材料（db_path、store、_started、_completed、_rows）はtest_store.pyから借りる。
+Fixtures (db_path, store, _started, _completed, _rows) are borrowed from test_store.py.
 """
 
 from __future__ import annotations
@@ -74,7 +74,8 @@ class TestRecord:
         assert row["actual_bytes"] == 30_200_000_000
         assert row["advertised_over"] == 1
         assert row["capacity_kind"] == "counterfeit"
-        # 非破壊チェックの"over_advertised"とステップの理由の順序保持和集合（重複なし）。
+        # Order-preserving union (no duplicates) of the non-destructive check's
+        # "over_advertised" and the step reasons.
         assert json.loads(row["counterfeit_reasons"]) == ["over_advertised", "lost_ratio"]
         assert row["lost_ratio"] == 0.7381
         assert row["probe_verdict_line"] is None
@@ -102,7 +103,8 @@ class TestRecord:
     def test_record_completed_without_started_inserts(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """開始記録が失敗していても完了行は残す（UPDATE影響0行→INSERT）。"""
+        """Keep the completion row even if the start record failed (UPDATE affects 0 rows, then
+        INSERT)."""
         result = _completed(tmp_path)
 
         assert store.record_completed(result, digest(result)) is None
@@ -115,7 +117,7 @@ class TestRecord:
     def test_concurrent_record_started_keeps_both_rows(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """2スレッドが同時に開始記録しても両行が残る（busy_timeoutで待つ）。"""
+        """Both rows remain even if two threads record a start at once (waits via busy_timeout)."""
         results = [_started(tmp_path, f"{INSPECTION_ID}-{i}") for i in range(2)]
         failures: list[str | None] = [None, None]
         barrier = threading.Barrier(2)
@@ -140,7 +142,8 @@ class TestRecord:
 class TestFileMode:
     @POSIX_ONLY
     def test_db_file_mode_is_0660(self, store: SqliteStore, db_path: Path, tmp_path: Path) -> None:
-        """record_started()後の本体はumaskに関係なく0o660（chmod後の値を見る）。"""
+        """After record_started(), the main DB file is 0o660 regardless of umask (checks the value
+        after chmod)."""
         store.record_started(_started(tmp_path))
 
         assert db_path.stat().st_mode & 0o777 == 0o660
@@ -152,7 +155,8 @@ class TestFileMode:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """chmodに失敗しても行は書けているので、記録失敗と区別できる文言を返す。"""
+        """If chmod fails the row is still written, so return a message distinguishable from a
+        recording failure."""
 
         def fail_chmod(self: Path, mode: int) -> None:
             raise PermissionError(1, "Operation not permitted", str(self))
@@ -171,7 +175,7 @@ class TestFileMode:
     def test_sidecars_are_removed_after_close(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """接続を操作ごとに閉じるので、戻った時点で-wal・-shmは無い。"""
+        """The connection is closed after each operation, so no -wal or -shm exists on return."""
         store.record_started(_started(tmp_path))
 
         assert db_path.exists()
@@ -182,7 +186,8 @@ class TestFileMode:
     def test_shm_copies_db_mode_while_another_connection_is_open(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """別接続が開いている間は-shmが残り、本体のモード0o660を写して作られる。"""
+        """While another connection is open, -shm remains and is created copying the main file's
+        mode 0o660."""
         store.record_started(_started(tmp_path))
         other = sqlite3.connect(str(db_path))
         try:

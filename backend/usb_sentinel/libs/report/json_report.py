@@ -6,24 +6,26 @@ from ..models import InspectionResult
 
 
 def to_json(result: InspectionResult) -> str:
-    """result.jsonの本文を作る。キーはソートし、日本語はエスケープせず、末尾に改行を1つ付ける。
+    """Build the body of result.json: sorted keys, non-ASCII unescaped, one trailing newline.
 
     Args:
-        result: 検査結果。
+        result: Inspection result.
 
     Returns:
-        インデント2のJSON文字列。
+        JSON string indented by 2.
     """
     return json.dumps(asdict(result), ensure_ascii=False, sort_keys=True, indent=2) + "\n"
 
 
 def digest(result: InspectionResult) -> str:
-    """to_json()のUTF-8バイト列のSHA-256（小文字hex）。QRとSQLiteがresult.jsonと対応を取るのに使う。
+    """SHA-256 (lowercase hex) of the UTF-8 bytes of to_json().
+
+    The QR code and SQLite use it to link back to result.json.
 
     Args:
-        result: 検査結果。
+        result: Inspection result.
 
     Returns:
-        64文字の16進ダイジェスト。
+        64-character hex digest.
     """
     return hashlib.sha256(to_json(result).encode("utf-8")).hexdigest()

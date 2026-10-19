@@ -22,7 +22,7 @@ class TestParser:
         capsys.readouterr()
 
     def test_run_calls_run_app(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """runはCLI値で上書きした設定とオプション、runnerをrun_appに渡す。"""
+        """run passes the CLI-overridden config, options, and runner to run_app."""
         from usb_sentinel_display.libs.ui import app as app_mod
 
         calls: list[tuple[object, object, object]] = []
@@ -53,7 +53,7 @@ class TestParser:
     def test_run_without_no_systemctl_uses_subprocess_runner(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """--no-systemctlが無ければSubprocessRunnerを渡す。"""
+        """Without --no-systemctl, a SubprocessRunner is passed."""
         from usb_sentinel_display.libs.ui import app as app_mod
 
         seen: list[object] = []
@@ -76,7 +76,7 @@ class TestConfigErrors:
     def test_config_is_directory_returns_one(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """--configにディレクトリを渡すとOSErrorを設定エラーとして1を返す。"""
+        """Passing a directory to --config returns 1, treating the OSError as a config error."""
         assert main(["--config", str(tmp_path), "calibrate"]) == 1
         assert "設定エラー" in capsys.readouterr().err
 
@@ -89,7 +89,7 @@ class TestCalibrate:
         capsys: pytest.CaptureFixture[str],
         tmp_path: Path,
     ) -> None:
-        """初見のディスクを1回だけ印字し、KeyboardInterruptで0を返す。"""
+        """Print each newly seen disk exactly once, and return 0 on KeyboardInterrupt."""
         sleeps: list[float] = []
 
         def fake_sleep(seconds: float) -> None:
@@ -117,7 +117,7 @@ class TestCalibrate:
     def test_missing_sys_block_reports_and_continues(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """sys_blockが無ければ標準エラーに知らせ、ループは続ける。"""
+        """If sys_block is missing, report it on stderr and keep looping."""
 
         def stop(seconds: float) -> None:
             raise KeyboardInterrupt

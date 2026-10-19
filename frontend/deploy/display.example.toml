@@ -1,46 +1,64 @@
-# usb-sentinel-displayの設定例。
+# Example configuration for usb-sentinel-display.
 #
-# 配置先: ~/.config/usb-sentinel/display.toml（`--config`で差し替え可）
-# 記載しなかったキーはfrontend/usb_sentinel_display/libs/config.pyの既定値が使われる。
-# ファイル自体が無い場合も既定値で動作する。
-# 未知のキーや型の違う値があると起動時に設定エラーで止まる（設定ミスを隠さない）。
+# Install to: ~/.config/usb-sentinel/display.toml (override with `--config`)
+# Keys left out fall back to the defaults in
+# frontend/usb_sentinel_display/libs/config.py.
+# The app also runs with defaults when this file does not exist.
+# An unknown key or a value of the wrong type stops startup with a configuration
+# error (mistakes are not hidden).
 
-# backendが結果を書き出すルート。配下の<timestamp>-<serial>/result.jsonだけを読む。
-# 無くても起動し、情報ストリップに「結果ディレクトリが見つからない」を出して毎秒再試行する。
-# 読めないときは「結果ディレクトリを読む権限がない」になる（README「ディスプレイの設置」手順7）。
+# Root directory the backend writes results to. Only <timestamp>-<serial>/result.json
+# below it is read.
+# The app starts without it, shows "results directory not found" in the info strip
+# and retries every second.
+# When it cannot be read, the strip shows "no permission to read the results
+# directory" (see the README, "Display setup", step 7).
 results_dir = "/var/lib/usb-sentinel/results"
 
-# ブロックデバイス一覧を読むsysfsのディレクトリ。開発機では`--sys-block`で偽ツリーに差し替える。
+# sysfs directory that lists the block devices. On a development machine, replace it
+# with a fake tree using `--sys-block`.
 sys_block = "/sys/block"
 
-# 検査ユニット名の雛形。{kernel}にsda〜sddなどのカーネル名が入る。{kernel}が無いと起動しない。
+# Template for the inspection unit name. {kernel} is replaced by a kernel name such
+# as sda to sdd. Startup fails if {kernel} is missing.
 unit_template = "usb-sentinel-docker@{kernel}.service"
 
-# 画面を更新する周期（秒）。0.2〜10の範囲。
+# Screen refresh interval in seconds. Range 0.2 to 10.
 poll_interval_s = 1.0
 
-# USBを抜いた後も判定とQRを表示し続ける時間（分）。1以上の整数。
-# 同じポートに次のUSBを挿した時点でも消える。
+# Minutes to keep showing the verdict and QR code after a USB stick is removed.
+# Integer, 1 or more. It also disappears as soon as the next stick is inserted into
+# the same port.
 retain_minutes = 60
 
-# 日本語フォント。無ければ標準エラーに警告を出してTkの既定フォントで描く。
-# Ubuntuでは`sudo apt-get install -y fonts-noto-cjk`で入る。
+# Font for Japanese text. If it is missing, a warning goes to standard error and the
+# Tk default font is used.
+# On Ubuntu: `sudo apt-get install -y fonts-noto-cjk`.
 font_family = "Noto Sans CJK JP"
-# 起動時の画面の言語。"en"か"ja"。画面の言語ボタン（左下中央）かキーLで切り替えると
-# $XDG_STATE_HOME/usb-sentinel-display/language（無ければ~/.local/state/…）に記録され、
-# 次回からは記録のほうが優先される。
+
+# Language shown at startup: "en" or "ja". When you switch with the language button
+# (bottom left, middle) or the L key, the choice is saved to
+# $XDG_STATE_HOME/usb-sentinel-display/language (or ~/.local/state/... when unset)
+# and the saved choice takes precedence from the next start.
 language = "en"
 
-# backendのSQLite索引。読み取り専用（mode=ro、PRAGMA query_only）で開き、DBには書かない。
-# result.jsonが正本でDBは索引。候補の一覧とstate='started'（検査中）の行だけに使う。
-# 無い・開けない・スキーマ版が新しいときは自動で結果ディレクトリの走査にフォールバックし、
-# 情報ストリップに理由を出す。空文字""で無効化し、走査だけにする（開発機向け）。
+# SQLite index written by the backend. It is opened read-only (mode=ro,
+# PRAGMA query_only) and never written to.
+# result.json is the source of truth; the database is only an index, used for the
+# candidate list and for rows with state='started' (inspection in progress).
+# If it is missing, cannot be opened, or has a newer schema, the app falls back to
+# scanning the results directory and shows the reason in the info strip.
+# An empty string "" disables it so only the scan is used (for development machines).
 sqlite_path = "/var/lib/usb-sentinel/db/inspections.sqlite"
 
-# 物理ポートとsysfsのポートパスの対応表。ファイル中の出現順にタイル1〜4へ入る。
-# 個体ごとにcalibrateで実測して埋める。既定は空で全ポートがP?表示になる。
-# 1つの物理ポートでもUSB 2.0とUSB 3.0でパスが変わるので、両方を列挙する。
-# labelは1〜4文字の印字可能ASCII。labelの重複、別エントリ間のpathsの重複、5件以上は起動エラー。
+# Mapping from physical ports to sysfs port paths. Entries fill tiles 1 to 4 in the
+# order they appear in this file.
+# Measure each unit with `calibrate` and fill it in. It is empty by default, so
+# every port shows as P?.
+# One physical port gets a different path for USB 2.0 and USB 3.0 devices, so list
+# both.
+# label is 1 to 4 printable ASCII characters. Duplicate labels, a path shared by
+# several entries, or 5 or more entries are startup errors.
 #
 # [[ports]]
 # label = "P1"

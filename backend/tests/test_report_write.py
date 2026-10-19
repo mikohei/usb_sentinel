@@ -1,7 +1,7 @@
-"""結果ファイルの書き出し（write_all）。
+"""Writing result files (write_all).
 
-表示フロントエンドが書き込み途中のresult.jsonを読まないよう、
-一時ファイル＋os.replaceで置き換えることを検証する。
+Verify that files are replaced via a temp file + os.replace, so the display frontend never
+reads a partially written result.json.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class TestWriteAll:
     def test_replaces_via_tmp_in_same_directory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """3ファイルとも同ディレクトリの.tmpからos.replaceで置き換える。"""
+        """All three files are replaced via os.replace from a .tmp in the same directory."""
         calls: list[tuple[Path, Path]] = []
         original = report_mod.os.replace
 
@@ -67,7 +67,7 @@ class TestWriteAll:
     def test_keeps_old_content_when_replace_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """置き換えに失敗しても旧result.jsonは壊れない。"""
+        """A failed replace does not corrupt the old result.json."""
         target = tmp_path / "result.json"
         target.write_text("old", encoding="utf-8")
 
@@ -82,7 +82,7 @@ class TestWriteAll:
         assert target.read_text(encoding="utf-8") == "old"
 
     def test_json_bytes_match_digest(self, tmp_path: Path) -> None:
-        """result.jsonをそのままハッシュした値がQRのdigestと一致する。"""
+        """The hash of result.json as written matches the QR digest."""
         result = _result(_clean_malware_step())
 
         write_all(result, tmp_path, emit_qr=False)

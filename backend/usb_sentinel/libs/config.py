@@ -5,22 +5,22 @@ from pathlib import Path
 
 from .speed_floor import DEVICE_FLOORS
 
-# fioのサイズ表記（例: 512、4k、1M、2G）。
+# fio size notation (e.g. 512, 4k, 1M, 2G).
 BLOCK_SIZE_PATTERN = re.compile(r"[1-9][0-9]*[kKmMgG]?")
 
 
 def _require_number(name: str, value: object) -> float:
-    """boolでない数値であることを確認して返す。
+    """Check that the value is a number other than bool, and return it.
 
     Args:
-        name: エラーメッセージに使う項目名。
-        value: 検証する値。
+        name: Item name used in the error message.
+        value: Value to validate.
 
     Returns:
-        数値としての値。
+        The value as a number.
 
     Raises:
-        ValueError: boolまたは数値以外のとき。
+        ValueError: If the value is a bool or not a number.
     """
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{name} must be a number")
@@ -28,20 +28,20 @@ def _require_number(name: str, value: object) -> float:
 
 
 def _require_ratio(name: str, value: object) -> None:
-    """0 < value <= 1の数値であることを確認する。"""
+    """Check that the value is a number with 0 < value <= 1."""
     number = _require_number(name, value)
     if not 0 < number <= 1:
         raise ValueError(f"{name} must be in (0, 1]")
 
 
 def _require_positive(name: str, value: object) -> None:
-    """正の数値であることを確認する。"""
+    """Check that the value is a positive number."""
     if _require_number(name, value) <= 0:
         raise ValueError(f"{name} must be positive")
 
 
 def _require_positive_int(name: str, value: object) -> None:
-    """boolでない1以上の整数であることを確認する。"""
+    """Check that the value is an integer >= 1 other than bool."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{name} must be an integer >= 1")
 
@@ -51,11 +51,11 @@ class MalwareConfig:
     max_db_age_days: int = 30
     timeout_s: float = 3600
     exclude_patterns: tuple[str, ...] = ()
-    # 定義DBの鮮度超過をERRORにする（真ならスキャンを実行しない）。既定は警告のみ。
+    # Treat a stale definition DB as ERROR (if true, the scan is not run). Default: warn only.
     stale_db_is_error: bool = False
 
     def __post_init__(self) -> None:
-        """設定値の型を検証する。"""
+        """Validate the types of the settings."""
         if not isinstance(self.stale_db_is_error, bool):
             raise ValueError("malware.stale_db_is_error must be a TOML boolean")
 
@@ -65,13 +65,14 @@ class CapacityConfig:
     pass_ratio: float = 0.93
     use_probe: bool = False
     timeout_s: float = 14400
-    # 商品ページの公称容量（バイト、10進表記）。未設定ならlsblkの申告値を分母にする。
+    # Nominal capacity from the product page (bytes, decimal). If unset, the size reported by
+    # lsblk is used as the denominator.
     nominal_bytes: int | None = None
-    # 容量超過の上限比率（公称×over_ratioを超えたら偽装疑い）。
+    # Upper ratio for excess capacity (exceeding nominal x over_ratio suggests counterfeit).
     over_ratio: float = 1.07
 
     def __post_init__(self) -> None:
-        """設定値の範囲を検証する。"""
+        """Validate the ranges of the settings."""
         _require_ratio("capacity.pass_ratio", self.pass_ratio)
         _require_positive("capacity.timeout_s", self.timeout_s)
         if not isinstance(self.use_probe, bool):
@@ -89,14 +90,15 @@ class SpeedConfig:
     duration_s: int = 30
     pass_ratio: float = 0.80
     timeout_s: float = 900
-    # 公称速度（MB/s、10^6バイト/秒）。未設定（None）なら判定しない。
+    # Nominal speeds (MB/s, 10^6 bytes/s). Not judged when unset (None).
     nominal_read_mb_s: float | None = None
     nominal_write_mb_s: float | None = None
-    # デバイス種別（speed_floor.DEVICE_FLOORSのキー）。公称速度が無いときの判定基準に使う。
+    # Device class (a speed_floor.DEVICE_FLOORS key). Used as the reference when no nominal
+    # speed is set.
     device_class: str | None = None
 
     def __post_init__(self) -> None:
-        """設定値の範囲を検証する。"""
+        """Validate the ranges of the settings."""
         if not isinstance(self.block_size, str) or not BLOCK_SIZE_PATTERN.fullmatch(
             self.block_size
         ):
@@ -120,9 +122,10 @@ class Config:
     mount_root: Path = Path("/run/usb-sentinel/mnt")
     allow_destructive: bool = False
     hash_inventory: bool = True
-    # ハッシュ台帳作成の時間上限（秒）。hash_inventoryがboolなのでテーブルにはしない。
+    # Time limit for building the hash inventory (seconds). Not a table because
+    # hash_inventory is a bool.
     hash_inventory_timeout_s: float = 3600.0
-    # SQLite記録先。Noneなら記録しない（TOMLでは "" を指定）。
+    # SQLite destination. None disables recording (set "" in TOML).
     sqlite_path: Path | None = Path("/var/lib/usb-sentinel/db/inspections.sqlite")
     emit_qr: bool = True
     malware: MalwareConfig = field(default_factory=MalwareConfig)
@@ -130,7 +133,7 @@ class Config:
     speed: SpeedConfig = field(default_factory=SpeedConfig)
 
     def __post_init__(self) -> None:
-        """真偽値キーの型と、ハッシュ台帳の時間上限が正であることを確かめる。"""
+        """Check the types of boolean keys and that the hash inventory time limit is positive."""
         for key in ("allow_destructive", "hash_inventory", "emit_qr"):
             if not isinstance(getattr(self, key), bool):
                 raise ValueError(f"{key} must be a TOML boolean")
@@ -138,17 +141,17 @@ class Config:
 
 
 def load_config(path: Path) -> Config:
-    """config.tomlを読んでConfigにする。ファイルが無ければ既定値。
+    """Read config.toml into a Config. Defaults are used when the file does not exist.
 
     Args:
-        path: 設定ファイルのパス（既定は`/etc/usb-sentinel/config.toml`）。
+        path: Path to the config file (default `/etc/usb-sentinel/config.toml`).
 
     Returns:
-        各節（malware／capacity／speed）を対応するdataclassに変換した設定。
+        Config with each section (malware / capacity / speed) converted to its dataclass.
 
     Raises:
-        ValueError: 値の型や範囲が不正なとき（各dataclassの`__post_init__`）。
-        TypeError: 未知のキーがあるとき（dataclassの引数エラー）。
+        ValueError: If a value has an invalid type or range (each dataclass's `__post_init__`).
+        TypeError: If there is an unknown key (dataclass argument error).
     """
     if not path.exists():
         return Config()

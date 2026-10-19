@@ -1,6 +1,7 @@
-"""容量ステップのf3writeモード（ファイルシステムを順にrwマウントしてf3write→f3read）。
+"""f3write mode of the capacity step (rw-mount each filesystem in turn, then f3write -> f3read).
 
-マウントと後片付けはcapacity_fs.rw_mounted()が担い、判定はcapacity.CapacityStepが行う。
+Mounting and cleanup are handled by capacity_fs.rw_mounted(); the judgment is done by
+capacity.CapacityStep.
 """
 
 import os
@@ -39,7 +40,7 @@ _F3WRITE_COMMANDS = ("mount", "umount", "f3write", "f3read")
 
 @dataclass
 class Totals:
-    """ファイルシステム横断の合算値。"""
+    """Totals across filesystems."""
 
     verified_bytes: int = 0
     used_bytes: int = 0
@@ -53,20 +54,20 @@ def run_f3write(
     commands: list[list[str]],
     statvfs: Callable[[str], os.statvfs_result],
 ) -> Totals | None:
-    """f3write+f3readモード。ファイルシステムを順にrwマウントして検証する。
+    """f3write+f3read mode. rw-mount each filesystem in turn and verify it.
 
-    失敗時はresult.summaryを確定させてからNoneを返す。マウントやパーサの例外
-    （MountError、NotWritableError、UnmountError、ValueErrorなど）は呼び出し側に伝える。
+    On failure, result.summary is finalized and None is returned. Mount and parser exceptions
+    (MountError, NotWritableError, UnmountError, ValueError, and so on) propagate to the caller.
 
     Args:
-        ctx: ステップ文脈。
-        result: 書き込み先のステップ結果。
-        budget: 時間予算。
-        commands: 実行したargvの記録先（実行直前に追記する）。
-        statvfs: 使用量の取得に使うos.statvfs互換の関数。
+        ctx: Step context.
+        result: Step result to write to.
+        budget: Time budget.
+        commands: Where run argv values are recorded (appended right before running).
+        statvfs: os.statvfs-compatible function used to get usage.
 
     Returns:
-        全ファイルシステムの合算値。失敗時はNone。
+        Totals across all filesystems. None on failure.
     """
     missing = missing_command(ctx.runner, _F3WRITE_COMMANDS)
     if missing is not None:
@@ -102,11 +103,12 @@ def _inspect_filesystem(
     entry: dict[str, Any],
     statvfs: Callable[[str], os.statvfs_result],
 ) -> F3ReadSummary | None:
-    """マウント中の1ファイルシステムに対してf3write→f3readを行う。
+    """Run f3write -> f3read on one mounted filesystem.
 
-    失敗時はresult.summaryを確定させてからNoneを返す（returnで抜ける経路でも
-    umount失敗時にsuppressed_errorへ退避できるようにする）。parse_f3write()・
-    parse_f3read()のValueErrorはrun()が捕まえる前にrw_mounted()のpendingへ乗る。
+    On failure, result.summary is finalized and None is returned (so that, even on a return
+    path, it can be moved to suppressed_error if umount fails). A ValueError from
+    parse_f3write() or parse_f3read() is placed in rw_mounted()'s pending before run() catches
+    it.
     """
     stale = remove_h2w(target, result.warnings)
     entry["stale_h2w_removed"] = stale

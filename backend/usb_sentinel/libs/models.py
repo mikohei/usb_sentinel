@@ -31,7 +31,7 @@ class DeviceInfo:
     removable: bool = False
     bus: str | None = None
     port_path: str | None = None
-    # USBリンク速度（Mbps）。sysfsから読めなければNone。
+    # USB link speed (Mbps). None if it cannot be read from sysfs.
     link_speed_mbps: int | None = None
 
 
@@ -42,7 +42,7 @@ class StepResult:
     summary: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
-    # ステップの所要時間（秒、小数2桁）。SKIPPEDとして組み立てたものはNone。
+    # Step duration (seconds, 2 decimal places). None for results built as SKIPPED.
     elapsed_s: float | None = None
 
 
@@ -55,15 +55,15 @@ class InspectionResult:
     steps: list[StepResult] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     output_dir: str = ""
-    # 検査全体の所要時間（秒、小数2桁）。finished_at確定時に入る。
+    # Total inspection duration (seconds, 2 decimal places). Set when finished_at is fixed.
     elapsed_s: float | None = None
-    # 機械可読の理由コード（例: "m:found"）。reasonsとは独立に組む。
+    # Machine-readable reason codes (e.g. "m:found"). Built independently of reasons.
     reason_codes: list[str] = field(default_factory=list)
-    # ステップに属さない全体の警告（SQLite記録失敗など）。
+    # Overall warnings not tied to a step (e.g. SQLite recording failure).
     warnings: list[str] = field(default_factory=list)
-    # 申告容量と公称容量の非破壊比較。未実施なら空の辞書。
+    # Non-destructive comparison of reported vs. nominal capacity. Empty dict if not run.
     advertised_check: dict[str, Any] = field(default_factory=dict)
 
     def step(self, name: str) -> StepResult | None:
-        """名前が一致する最初のステップ結果。無ければNone。"""
+        """Return the first step result whose name matches, or None if there is none."""
         return next((step for step in self.steps if step.name == name), None)

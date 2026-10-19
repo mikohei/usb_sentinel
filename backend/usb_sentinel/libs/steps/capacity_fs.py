@@ -1,7 +1,7 @@
-"""容量ステップ（f3writeモード）のrwマウントとf3出力のパーサ。
+"""rw mount and f3 output parsers for the capacity step (f3write mode).
 
-rwマウントは容量検査専用で、`mounter.py`（read-only専用）には持ち込まない。
-オプション`noexec,nosuid,nodev`は外さない。
+The rw mount is only for the capacity test and must not be brought into `mounter.py`
+(read-only only). The `noexec,nosuid,nodev` options must not be removed.
 """
 
 import os
@@ -13,13 +13,13 @@ from pathlib import Path
 
 from . import StepContext
 
-# f3のセクタは512バイト固定。
+# f3 sectors are always 512 bytes.
 SECTOR_BYTES = 512
 
-# f3の速度表記（十進）をMB/sに揃える係数。
+# Factors converting f3 speed notation (decimal) to MB/s.
 SPEED_UNIT_TO_MB = {"Byte": 1e-6, "KB": 1e-3, "MB": 1.0, "GB": 1e3, "TB": 1e6}
 
-# f3writeが作るファイル名。検体の無関係なファイルは消さない。
+# File names created by f3write. Unrelated files on the sample are never deleted.
 H2W_PATTERN = re.compile(r"^\d+\.h2w$")
 
 _SPEED_UNITS = r"(Byte|KB|MB|GB|TB)/s"
@@ -33,24 +33,24 @@ _OVERWRITTEN = re.compile(r"Overwritten: .*\((\d+) sectors\)")
 
 
 class MountpointError(RuntimeError):
-    """マウントポイントの作成（mkdir）または調査（statvfs）に失敗した。"""
+    """Creating (mkdir) or inspecting (statvfs) the mount point failed."""
 
 
 class MountError(RuntimeError):
-    """mount -wが失敗した。メッセージはstderr。umountは呼ばれていない。"""
+    """mount -w failed. The message is stderr. umount has not been called."""
 
 
 class NotWritableError(RuntimeError):
-    """マウントはできたがST_RDONLYが立っている（書き込み可能でマウントできない）。"""
+    """The mount succeeded but ST_RDONLY is set (cannot be mounted writable)."""
 
 
 class UnmountError(RuntimeError):
-    """umountに失敗した。マウントが残っている。"""
+    """umount failed. The mount remains."""
 
 
 @dataclass
 class F3ReadSummary:
-    """f3readのstdoutから取り出した集計。"""
+    """Summary extracted from f3read stdout."""
 
     ok_sectors: int
     lost_sectors: int
@@ -61,7 +61,7 @@ class F3ReadSummary:
 
     @property
     def bad_sectors(self) -> int:
-        """非OKセクタの合計。"""
+        """Total of non-OK sectors."""
         return (
             self.lost_sectors
             + self.corrupted_sectors
@@ -71,7 +71,7 @@ class F3ReadSummary:
 
 
 def _speed_mb_s(pattern: re.Pattern[str], text: str) -> float | None:
-    """速度行を探してMB/sに換算する。行が無ければNone。"""
+    """Find the speed line and convert it to MB/s. None if absent."""
     match = pattern.search(text)
     if match is None:
         return None
@@ -79,21 +79,21 @@ def _speed_mb_s(pattern: re.Pattern[str], text: str) -> float | None:
 
 
 def _optional_sectors(pattern: re.Pattern[str], text: str) -> int:
-    """任意のセクタ数行を取る。無ければ0。"""
+    """Read an optional sector-count line. 0 if absent."""
     match = pattern.search(text)
     return int(match.group(1)) if match else 0
 
 
 def parse_f3write(text: str) -> float | None:
-    """f3writeのstdoutから書き込み速度（MB/s）を取る。速度行が無ければNone。"""
+    """Get the write speed (MB/s) from f3write stdout. None if there is no speed line."""
     return _speed_mb_s(_WRITE_SPEED, text)
 
 
 def parse_f3read(text: str) -> F3ReadSummary:
-    """f3readのstdoutを解析する。
+    """Parse f3read stdout.
 
     Raises:
-        ValueError: `Data OK`行または`Data LOST`行が無いとき。
+        ValueError: If the `Data OK` or `Data LOST` line is missing.
     """
     ok = _DATA_OK.search(text)
     lost = _DATA_LOST.search(text)
@@ -110,10 +110,10 @@ def parse_f3read(text: str) -> F3ReadSummary:
 
 
 def usage(statvfs: Callable[[str], os.statvfs_result], target: Path) -> tuple[int, int]:
-    """マウントポイントの（既使用バイト数, 空きバイト数）を返す。
+    """Return (used bytes, free bytes) of the mount point.
 
     Raises:
-        MountpointError: statvfsがOSErrorを出したとき。
+        MountpointError: If statvfs raises OSError.
     """
     try:
         stat = statvfs(str(target))
@@ -123,10 +123,10 @@ def usage(statvfs: Callable[[str], os.statvfs_result], target: Path) -> tuple[in
 
 
 def remove_h2w(target: Path, warnings: list[str]) -> int:
-    """target直下の<数字>.h2wを削除して件数を返す。
+    """Delete <digits>.h2w directly under target and return the count.
 
-    削除時のOSErrorはwarningsに残して続行する。「前回のファイルを削除した」旨の
-    警告はここでは出さない（呼び出し側の責務）。
+    An OSError while deleting is recorded in warnings and processing continues. The warning
+    that previous files were deleted is not emitted here (the caller's responsibility).
     """
     removed = 0
     try:
@@ -155,12 +155,13 @@ def rw_mounted(
     warnings: list[str],
     commands: list[list[str]],
 ) -> Generator[Path]:
-    """device_pathをrwマウントしてマウントポイントを返す。
+    """rw-mount device_path and yield the mount point.
 
-    warningsとcommandsは呼び出し側（run()）のリストをそのまま受け取り、追記する。
-    commandsにはmount / umountのargvを、runner.run()を呼ぶ直前に記録する。
-    mount成功後は、本体が例外で抜けてもreturnで抜けても、.h2w削除→umountの順で
-    必ず後片付けする。umount失敗はUnmountErrorとして伝え、進行中の例外は__cause__に残す。
+    warnings and commands are the caller's (run()) lists, received as-is and appended to.
+    The mount / umount argv is recorded in commands right before runner.run() is called.
+    After a successful mount, cleanup always runs in the order .h2w deletion -> umount, whether
+    the body exits via an exception or a return. A umount failure propagates as UnmountError,
+    with any in-flight exception kept in __cause__.
     """
     target = ctx.config.mount_root / ctx.device.kernel_name / "rw" / str(index)
     try:
@@ -182,8 +183,8 @@ def rw_mounted(
             raise NotWritableError("書き込み可能でマウントできない")
         yield target
     except BaseException as exc:
-        # contextmanagerはwith本体の例外をyield位置へ送り込む。umount失敗時の連鎖用に保持し、
-        # 必ず再送出するので握りつぶしにはならない。
+        # contextmanager throws the with-body's exception in at the yield. Keep it for chaining
+        # on umount failure; it is always re-raised, so nothing is swallowed.
         pending = exc
         raise
     finally:

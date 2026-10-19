@@ -1,7 +1,7 @@
-"""ハッシュ台帳（hashing.inventory）。
+"""Hash inventory (hashing.inventory).
 
-時間上限・読み取り不能ファイルの継続・台帳自体のダイジェストを検証する。
-`ctx`フィクスチャのマウント先は`tmp_path/mnt/sda1`、出力先は`tmp_path/out`。
+Verify the time limit, continuing past unreadable files, and the digest of the inventory itself.
+The `ctx` fixture mounts at `tmp_path/mnt/sda1` and writes output to `tmp_path/out`.
 """
 
 from __future__ import annotations
@@ -27,14 +27,15 @@ def _mountpoint(ctx: StepContext) -> Path:
 
 @pytest.fixture
 def hctx(ctx: StepContext) -> StepContext:
-    """出力先ディレクトリを作成済みにしたStepContext。"""
+    """StepContext with the output directory already created."""
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     return ctx
 
 
 class TestInventory:
     def test_empty_mountpoint_passes_with_zero_lines(self, hctx: StepContext) -> None:
-        """ファイル0件は正常。0行の台帳を作りPASS（空ドライブでpermittedを偽にしない）。"""
+        """Zero files is normal. Build a 0-line inventory and PASS (an empty drive must not make
+        permitted false)."""
         result = inventory(hctx)
 
         assert result.status is StepStatus.PASS
@@ -66,7 +67,7 @@ class TestInventory:
         assert result.details["bytes_hashed"] == len(b"bravo") + len(b"alpha")
 
     def test_large_file_is_read_in_chunks(self, hctx: StepContext) -> None:
-        """1MiB超のファイルはチャンクで読み、bytes_hashedは実サイズになる。"""
+        """Files over 1 MiB are read in chunks, and bytes_hashed equals the actual size."""
         payload = bytes(range(256)) * ((CHUNK_SIZE // 256) + 3)
         assert len(payload) > CHUNK_SIZE
         (_mountpoint(hctx) / "big.bin").write_bytes(payload)
@@ -79,14 +80,15 @@ class TestInventory:
         assert line.split("\t")[0] == hashlib.sha256(payload).hexdigest()
 
     def test_budget_exceeded_keeps_completed_rows(self, hctx: StepContext) -> None:
-        """時間上限を超えたら途中のファイルは書かず、それまでの行を残してERROR。"""
+        """On exceeding the time limit, skip the in-progress file, keep earlier lines, and
+        ERROR."""
         root = _mountpoint(hctx)
         (root / "a.txt").write_bytes(b"a")
         (root / "b.txt").write_bytes(b"b")
         (root / "c.txt").write_bytes(b"c")
         hctx.config = replace(hctx.config, hash_inventory_timeout_s=10.0)
-        # Budget生成→1ファイル目のループ先頭→チャンク確認→2ファイル目のループ先頭は時間内、
-        # 2ファイル目のチャンク確認で上限超過にする。
+        # Budget creation -> loop start for file 1 -> chunk check -> loop start for file 2 are
+        # within time; the chunk check for file 2 exceeds the limit.
         clock = iter([0.0, 0.0, 0.0, 0.0, 11.0, 11.0])
 
         result = inventory(hctx, monotonic=lambda: next(clock))
@@ -101,13 +103,14 @@ class TestInventory:
         assert '"0/c.txt"' not in text
 
     def test_budget_exceeded_before_first_file_writes_nothing(self, hctx: StepContext) -> None:
-        """0バイトファイルはチャンク確認を通らないので、ループ先頭の予算確認で止める。"""
+        """A 0-byte file never reaches the chunk check, so stop at the budget check at loop
+        start."""
         root = _mountpoint(hctx)
         (root / "a.txt").write_bytes(b"")
         (root / "b.txt").write_bytes(b"")
         (root / "c.txt").write_bytes(b"")
         hctx.config = replace(hctx.config, hash_inventory_timeout_s=10.0)
-        # Budget生成で1回、1ファイル目のループ先頭で1回（ここで上限超過）。
+        # Once at Budget creation, once at loop start for file 1 (the limit is exceeded here).
         clock = iter([0.0, 11.0, 11.0, 11.0, 11.0, 11.0])
 
         result = inventory(hctx, monotonic=lambda: next(clock))
@@ -121,13 +124,14 @@ class TestInventory:
     def test_unreadable_file_is_skipped_and_reported(
         self, hctx: StepContext, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """読めないファイルは飛ばして記録し、他のファイルは台帳に残す。最終状態はERROR。"""
+        """Skip and record unreadable files, keep other files in the inventory. Final state is
+        ERROR."""
         root = _mountpoint(hctx)
         (root / "ok.txt").write_bytes(b"ok")
         (root / "locked.txt").write_bytes(b"secret")
         original_open = Path.open
 
-        def fake_open(self: Path, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 -- Path.openの引き渡し
+        def fake_open(self: Path, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 -- passthrough to Path.open
             if self.name == "locked.txt":
                 raise PermissionError(13, "Permission denied", str(self))
             return original_open(self, *args, **kwargs)
@@ -155,7 +159,8 @@ class TestInventory:
         assert "link.txt" not in _ledger(hctx).read_text()
 
     def test_digest_matches_ledger_file(self, hctx: StepContext) -> None:
-        """details.digestは台帳ファイル自体のSHA-256（改ざん検知の連鎖の起点）。"""
+        """details.digest is the SHA-256 of the inventory file itself (the root of the
+        tamper-detection chain)."""
         root = _mountpoint(hctx)
         (root / "x.txt").write_bytes(b"x")
         (root / "y.txt").write_bytes(b"y")
@@ -172,7 +177,7 @@ class TestInventory:
         assert result.details["timeout_s"] == 123.0
 
     def test_unwritable_output_dir_is_error(self, ctx: StepContext) -> None:
-        """台帳ファイル自体を開けないときは全体ERROR（現行どおり）。"""
+        """If the inventory file itself cannot be opened, the whole step is ERROR (as today)."""
         assert not ctx.output_dir.exists()
 
         result = inventory(ctx)

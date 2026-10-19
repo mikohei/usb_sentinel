@@ -1,4 +1,4 @@
-"""row_from_result()。列の値がresult.json（to_json）の同じ値から来ることを確かめる。"""
+"""row_from_result(). Verify column values come from the same values in result.json (to_json)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from usb_sentinel.libs.store import row_from_result
 
 class TestRowFromResult:
     def test_columns_match_result_json(self, tmp_path: Path) -> None:
-        """列の値はresult.json（to_json）の同じ値から来る。"""
+        """Column values come from the same values in result.json (to_json)."""
         result = _completed(tmp_path)
         payload = json.loads(to_json(result))
         steps = {s["name"]: s for s in payload["steps"]}
@@ -44,7 +44,7 @@ class TestRowFromResult:
         assert row["result_digest"] == digest(result)
 
     def test_missing_steps_and_keys_become_none(self, tmp_path: Path) -> None:
-        """ステップが無い・detailsにキーが無い（ERROR経路）ときはNoneで埋める。"""
+        """Fill with None when a step is missing or details lacks a key (ERROR path)."""
         result = _started(tmp_path)
         result.advertised_check = {}
         result.steps = [StepResult("malware", StepStatus.ERROR, "マウント失敗: x")]

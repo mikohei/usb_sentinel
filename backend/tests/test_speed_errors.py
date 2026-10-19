@@ -1,6 +1,7 @@
-"""速度ステップの異常系（権限、I/Oエラー、解析失敗、タイムアウト、fio不在、マウント残り）。
+"""Error paths of the speed step (permissions, I/O errors, parse failures, timeouts, missing fio,
+leftover mounts).
 
-材料（fio_runner、_step、_with_speed、_fio_calls）はtest_speed.pyから借りる。
+Fixtures (fio_runner, _step, _with_speed, _fio_calls) are borrowed from test_speed.py.
 """
 
 from __future__ import annotations
@@ -43,7 +44,8 @@ class TestErrorPaths:
     def test_read_permission_errno_names_read(
         self, ctx: StepContext, fio_runner: FakeRunner
     ) -> None:
-        # 読み取りfioがEACCESを返したとき、文言は「読み取りが拒否された」になり書き込みは走らない。
+        # When the read fio returns EACCES, the message says the read was denied and the write
+        # does not run.
         fio_runner.register(READ_ARGV, stdout=fio_json("read", error=13))
 
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=90.0))
@@ -104,7 +106,8 @@ class TestErrorPaths:
     def test_timeout_sets_top_level_flag_and_reason_code(
         self, ctx: StepContext, fio_runner: FakeRunner
     ) -> None:
-        """fioのタイムアウトはトップレベルのtimed_outにも立ち、理由コードはs:timeoutになる。"""
+        """A fio timeout also sets the top-level timed_out, and the reason code becomes
+        s:timeout."""
         fio_runner.register(READ_ARGV, returncode=-1, timed_out=True)
 
         result = _step().run(ctx)
@@ -115,7 +118,7 @@ class TestErrorPaths:
         assert reason_codes_for(inspection) == ["s:timeout"]
 
     def test_budget_exhausted_after_read(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
-        # Budget生成→読み取り前→読み取りのtimeout_s→書き込み前（予算切れ）。
+        # Budget creation -> before read -> read timeout_s -> before write (budget exhausted).
         clock = iter([0.0, 0.0, 0.0, 10_000.0, 10_000.0])
 
         result = SpeedStep(monotonic=lambda: next(clock)).run(ctx)

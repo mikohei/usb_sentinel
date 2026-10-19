@@ -1,4 +1,5 @@
-"""result.txtの第2期追加行。材料はtest_report.py／test_report_v3.pyから借りる。"""
+"""Lines added to result.txt in phase 2. Fixtures are borrowed from test_report.py and
+test_report_v3.py."""
 
 from __future__ import annotations
 
@@ -9,7 +10,8 @@ from usb_sentinel.libs import StepStatus, Verdict, render_text
 
 class TestTextV3:
     def test_new_lines_are_shown(self) -> None:
-        """所要時間・リンク速度・申告容量超過・重大度の各行が出る。"""
+        """Lines for elapsed time, link speed, advertised-capacity overrun, and severity
+        appear."""
         result = _full_result()
         result.verdict = Verdict.COUNTERFEIT_SUSPECTED
         result.advertised_check = {
@@ -31,7 +33,8 @@ class TestTextV3:
         assert "  重大度: minor" in text
 
     def test_missing_new_keys_omit_lines_without_keyerror(self) -> None:
-        """ERROR容量ステップ・details空のspeedでもKeyErrorを出さず、該当行を省く。"""
+        """An ERROR capacity step or a speed step with empty details raises no KeyError;
+        the affected lines are omitted."""
         result = _result(_clean_malware_step(), _error_capacity_step(), _skipped_speed_step())
 
         text = render_text(result)
@@ -54,7 +57,8 @@ class TestTextV3:
         assert "警告: 種別未設定のため推定\n" in text
 
     def test_first_three_lines_keep_legacy_format(self) -> None:
-        """判定・デバイス・公称容量の3行が先頭で、形式は変わらない。"""
+        """The verdict, device, and nominal-capacity lines come first, in an unchanged
+        format."""
         lines = render_text(_full_result()).splitlines()
 
         assert lines[:3] == [

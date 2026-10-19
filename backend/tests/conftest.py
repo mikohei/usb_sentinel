@@ -1,7 +1,7 @@
-"""テスト共通のフィクスチャ。
+"""Shared test fixtures.
 
-実機の Linux コマンドは `FakeRunner` で置き換えるため、macOS 開発機でも全テストが
-通る。`FakeRunner.register()` は argv の前置一致で、より長い prefix を優先する。
+Real Linux commands are replaced by `FakeRunner`, so every test passes on a macOS dev
+machine too. `FakeRunner.register()` matches argv by prefix and prefers longer prefixes.
 """
 
 from __future__ import annotations
@@ -16,13 +16,14 @@ import pytest
 from usb_sentinel.libs import Config, DeviceInfo, FakeRunner, StepContext
 from usb_sentinel.libs.steps.capacity import CapacityStep
 
-# clamscan --version の実出力に合わせた形式。
+# Format matching real clamscan --version output.
 CLAMSCAN_VERSION = "ClamAV 1.0.3/27200/Mon Feb 12 09:23:12 2024"
 
-# DB 日付（2024-02-12）に対して十分に近い「現在時刻」。鮮度警告が出ない。
+# A "current time" close enough to the DB date (2024-02-12) that no staleness warning appears.
 FIXED_NOW = "2024-02-20T10:00:00"
 
-# f3write 8.x の stdout（公開ドキュメントの形式。実機確認後に差し替える前提）。
+# stdout of f3write 8.x (format from public docs; to be replaced after checking on real
+# hardware).
 F3WRITE_OK = (
     "F3 write 8.0\n"
     "Copyright (C) 2010 Digirati Internet LTDA.\n"
@@ -35,7 +36,7 @@ F3WRITE_OK = (
     "Average writing speed: 18.20 MB/s\n"
 )
 
-# f3read 8.x の stdout。Data OK は 30.2GB 相当（58984375 セクタ）。
+# stdout of f3read 8.x. Data OK is about 30.2 GB (58984375 sectors).
 F3READ_OK = (
     "F3 read 8.0\n"
     "Copyright (C) 2010 Digirati Internet LTDA.\n"
@@ -53,12 +54,12 @@ F3READ_OK = (
     "Average reading speed: 62.90 MB/s\n"
 )
 
-# f3read の stdout で Data OK のセクタ数だけ差し替えたい場合に使う。
+# Use when only the Data OK sector count in the f3read stdout needs changing.
 F3READ_OK_SECTORS = 58984375
 
 
 def f3read_output(ok_sectors: int, lost_sectors: int = 0, corrupted_sectors: int = 0) -> str:
-    """セクタ数を指定した f3read の stdout を組み立てる。"""
+    """Build f3read stdout with the given sector counts."""
     return (
         f"  Data OK: {ok_sectors * 512 / 1e9:.2f} GB ({ok_sectors} sectors)\n"
         f"Data LOST: {lost_sectors * 512 / 1e9:.2f} GB ({lost_sectors} sectors)\n"
@@ -77,14 +78,14 @@ def fio_json(
     error: int | None = 0,
     prefix: str = "",
 ) -> str:
-    """fio --output-format=json の stdout を組み立てる。
+    """Build fio --output-format=json stdout.
 
     Args:
-        mode: "read" または "write"。
-        bw_bytes: バイト/秒。None なら bw_bytes キーを省く。
-        bw: KiB/秒。bw_bytes が無いときのフォールバック用。
-        error: jobs[0].error。None ならキーを省く。
-        prefix: JSON の前に出る警告行。
+        mode: "read" or "write".
+        bw_bytes: Bytes per second. If None, the bw_bytes key is omitted.
+        bw: KiB per second. Fallback used when bw_bytes is absent.
+        error: jobs[0].error. If None, the key is omitted.
+        prefix: Warning lines printed before the JSON.
     """
     io: dict[str, Any] = {"iops": 81.3, "io_bytes": 2_559_000_000, "runtime": 30001}
     if bw_bytes is not None:
@@ -97,7 +98,7 @@ def fio_json(
     return prefix + json.dumps({"fio version": "fio-3.33", "jobs": [job]})
 
 
-# make_statvfs() の既定値での既使用バイト数（(7_812_500 - 7_568_359) * 4096）。
+# Used bytes with make_statvfs() defaults ((7_812_500 - 7_568_359) * 4096).
 STATVFS_USED_BYTES = 244_141 * 4096
 
 
@@ -109,16 +110,16 @@ def make_statvfs(
     f_bfree: int = 7_568_359,
     f_bavail: int | None = None,
 ) -> os.statvfs_result:
-    """注入用の os.statvfs_result を作る。既定は 32GB 中 1GB 使用。"""
+    """Create an os.statvfs_result for injection. Default: 1 GB used of 32 GB."""
     bavail = f_bfree if f_bavail is None else f_bavail
-    # 並びは f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, f_files, f_ffree, f_favail,
-    # f_flag, f_namemax。
+    # Order: f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, f_files, f_ffree, f_favail,
+    # f_flag, f_namemax.
     return os.statvfs_result((f_frsize, f_frsize, f_blocks, f_bfree, bavail, 0, 0, 0, f_flag, 255))
 
 
 @pytest.fixture
 def device() -> DeviceInfo:
-    """典型的な検査対象 USB メモリ（32GB）。"""
+    """A typical USB flash drive under inspection (32 GB)."""
     return DeviceInfo(
         path="/dev/sda",
         kernel_name="sda",
@@ -133,7 +134,7 @@ def device() -> DeviceInfo:
 
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
-    """テスト用設定。出力先は tmp_path 配下に閉じ込める。"""
+    """Test config. Output is confined under tmp_path."""
     return Config(
         results_dir=tmp_path / "results",
         mount_root=tmp_path / "mnt",
@@ -143,13 +144,13 @@ def config(tmp_path: Path) -> Config:
 
 @pytest.fixture
 def runner() -> FakeRunner:
-    """clamscan --version だけ登録済みの FakeRunner。"""
+    """FakeRunner with only clamscan --version registered."""
     fake = FakeRunner()
     fake.register(["clamscan", "--version"], stdout=CLAMSCAN_VERSION)
     return fake
 
 
-# 容量・速度ステップのテストで使う、未マウントの vfat パーティション 1 つを持つ 32GB ディスク。
+# 32 GB disk with one unmounted vfat partition, used by capacity and speed step tests.
 LSBLK_DISK = {
     "blockdevices": [
         {
@@ -172,7 +173,7 @@ LSBLK_DISK = {
 
 @pytest.fixture
 def f3_runner(runner: FakeRunner) -> FakeRunner:
-    """容量ステップ（f3write モード）が正常 PASS する経路に必要なコマンドを登録した FakeRunner。"""
+    """FakeRunner with the commands needed for the capacity step (f3write mode) to PASS."""
     runner.register(["lsblk"], stdout=json.dumps(LSBLK_DISK))
     runner.register(["mount"])
     runner.register(["umount"])
@@ -182,7 +183,7 @@ def f3_runner(runner: FakeRunner) -> FakeRunner:
 
 
 def capacity_step(stat: os.statvfs_result | None = None) -> CapacityStep:
-    """statvfs と monotonic を固定した CapacityStep。"""
+    """CapacityStep with statvfs and monotonic fixed."""
     return CapacityStep(statvfs=lambda _p: stat or make_statvfs(), monotonic=lambda: 0.0)
 
 
@@ -193,7 +194,7 @@ def ctx(
     device: DeviceInfo,
     tmp_path: Path,
 ) -> StepContext:
-    """マウント済みパーティション 1 つを持つ StepContext。"""
+    """StepContext with one mounted partition."""
     mountpoint = tmp_path / "mnt" / "sda1"
     mountpoint.mkdir(parents=True, exist_ok=True)
     return StepContext(

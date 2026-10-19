@@ -1,7 +1,7 @@
-"""設定値の検証（CapacityConfig / SpeedConfig の __post_init__）。
+"""Validation of config values (__post_init__ of CapacityConfig / SpeedConfig).
 
-TOMLの true/false はPythonでは int のサブクラスなので、数値項目に混入しても
-弾かれることを確認する。
+TOML true/false become bool in Python, a subclass of int, so verify they are rejected even
+when they slip into numeric fields.
 """
 
 from __future__ import annotations
@@ -23,26 +23,26 @@ class TestCapacityConfig:
     @pytest.mark.parametrize("ratio", [0, 1.5, True, "0.9"])
     def test_rejects_invalid_pass_ratio(self, ratio: object) -> None:
         with pytest.raises(ValueError, match="capacity.pass_ratio"):
-            CapacityConfig(pass_ratio=ratio)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            CapacityConfig(pass_ratio=ratio)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     @pytest.mark.parametrize("timeout", [0, -1, True])
     def test_rejects_invalid_timeout(self, timeout: object) -> None:
         with pytest.raises(ValueError, match="capacity.timeout_s"):
-            CapacityConfig(timeout_s=timeout)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            CapacityConfig(timeout_s=timeout)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_rejects_string_use_probe(self) -> None:
         with pytest.raises(ValueError, match="use_probe"):
-            CapacityConfig(use_probe="false")  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            CapacityConfig(use_probe="false")  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_boundary_ratio_one_is_accepted(self) -> None:
-        # pass_ratio = 1.0 は「公称容量と同じ」を要求する境界値。
+        # pass_ratio = 1.0 is the boundary value that requires "equal to nominal capacity".
         assert CapacityConfig(pass_ratio=1.0).pass_ratio == 1.0
 
     @pytest.mark.parametrize("nominal", [-1, 0, True, 32.0])
     def test_rejects_invalid_nominal_bytes(self, nominal: object) -> None:
-        """公称容量はboolでない1以上の整数だけ受け付ける。"""
+        """Nominal capacity accepts only non-bool integers of 1 or more."""
         with pytest.raises(ValueError, match="capacity.nominal_bytes"):
-            CapacityConfig(nominal_bytes=nominal)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            CapacityConfig(nominal_bytes=nominal)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_nominal_bytes_defaults_to_none(self) -> None:
         assert CapacityConfig().nominal_bytes is None
@@ -50,9 +50,9 @@ class TestCapacityConfig:
 
     @pytest.mark.parametrize("ratio", [1.0, 0.99, 0, True, "1.07"])
     def test_rejects_over_ratio_not_above_one(self, ratio: object) -> None:
-        """容量超過の比率は1.0より大きい数値（既定1.07）。"""
+        """The capacity-overrun ratio is a number greater than 1.0 (default 1.07)."""
         with pytest.raises(ValueError, match="capacity.over_ratio"):
-            CapacityConfig(over_ratio=ratio)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            CapacityConfig(over_ratio=ratio)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_over_ratio_default(self) -> None:
         assert CapacityConfig().over_ratio == 1.07
@@ -61,7 +61,7 @@ class TestCapacityConfig:
 class TestMalwareConfig:
     def test_rejects_string_stale_db_is_error(self) -> None:
         with pytest.raises(ValueError, match="stale_db_is_error"):
-            MalwareConfig(stale_db_is_error="true")  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            MalwareConfig(stale_db_is_error="true")  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_stale_db_is_error_defaults_to_false(self) -> None:
         assert MalwareConfig().stale_db_is_error is False
@@ -71,7 +71,7 @@ class TestSpeedConfig:
     @pytest.mark.parametrize("block_size", ["abc", "0M", "1MB", 1024, ""])
     def test_rejects_invalid_block_size(self, block_size: object) -> None:
         with pytest.raises(ValueError, match="block_size"):
-            SpeedConfig(block_size=block_size)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            SpeedConfig(block_size=block_size)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     @pytest.mark.parametrize("block_size", ["4k", "1M", "512", "2G"])
     def test_accepts_fio_size_notation(self, block_size: str) -> None:
@@ -80,7 +80,7 @@ class TestSpeedConfig:
     @pytest.mark.parametrize("depth", [0, True, 1.5])
     def test_rejects_invalid_queue_depth(self, depth: object) -> None:
         with pytest.raises(ValueError, match="queue_depth"):
-            SpeedConfig(queue_depth=depth)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            SpeedConfig(queue_depth=depth)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_rejects_zero_duration(self) -> None:
         with pytest.raises(ValueError, match="duration_s"):
@@ -89,7 +89,7 @@ class TestSpeedConfig:
     @pytest.mark.parametrize("ratio", [0, 1.5, True])
     def test_rejects_invalid_pass_ratio(self, ratio: object) -> None:
         with pytest.raises(ValueError, match="speed.pass_ratio"):
-            SpeedConfig(pass_ratio=ratio)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            SpeedConfig(pass_ratio=ratio)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_rejects_zero_timeout(self) -> None:
         with pytest.raises(ValueError, match="speed.timeout_s"):
@@ -98,9 +98,9 @@ class TestSpeedConfig:
     @pytest.mark.parametrize("nominal", [0, -5, True])
     def test_rejects_invalid_nominal_speed(self, nominal: object) -> None:
         with pytest.raises(ValueError, match="nominal_read_mb_s"):
-            SpeedConfig(nominal_read_mb_s=nominal)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            SpeedConfig(nominal_read_mb_s=nominal)  # ty: ignore[invalid-argument-type]  intentionally invalid type
         with pytest.raises(ValueError, match="nominal_write_mb_s"):
-            SpeedConfig(nominal_write_mb_s=nominal)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            SpeedConfig(nominal_write_mb_s=nominal)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_nominal_defaults_to_none(self) -> None:
         config = SpeedConfig()
@@ -114,9 +114,9 @@ class TestSpeedConfig:
 
     @pytest.mark.parametrize("device_class", ["usb4_flash", "", 3])
     def test_rejects_unknown_device_class(self, device_class: object) -> None:
-        """種別はspeed_floor.DEVICE_FLOORSのキーに限る。"""
+        """The device kind is limited to keys of speed_floor.DEVICE_FLOORS."""
         with pytest.raises(ValueError, match="speed.device_class"):
-            SpeedConfig(device_class=device_class)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            SpeedConfig(device_class=device_class)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_accepts_known_device_class(self) -> None:
         assert SpeedConfig(device_class="usb3_flash").device_class == "usb3_flash"
@@ -127,7 +127,7 @@ class TestConfig:
     @pytest.mark.parametrize("timeout", [0, -1, True])
     def test_rejects_invalid_hash_inventory_timeout(self, timeout: object) -> None:
         with pytest.raises(ValueError, match="hash_inventory_timeout_s"):
-            Config(hash_inventory_timeout_s=timeout)  # ty: ignore[invalid-argument-type]  不正な型を意図的に渡す
+            Config(hash_inventory_timeout_s=timeout)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_defaults(self) -> None:
         config = Config()
@@ -137,7 +137,7 @@ class TestConfig:
 
 class TestLoadConfig:
     def test_empty_sqlite_path_disables_store(self, tmp_path: Path) -> None:
-        """TOMLで sqlite_path = "" とするとSQLite記録を無効にする（None）。"""
+        """Setting sqlite_path = "" in TOML disables SQLite recording (None)."""
         path = tmp_path / "config.toml"
         path.write_text('sqlite_path = ""\n')
         assert load_config(path).sqlite_path is None

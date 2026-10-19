@@ -1,6 +1,6 @@
-"""App（tkルート、tick結線、キー、QRモード、言語切替）の煙テスト。@pytest.mark.gui。
+"""Smoke tests for App (tk root, tick wiring, keys, QR modes, language switch). @pytest.mark.gui.
 
-FakeMonitor／make_app()／scene_a_slots()はtest_gui_smokeから借りる。
+FakeMonitor, make_app(), and scene_a_slots() are borrowed from test_gui_smoke.
 """
 
 from pathlib import Path
@@ -17,14 +17,14 @@ pytestmark = pytest.mark.gui
 
 @pytest.fixture(autouse=True)
 def state_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """言語の記録先をtmp_pathに向け、開発機の実ファイルを読み書きしない。"""
+    """Point the language store at tmp_path so the dev machine's real file is untouched."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     return tmp_path
 
 
 class TestApp:
     def test_tick_render_and_destroy(self) -> None:
-        """windowedでAppを組み、tick→update→destroyが例外なく終わる。"""
+        """Build App windowed; tick -> update -> destroy finishes without exceptions."""
         monitor = FakeMonitor(Snapshot(scene_a_slots(), 0, None, None, 4))
         app = make_app(monitor)
         try:
@@ -42,7 +42,7 @@ class TestApp:
             app.root.destroy()
 
     def test_step_switches_port_or_page(self) -> None:
-        """通常QRでは◀▶がポート、詳細QRではページ送り（1→2→3→1）でポートは変わらない。"""
+        """Normal QR: arrows change port. Detail QR: they page (1->2->3->1) and the port stays."""
         app = make_app(FakeMonitor(Snapshot(scene_a_slots(), 0, None, None, 4)))
         try:
             app.tick()
@@ -65,7 +65,7 @@ class TestApp:
             app.root.destroy()
 
     def test_right_canvas_tap_toggles_qr_mode(self) -> None:
-        """右キャンバスのタップで通常↔詳細が切り替わり、詳細1〜3の各モードで画像がある。"""
+        """Tapping the right canvas toggles normal/detail; each detail mode 1-3 has an image."""
         slots = scene_a_slots()
         slots[0] = Slot(0, "P1", SlotState.DONE, slots[0].disk, summary(detail=DETAIL), None, False)
         app = make_app(FakeMonitor(Snapshot(slots, 0, None, None, 4)))
@@ -83,7 +83,7 @@ class TestApp:
             app.root.destroy()
 
     def test_language_button_saves_state(self, state_home: Path) -> None:
-        """左キャンバス(80, 290)のクリックで言語がjaになり、XDG_STATE_HOME配下に記録される。"""
+        """Clicking the left canvas at (80, 290) sets ja and saves it under XDG_STATE_HOME."""
         app = make_app(FakeMonitor(Snapshot(scene_a_slots(), 0, None, None, 4)))
         try:
             assert app.language == "en"
@@ -102,7 +102,7 @@ class TestApp:
             app.root.destroy()
 
     def test_saved_language_beats_config(self, state_home: Path) -> None:
-        """記録された言語が設定より優先される。"""
+        """The saved language takes precedence over the config."""
         saved = state_home / "usb-sentinel-display" / "language"
         saved.parent.mkdir(parents=True)
         saved.write_text("en\n", encoding="utf-8")
@@ -115,7 +115,7 @@ class TestApp:
 
 class TestStrip:
     def test_strip_text_priority(self) -> None:
-        """情報ストリップの優先順位（ja）と詳細QR中の文言。"""
+        """Info strip priority order (ja) and the wording while a detail QR is shown."""
         slots = scene_a_slots()
         slots[3] = Slot(3, "P4", SlotState.NO_RESULT, disk("sdd", "1-1.4", "X"), None, None, False)
         template = "usb-sentinel-docker@{kernel}.service"

@@ -5,22 +5,22 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path("~/.config/usb-sentinel/display.toml")
 MAX_PORTS = 4
 MAX_LABEL_LEN = 4
-# 画面の言語。ui/i18n.pyのLANGUAGESと同じ組（config.pyはui/をimportしないので自前で持つ）。
+# Display languages. Same set as LANGUAGES in ui/i18n.py (kept here; config.py doesn't import ui/).
 LANGUAGES: tuple[str, ...] = ("en", "ja")
 
 
 def _require_number(name: str, value: object) -> float:
-    """boolでない数値であることを確認して返す。
+    """Check that the value is a non-bool number and return it.
 
     Args:
-        name: エラーメッセージに使う項目名。
-        value: 検証する値。
+        name: Field name used in error messages.
+        value: Value to check.
 
     Returns:
-        数値としての値。
+        The value as a number.
 
     Raises:
-        ValueError: boolまたは数値以外のとき。
+        ValueError: When it is a bool or not a number.
     """
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{name} must be a number")
@@ -28,7 +28,7 @@ def _require_number(name: str, value: object) -> float:
 
 
 def _require_str(name: str, value: object) -> str:
-    """文字列であることを確認して返す。"""
+    """Check that the value is a str and return it."""
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string")
     return value
@@ -36,13 +36,13 @@ def _require_str(name: str, value: object) -> str:
 
 @dataclass(frozen=True)
 class PortMapping:
-    """物理ポートの表示名と、そのポートに現れるポートパスの一覧。"""
+    """Display name of a physical port and the port paths that appear on it."""
 
     label: str
     paths: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        """labelとpathsの形式を検証する。"""
+        """Validate the format of label and paths."""
         label = _require_str("ports.label", self.label)
         if not 1 <= len(label) <= MAX_LABEL_LEN or not label.isascii() or not label.isprintable():
             raise ValueError("ports.label must be 1-4 printable ASCII characters")
@@ -52,7 +52,7 @@ class PortMapping:
 
 @dataclass(frozen=True)
 class DisplayConfig:
-    """display.tomlの内容（設計書5.2）。"""
+    """Contents of display.toml (design doc 5.2)."""
 
     results_dir: Path = Path("/var/lib/usb-sentinel/results")
     sys_block: Path = Path("/sys/block")
@@ -61,12 +61,12 @@ class DisplayConfig:
     retain_minutes: int = 60
     font_family: str = "Noto Sans CJK JP"
     language: str = "en"
-    # backendのSQLite索引。Noneなら索引を使わず結果ディレクトリだけを走査する（TOMLでは""）。
+    # backend SQLite index. None scans only the result directories, without the index ("" in TOML).
     sqlite_path: Path | None = Path("/var/lib/usb-sentinel/db/inspections.sqlite")
     ports: tuple[PortMapping, ...] = ()
 
     def __post_init__(self) -> None:
-        """型と範囲を検証する。"""
+        """Validate types and ranges."""
         if not isinstance(self.results_dir, Path):
             raise ValueError("results_dir must be a string")
         if not isinstance(self.sys_block, Path):
@@ -104,12 +104,12 @@ class DisplayConfig:
 
 
 def default_config_path() -> Path:
-    """既定の設定ファイルパス（~を展開したもの）を返す。"""
+    """Return the default config file path (with ~ expanded)."""
     return DEFAULT_CONFIG_PATH.expanduser()
 
 
 def _parse_ports(raw: object) -> tuple[PortMapping, ...]:
-    """[[ports]]の配列をPortMappingの組に変換する。"""
+    """Convert the [[ports]] array into a tuple of PortMapping."""
     if not isinstance(raw, list):
         raise ValueError("ports must be an array of tables")
     ports: list[PortMapping] = []
@@ -127,16 +127,16 @@ def _parse_ports(raw: object) -> tuple[PortMapping, ...]:
 
 
 def load_config(path: Path) -> DisplayConfig:
-    """設定ファイルを読む。無ければ既定値を返す。
+    """Read the config file. Return the defaults if it does not exist.
 
     Args:
-        path: display.tomlのパス。
+        path: Path to display.toml.
 
     Returns:
-        検証済みの設定。
+        The validated config.
 
     Raises:
-        ValueError: 型違い、範囲外、未知のキーがあるとき。
+        ValueError: On a wrong type, an out-of-range value, or an unknown key.
     """
     if not path.exists():
         return DisplayConfig()

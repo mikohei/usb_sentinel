@@ -14,11 +14,11 @@ from .models import (
 from .result_file import compact_utc
 from .sysfs import sanitize_text
 
-# バージョン8-M（152バイト）に収めるための上限（設計書2.1）。
+# Limits to fit QR version 8-M (152 bytes) (design doc 2.1).
 MAX_PAYLOAD_BYTES = 150
 SERIAL_LEN = 32
 SHORT_SERIAL_LEN = 16
-# 詳細QR（v:3、doc/qr-payload.md第5節）。3枚固定、ヘッダーのdは12桁。
+# Detail QR (v:3, doc/qr-payload.md section 5). Always 3 pages; header d is 12 chars.
 DETAIL_PAGES = 3
 DETAIL_DIGEST_LEN = 12
 MB = 10**6
@@ -26,26 +26,26 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _ascii_serial(serial: str) -> str:
-    """表示用にサニタイズしたシリアルをASCII化する（非ASCIIは?）。"""
+    """Make the display-sanitized serial ASCII (non-ASCII becomes ?)."""
     return sanitize_text(serial).encode("ascii", "replace").decode("ascii")
 
 
 def _encode(payload: dict[str, object]) -> str:
-    """区切り文字を詰めたASCIIのJSONにする。"""
+    """Serialize to ASCII JSON with compact separators."""
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
 
 
 def build_payload(summary: ResultSummary) -> str:
-    """画面用QRペイロード（v:2、設計書2.2）を作る。
+    """Build the on-screen QR payload (v:2, design doc 2.2).
 
     Args:
-        summary: 結果の要約。
+        summary: Result summary.
 
     Returns:
-        150バイト以下のASCII JSON文字列。
+        ASCII JSON string of 150 bytes or less.
 
     Raises:
-        ValueError: sを16文字に切り、stを落としても150バイトを超えるとき。
+        ValueError: When it exceeds 150 bytes even after cutting s to 16 chars and dropping st.
     """
     serial = _ascii_serial(summary.serial)[:SERIAL_LEN]
     payload: dict[str, object] = {"v": 2, "r": VERDICT_CODES.get(summary.verdict, "?")}
@@ -74,24 +74,24 @@ def build_payload(summary: ResultSummary) -> str:
 
 
 def _mb(value: int | None) -> int | None:
-    """バイトをMB（10^6、切り捨て）にする。Noneは透過。"""
+    """Convert bytes to MB (10^6, truncated). None passes through."""
     return None if value is None else value // MB
 
 
 def _round(value: float | None, digits: int) -> float | None:
-    """小数をdigits桁に丸める。Noneは透過。"""
+    """Round a float to digits places. None passes through."""
     return None if value is None else round(value, digits)
 
 
 def _db_yyyymmdd(db_date: str | None) -> str | None:
-    """ISO 8601の日付（先頭10文字がYYYY-MM-DD）を8桁にする。形式外はNone。"""
+    """Turn an ISO 8601 date (first 10 chars YYYY-MM-DD) into 8 digits. None if malformed."""
     if db_date is None or _DATE_RE.fullmatch(db_date[:10]) is None:
         return None
     return db_date[:10].replace("-", "")
 
 
 def _db_version_int(text: str | None) -> int | None:
-    """ClamAV DBバージョンの文字列を整数にする。整数化できなければNone。"""
+    """Turn a ClamAV DB version string into an int. None if it cannot be converted."""
     if text is None:
         return None
     try:
@@ -101,13 +101,13 @@ def _db_version_int(text: str | None) -> int | None:
 
 
 def _identity(summary: ResultSummary) -> tuple[str, bool]:
-    """QRの`s`に入れる文字列と、それがカーネル名か（`k`を付けるか）を返す。"""
+    """Return the string for the QR `s` and whether it is a kernel name (whether to add `k`)."""
     serial = _ascii_serial(summary.serial)[:SERIAL_LEN]
     return (serial, False) if serial else (summary.kernel_name, True)
 
 
 def _detail_page1(summary: ResultSummary) -> dict[str, object]:
-    """1枚目（同定と判定、doc/qr-payload.md 5.2）の本文。"""
+    """Body of page 1 (identity and verdict, doc/qr-payload.md 5.2)."""
     serial, is_kernel = _identity(summary)
     body: dict[str, object] = {"t": compact_utc(summary.started_at, summary.dir_name), "s": serial}
     if is_kernel:
@@ -121,7 +121,7 @@ def _detail_page1(summary: ResultSummary) -> dict[str, object]:
 
 
 def _detail_page2(summary: ResultSummary) -> dict[str, object]:
-    """2枚目（容量とデバイス、doc/qr-payload.md 5.3）の本文。"""
+    """Body of page 2 (capacity and device, doc/qr-payload.md 5.3)."""
     detail = summary.detail
     kind = detail.capacity_kind
     over = detail.advertised_over
@@ -139,7 +139,7 @@ def _detail_page2(summary: ResultSummary) -> dict[str, object]:
 
 
 def _detail_page3(summary: ResultSummary) -> dict[str, object]:
-    """3枚目（速度とDB、台帳、doc/qr-payload.md 5.4）の本文。"""
+    """Body of page 3 (speed, DB, and ledger, doc/qr-payload.md 5.4)."""
     detail = summary.detail
     return {
         "sr": _round(detail.read_mb_s, 1),
@@ -154,18 +154,18 @@ def _detail_page3(summary: ResultSummary) -> dict[str, object]:
 
 
 def build_detail_page(summary: ResultSummary, page: int) -> str:
-    """詳細QR（v:3）の1枚分のペイロードを作る（doc/qr-payload.md第5節）。
+    """Build the payload for one detail QR (v:3) page (doc/qr-payload.md section 5).
 
     Args:
-        summary: 結果の要約（detailに材料を持つ）。
+        summary: Result summary (its detail holds the inputs).
         page: 1〜3。
 
     Returns:
-        150バイト以下のASCII JSON文字列。値が無い項目はnullで出し、キーは省かない
-        （例外は1枚目の`k`）。
+        ASCII JSON string of 150 bytes or less. Missing values are written as null and keys are
+        never omitted (except `k` on page 1).
 
     Raises:
-        ValueError: pageが1〜3以外、または（1枚目はsを16文字に切っても）150バイトを超えるとき。
+        ValueError: If page is not 1-3, or it exceeds 150 bytes (page 1: even after cutting s).
     """
     if page not in range(1, DETAIL_PAGES + 1):
         raise ValueError(f"detail page out of range: {page}")
@@ -190,5 +190,5 @@ def build_detail_page(summary: ResultSummary, page: int) -> str:
 
 
 def build_detail_pages(summary: ResultSummary) -> list[str]:
-    """詳細QRの3枚をまとめて作る。1枚でも超過すればValueError。"""
+    """Build all 3 detail QR pages. ValueError if any page exceeds the limit."""
     return [build_detail_page(summary, page) for page in range(1, DETAIL_PAGES + 1)]

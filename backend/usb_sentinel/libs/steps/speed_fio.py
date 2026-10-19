@@ -1,6 +1,7 @@
-"""fioのargv組み立てとJSON出力のパーサ。
+"""fio argv construction and JSON output parser.
 
-速度ステップ（speed.py）が使う純関数とデータ型を置く。外部コマンドは呼ばない。
+Holds pure functions and data types used by the speed step (speed.py). No external commands
+are run.
 """
 
 import json
@@ -13,7 +14,7 @@ from .speed_judge import Mode
 
 @dataclass
 class FioJob:
-    """fioのJSON出力jobs[0]から取り出した測定値。"""
+    """Measurements extracted from jobs[0] of fio JSON output."""
 
     error: int
     bw_bytes: int
@@ -23,17 +24,17 @@ class FioJob:
 
     @property
     def mb_s(self) -> float:
-        """帯域をMB/sに換算した値。"""
+        """Bandwidth converted to MB/s."""
         return bytes_to_mb_s(self.bw_bytes)
 
 
 def parse_fio(text: str, mode: Mode) -> FioJob:
-    """fio --output-format=jsonのstdoutを解析する。
+    """Parse stdout of fio --output-format=json.
 
-    stdoutの先頭にfioが警告行を出すことがあるため、最初の`{`以降を解析する。
+    fio may print warning lines at the start of stdout, so parsing starts at the first `{`.
 
     Raises:
-        ValueError: JSON不正、jobsが空、read/writeキーが無いなど。
+        ValueError: Invalid JSON, empty jobs, a missing read/write key, and so on.
     """
     start = text.find("{")
     if start < 0:
@@ -54,14 +55,14 @@ def parse_fio(text: str, mode: Mode) -> FioJob:
 
 
 def fio_argv(ctx: StepContext, mode: Mode) -> list[str]:
-    """fioのargvを組む。値はconfig.speedからだけ埋める。読み取りには--readonlyを付ける。
+    """Build fio argv. Values come only from config.speed. --readonly is added for reads.
 
     Args:
-        ctx: ステップ文脈（config.speedとdevice.pathを使う）。
-        mode: "read"または"write"。
+        ctx: Step context (config.speed and device.path are used).
+        mode: "read" or "write".
 
     Returns:
-        fioのargv（リスト固定。文字列の結合でコマンドを組まない）。
+        fio argv (fixed list; never built by string concatenation).
     """
     speed = ctx.config.speed
     argv = [

@@ -1,42 +1,42 @@
 from .models import ResultDetail
 
-# 容量ステップのkind・lost_ratio・counterfeit_reasonsを読む状態（それ以外ではkindが無い）。
+# Statuses where the capacity step's kind, lost_ratio, counterfeit_reasons are read (else no kind).
 CAPACITY_JUDGED_STATUSES = frozenset({"pass", "fail"})
 
 
 def _int(value: object) -> int | None:
-    """boolでない整数ならそのまま、違えばNone。"""
+    """Return a non-bool int as-is, else None."""
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _float(value: object) -> float | None:
-    """boolでない数値ならfloatに、違えばNone。"""
+    """Return a non-bool number as float, else None."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
 
 
 def _str(value: object) -> str | None:
-    """文字列ならそのまま、違えばNone。"""
+    """Return a str as-is, else None."""
     return value if isinstance(value, str) else None
 
 
 def _str_items(value: object) -> tuple[str, ...] | None:
-    """リストならstr要素だけのタプルに、違えばNone。"""
+    """Return a list as a tuple of its str elements, else None."""
     if not isinstance(value, list):
         return None
     return tuple(item for item in value if isinstance(item, str))
 
 
 def _dict(value: object) -> dict[str, object] | None:
-    """辞書ならキーを文字列化した複製を、違えばNone。"""
+    """Return a dict as a copy with stringified keys, else None."""
     if not isinstance(value, dict):
         return None
     return {str(key): item for key, item in value.items()}
 
 
 def _step(steps: object, name: str) -> dict[str, object] | None:
-    """stepsから名前が一致するステップ辞書を返す。無ければNone。"""
+    """Return the step dict whose name matches from steps, or None."""
     if not isinstance(steps, list):
         return None
     for step in steps:
@@ -46,19 +46,19 @@ def _step(steps: object, name: str) -> dict[str, object] | None:
 
 
 def _details(steps: object, name: str) -> dict[str, object] | None:
-    """該当ステップのdetails辞書。ステップが無い、またはdetailsが辞書でなければNone。"""
+    """The step's details dict. None if there is no step or details is not a dict."""
     step = _step(steps, name)
     return _dict(step.get("details")) if step is not None else None
 
 
 def _status(steps: object, name: str) -> str | None:
-    """該当ステップのstatus文字列。無ければNone。"""
+    """The step's status string, or None."""
     step = _step(steps, name)
     return _str(step.get("status")) if step is not None else None
 
 
 def _db_version(value: object) -> str | None:
-    """ClamAV DBバージョンを文字列にする（backendは文字列だが整数でも受ける）。"""
+    """Turn the ClamAV DB version into a str (backend writes a str, but an int is accepted)."""
     if isinstance(value, str):
         return value
     number = _int(value)
@@ -66,17 +66,17 @@ def _db_version(value: object) -> str | None:
 
 
 def parse_detail(data: dict[str, object]) -> ResultDetail:
-    """result.jsonの内容から詳細QR（v:3）の材料を取り出す。
+    """Extract detail QR (v:3) inputs from the contents of result.json.
 
-    すべての値はisinstanceで型を確かめ、違えばNoneにする。ERROR／SKIPPEDの経路では
-    detailsにキーが無いので.get()で読む。容量のkind・lost_ratio・counterfeit_reasonsは
-    ステップがPASS／FAILのときだけ読み、actual_bytesは状態を問わず読む。
+    Every value is type-checked with isinstance and set to None on mismatch. On the ERROR/SKIPPED
+    paths details has no keys, so read with .get(). The capacity kind, lost_ratio, and
+    counterfeit_reasons are read only when the step is PASS/FAIL; actual_bytes regardless of status.
 
     Args:
-        data: json.loads()したresult.json（dict）。
+        data: result.json after json.loads() (dict).
 
     Returns:
-        取り出した値。無い値はNone、reason_codesは空タプル。
+        The extracted values. Missing values are None; reason_codes is an empty tuple.
     """
     steps = data.get("steps")
     device = _dict(data.get("device")) or {}

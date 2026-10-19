@@ -1,11 +1,11 @@
 [project]
 name = "usb-sentinel"
 version = "0.1.0"
-description = "USB ドライブの自動検査（マルウェア / 容量 / 速度）— Raspberry Pi 4 / Ubuntu 向け"
+description = "Automatic USB drive inspection (malware / capacity / speed) for Raspberry Pi 4 / Ubuntu"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    # QR コード画像の生成。結果をエアギャップ越しに転送するために使う。
+    # QR code image generation, used to carry results across the air gap.
     "qrcode[pil]>=8.0",
 ]
 
@@ -24,7 +24,7 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-# src/ レイアウトではなく backend/ 直下に usb_sentinel/ を置いている。
+# usb_sentinel/ sits directly under backend/ instead of using a src/ layout.
 module-root = ""
 
 [tool.ruff]
@@ -43,28 +43,28 @@ select = [
     "RET",  # flake8-return
     "S",    # flake8-bandit
     "DTZ",  # flake8-datetimez
-    "ANN",  # flake8-annotations（mypy strict の disallow_untyped_defs の代替）
+    "ANN",  # flake8-annotations (replaces mypy strict's disallow_untyped_defs)
 ]
 ignore = [
-    # subprocess の呼び出しは runner.py に集約し、argv をリストで固定している。
+    # subprocess calls are centralised in runner.py and argv is always a fixed list.
     "S603",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# テストでは assert と固定値の利用を許容する。
+# Tests may use assert and hard-coded values.
 "tests/*" = ["S101", "S105", "S106", "DTZ001"]
 
 [tool.ty.rules]
-# mypy strict 相当の検査へ近づけるため、既定で無効なルールを有効にする。
-# デコレータが関数の型を失う場合を検出する（mypy の disallow_untyped_decorators 相当）。
+# Enable rules that are off by default to get close to mypy strict.
+# Detect decorators that lose the function type (like mypy's disallow_untyped_decorators).
 dynamic-function-decorator-return = "error"
-# 型引数のないジェネリクスを検出する（mypy の disallow_any_generics 相当）。
+# Detect generics without type arguments (like mypy's disallow_any_generics).
 missing-type-argument = "error"
-# 条件分岐によって未定義になりうる変数の参照を警告する。
+# Warn about references to variables that may be undefined on some branches.
 possibly-unresolved-reference = "warn"
-# 宣言した戻り値型の部分型でない値を返す return を検出する。
+# Detect a return of a value that is not a subtype of the declared return type.
 unsound-return-statement = "error"
-# 不要になった `# ty: ignore` を警告する（mypy の warn_unused_ignores 相当）。
+# Warn about `# ty: ignore` comments that are no longer needed (like mypy's warn_unused_ignores).
 unused-ignore-comment = "warn"
 
 [tool.pytest.ini_options]

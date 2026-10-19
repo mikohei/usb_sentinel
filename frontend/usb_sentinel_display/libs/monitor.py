@@ -10,8 +10,8 @@ from .results import ResultsMissingError, ResultsPermissionError, ResultStore
 from .sysfs import SysfsMissingError, SysfsPermissionError, boot_time, list_usb_disks
 from .units import Runner, query_unit_states, unit_name
 
-# 情報ストリップの通知キー（文章はui/i18n.pyの"notice." + キー）。SQLite索引の
-# db_missing／db_open_failed／db_schema_newはstore.pyのNOTICE_DB_*で定義し、collect()が返す。
+# Info strip notice keys (text is "notice." + key in ui/i18n.py). The SQLite index's
+# db_missing/db_open_failed/db_schema_new are NOTICE_DB_* in store.py, returned by collect().
 NOTICE_RESULTS_MISSING = "results_missing"
 NOTICE_RESULTS_PERMISSION = "results_permission"
 NOTICE_SYSFS_MISSING = "sysfs_missing"
@@ -20,19 +20,19 @@ NOTICE_SYSFS_PERMISSION = "sysfs_permission"
 
 @dataclass(frozen=True)
 class Snapshot:
-    """1tick分の表示内容。noticeは通知キー、errorは例外クラス名（文章化はGUI層）。"""
+    """Display contents for one tick. notice is a notice key; error is an exception class name."""
 
     slots: list[Slot]
     overflow: int = 0
     notice: str | None = None
     error: str | None = None
     tick_count: int = 0
-    # 同じ例外がrepeat_threshold回続いたか（情報ストリップの文言を変える）。
+    # Whether the same exception repeated repeat_threshold times (changes the info strip text).
     error_repeated: bool = False
 
 
 def _empty_slots(mapper: Mapper) -> list[Slot]:
-    """起動直後の表示に使う未接続スロット。"""
+    """Empty slots shown right after startup."""
     return [
         Slot(
             i,
@@ -48,7 +48,7 @@ def _empty_slots(mapper: Mapper) -> list[Slot]:
 
 
 class Monitor:
-    """tick本体（sysfs列挙→結果列挙→systemctl→mapper）と例外規則（設計書4.1）。"""
+    """Tick body (sysfs -> results -> systemctl -> mapper) and exception rules (design doc 4.1)."""
 
     def __init__(
         self,
@@ -61,16 +61,16 @@ class Monitor:
         now: Callable[[], float] = time.time,
         repeat_threshold: int = 30,
     ) -> None:
-        """依存を注入する。外部に触る関数（sysfs列挙、systemctl、時刻）はすべて差し替えられる。
+        """Inject dependencies. All external calls (sysfs listing, systemctl, time) are swappable.
 
         Args:
-            config: 表示設定（sys_block、unit_templateを使う）。
-            store: 結果の読み込み元。
-            runner: systemctlの実行器。Noneならユニット状態を問い合わせない。
-            mapper: スロットの割り当て。
-            list_disks: sysfsからディスクを列挙する関数。
-            now: 現在時刻（エポック秒）。
-            repeat_threshold: 同じ例外が何回続いたら「繰り返し」とみなすか。
+            config: Display config (uses sys_block and unit_template).
+            store: Source of results.
+            runner: systemctl runner. If None, unit states are not queried.
+            mapper: Slot assignment.
+            list_disks: Function that lists disks from sysfs.
+            now: Current time (epoch seconds).
+            repeat_threshold: How many consecutive identical exceptions count as "repeating".
         """
         self.config = config
         self.store = store
@@ -86,18 +86,18 @@ class Monitor:
         self._tick_count = 0
 
     def _fallback_time(self, kernel_name: str) -> float:
-        """st_mtimeが取れないときの接続時刻。起動時刻、無ければ初見時刻（D9）。"""
+        """Connect time when st_mtime is unavailable: boot time, else first-seen time (D9)."""
         booted = boot_time()
         if booted is not None:
             return booted
         return self._first_seen.setdefault(kernel_name, self.now())
 
     def force_reload(self) -> None:
-        """結果キャッシュを捨て、次のtickで全result.jsonを読み直す（F5）。"""
+        """Drop the result cache and reload every result.json on the next tick (F5)."""
         self.store.reset()
 
     def tick_body(self) -> Snapshot:
-        """1tick分の処理。sysfs／結果ルートの不在・権限はnoticeにし、例外は投げる。"""
+        """One tick. Missing/denied sysfs or results root becomes a notice; other errors raise."""
         notice: str | None = None
         disks: list[AttachedDisk] = []
         try:
@@ -115,7 +115,7 @@ class Monitor:
             notice = notice or NOTICE_RESULTS_MISSING
         except ResultsPermissionError:
             notice = notice or NOTICE_RESULTS_PERMISSION
-        # SQLite索引の不調（store.NOTICE_DB_*）はsysfs・結果ルートの通知より後回し。
+        # SQLite index problems (store.NOTICE_DB_*) rank below the sysfs and results-root notices.
         notice = notice or db_notice
         unit_states: dict[str, str] = {}
         if self.runner is not None and disks:
@@ -127,7 +127,7 @@ class Monitor:
         return Snapshot(slots, overflow, notice, None, self._tick_count)
 
     def tick(self) -> Snapshot:
-        """tick_body()を例外規則で包む。例外時は前回のスロットを保持して返す。"""
+        """Wrap tick_body() in the exception rules. On an exception, return the previous slots."""
         self._tick_count += 1
         try:
             snapshot = self.tick_body()

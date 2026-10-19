@@ -1,7 +1,7 @@
-"""結果ディレクトリ名の解析、時刻の変換、result.jsonの要約（ResultSummary）。
+"""Parse result directory names, convert times, and summarize result.json (ResultSummary).
 
-ファイルシステムの走査とSQLite索引の突き合わせはresults.pyのResultStoreが行う。
-ここに置く関数はファイルを開かず（file_digestを除く）、受け取った値だけで動く純関数である。
+ResultStore in results.py scans the file system and matches it against the SQLite index.
+Functions here open no files (except file_digest); they are pure functions of their inputs.
 """
 
 import hashlib
@@ -13,13 +13,13 @@ from .models import ResultSummary
 from .result_detail import parse_detail
 from .sysfs import sanitize_text
 
-# 結果ディレクトリ名: <timestamp>-<serial>[-<6桁>]。
+# Result directory name: <timestamp>-<serial>[-<6 digits>].
 DIR_NAME_RE = re.compile(r"^(\d{8}T\d{6}Z)-(.+?)(?:-(\d{6}))?$")
 RESULT_FILE = "result.json"
 
 
 def parse_dir_name(name: str) -> tuple[str, str] | None:
-    """結果ディレクトリ名をタイムスタンプとシリアル部分に分ける。形式外ならNone。"""
+    """Split a result directory name into timestamp and serial parts. None if malformed."""
     match = DIR_NAME_RE.match(name)
     if match is None:
         return None
@@ -27,15 +27,15 @@ def parse_dir_name(name: str) -> tuple[str, str] | None:
 
 
 def serial_for_dir(serial: str, kernel: str) -> str:
-    """backendのresult_dir_for()と同じ規則でシリアルをディレクトリ名用に変換する。"""
+    """Convert a serial for directory names by the same rule as backend result_dir_for()."""
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", serial)[:128]
     return safe or f"{kernel}-unknown-serial"
 
 
 def compact_utc(started_at: object, fallback: str) -> str:
-    """ISO 8601の時刻をYYYYmmddTHHMMSSZに直す。失敗したらfallbackの先頭16文字。"""
+    """Turn an ISO 8601 time into YYYYmmddTHHMMSSZ. On failure, the first 16 chars of fallback."""
     try:
-        parsed = datetime.fromisoformat(started_at)  # ty: ignore[invalid-argument-type] -- 型違いはTypeErrorで捕まえる
+        parsed = datetime.fromisoformat(started_at)  # ty: ignore[invalid-argument-type] -- wrong types are caught as TypeError
     except (ValueError, TypeError):
         return fallback[:16]
     if parsed.tzinfo is None:
@@ -44,21 +44,21 @@ def compact_utc(started_at: object, fallback: str) -> str:
 
 
 def iso_utc(ts: float) -> str:
-    """エポック秒をbackendのstarted_atと同じISO 8601（UTC、マイクロ秒付き）にする。"""
+    """Turn epoch seconds into ISO 8601 like backend started_at (UTC, with microseconds)."""
     return datetime.fromtimestamp(ts, UTC).isoformat(timespec="microseconds")
 
 
 def started_at_lower_bound(ts: float) -> str:
-    """索引のstarted_atに文字列比較で渡す下限。秒に切り下げ、マイクロ秒を付けない。
+    """Lower bound passed to the index's started_at string comparison: floored to seconds.
 
-    backendのisoformat()はマイクロ秒0のとき".000000"を省くので、マイクロ秒付きの下限と
-    同じ秒の行が'+' < '.'の比較で落ちる。秒で切り下げれば同じ秒の行はすべて候補に入る。
+    backend isoformat() omits ".000000" when microseconds are 0, so a bound with microseconds
+    drops same-second rows because '+' < '.'. Flooring to seconds keeps all same-second rows.
     """
     return datetime.fromtimestamp(int(ts // 1), UTC).isoformat(timespec="seconds")
 
 
 def epoch_from_iso(text: str) -> float | None:
-    """ISO 8601の時刻をエポック秒にする。tzが無ければUTCとみなす。解釈できなければNone。"""
+    """Turn an ISO 8601 time into epoch seconds. No tz means UTC. None if unparsable."""
     try:
         parsed = datetime.fromisoformat(text)
     except (ValueError, TypeError):
@@ -69,12 +69,12 @@ def epoch_from_iso(text: str) -> float | None:
 
 
 def file_digest(path: Path) -> str:
-    """ファイルのバイト列のSHA-256（小文字hex）。"""
+    """SHA-256 (lowercase hex) of the file bytes."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _malware_count(steps: list[object]) -> int:
-    """malwareステップのdetections要素数。無ければ0。"""
+    """Number of detections in the malware step, or 0."""
     for step in steps:
         if isinstance(step, dict) and step.get("name") == "malware":
             details = step.get("details")
@@ -86,7 +86,7 @@ def _malware_count(steps: list[object]) -> int:
 def parse_summary(
     data: object, *, dir_name: str, path: Path, mtime: float, digest: str
 ) -> ResultSummary | None:
-    """result.jsonの内容から表示用の要約を作る。必須キーが欠けていればNone。"""
+    """Build a display summary from result.json contents. None if a required key is missing."""
     if not isinstance(data, dict):
         return None
     device = data.get("device")

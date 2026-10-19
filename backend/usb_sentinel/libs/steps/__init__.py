@@ -18,5 +18,5 @@ class StepContext:
 
 class Step(Protocol):
     def run(self, ctx: StepContext) -> StepResult:
-        """ステップを1回実行し、status・summary・detailsを埋めたStepResultを返す。"""
+        """Run the step once and return a StepResult with status, summary, and details filled."""
         ...

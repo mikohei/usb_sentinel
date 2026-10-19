@@ -11,28 +11,28 @@ STRIP_TEXT_X = 4
 
 
 class QrView:
-    """右320pxのQRキャンバス（白地）と情報ストリップを描く。タップで通常／詳細を切り替える。"""
+    """Draw the right 320 px QR canvas (white) and the info strip. A tap toggles normal/detail."""
 
     def __init__(self, canvas: tk.Canvas, fonts: Fonts, on_toggle: Callable[[], None]) -> None:
-        """描画先のCanvasとフォントを受け取り、タップで通常／詳細の切替を呼ぶよう束縛する。
+        """Take the target Canvas and fonts, and bind a tap to toggle normal/detail.
 
         Args:
-            canvas: 右側320pxのCanvas。
-            fonts: 解決済みのフォント一式。
-            on_toggle: タップ時に呼ぶ関数（通常QR／詳細QRの切替）。
+            canvas: The right-side 320 px Canvas.
+            fonts: The resolved font set.
+            on_toggle: Function called on tap (toggles normal QR/detail QR).
         """
         self.canvas = canvas
         self.fonts = fonts
-        # PhotoImageはCanvasが参照を持たないので、GCされないよう自身で保持する。
+        # Canvas does not hold a reference to PhotoImage, so keep it here to avoid GC.
         self._image: tk.PhotoImage | None = None
         self._image_key: tuple[str, str, int] | None = None
         canvas.bind("<Button-1>", lambda _e: on_toggle())
 
     def _photo(self, slot: Slot, qr_mode: int) -> tk.PhotoImage | None:
-        """スロットの結果とモードからPhotoImageを作る。同じ結果・同じモードなら前回のものを使う。
+        """Build a PhotoImage from the slot result and mode. Reuse it for the same result and mode.
 
         Raises:
-            ValueError: ペイロードがその枚の上限を超えたとき（他の枚には影響しない）。
+            ValueError: When the payload exceeds that page's limit (other pages are unaffected).
         """
         if slot.result is None:
             return None
@@ -49,13 +49,13 @@ class QrView:
         return self._image
 
     def render(self, slot: Slot | None, strip_text: str, qr_mode: int, lang: str) -> None:
-        """白地にQRを中央に描き、情報ストリップに文言を出す。
+        """Draw the QR centered on white and show the text in the info strip.
 
         Args:
-            slot: 選択中のスロット。Noneか結果が無ければ白地のまま。
-            strip_text: 情報ストリップの文言。
-            qr_mode: 0が通常QR、1〜3が詳細QRのページ。
-            lang: 'en'または'ja'（QR生成失敗の文言に使う）。
+            slot: The selected slot. If None or it has no result, leave it white.
+            strip_text: Info strip text.
+            qr_mode: 0 for normal QR, 1-3 for detail QR pages.
+            lang: 'en' or 'ja' (used for the QR build failure text).
         """
         canvas = self.canvas
         canvas.delete("all")
@@ -90,5 +90,5 @@ class QrView:
 
     @property
     def image(self) -> tk.PhotoImage | None:
-        """現在表示しているQRのPhotoImage（テスト用）。"""
+        """PhotoImage of the QR currently shown (for tests)."""
         return self._image

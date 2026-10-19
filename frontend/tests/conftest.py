@@ -15,7 +15,7 @@ MMC_REL = "devices/platform/emmc2bus/fe340000.mmc/mmc_host/mmc0/mmc0:0001/block/
 
 @dataclass(frozen=True)
 class FakeSysfs:
-    """偽sysfsツリーの主要パス。"""
+    """Main paths of the fake sysfs tree."""
 
     root: Path
     sys_block: Path
@@ -25,9 +25,9 @@ class FakeSysfs:
 
 @pytest.fixture
 def fake_sysfs(tmp_path: Path) -> FakeSysfs:
-    """Raspberry Pi 4相当の偽sysfsツリーをtmp_pathに作る。
+    """Create a fake Raspberry Pi 4-like sysfs tree under tmp_path.
 
-    sdaはusb1バスの1-1.3、sdbはusb2バスの2-1、mmcblk0はUSBでないパスに置く。
+    sda is at 1-1.3 on bus usb1, sdb at 2-1 on bus usb2, and mmcblk0 on a non-USB path.
     """
     root = tmp_path
     for rel in (SDA_REL, SDB_REL, MMC_REL):
@@ -45,16 +45,16 @@ def fake_sysfs(tmp_path: Path) -> FakeSysfs:
 
 
 def make_result(root: Path, name: str, data: dict[str, object] | str, mtime: float) -> Path:
-    """結果ディレクトリとresult.jsonを作り、mtimeを固定する。
+    """Create a result directory and result.json, and pin its mtime.
 
     Args:
-        root: 結果ルート。
-        name: ディレクトリ名（<timestamp>-<serial>）。
-        data: dictならJSONにして書く。strならそのまま書く（切れたJSONの再現用）。
-        mtime: result.jsonに設定するmtime。
+        root: Results root.
+        name: Directory name (<timestamp>-<serial>).
+        data: A dict is written as JSON; a str is written as-is (to reproduce truncated JSON).
+        mtime: mtime to set on result.json.
 
     Returns:
-        作ったディレクトリのパス。
+        Path of the created directory.
     """
     directory = root / name
     directory.mkdir(parents=True, exist_ok=True)
@@ -74,7 +74,7 @@ def sample_result(
     steps: list[dict[str, object]] | None = None,
     started_at: str = "2025-06-01T12:00:00.123456+00:00",
 ) -> dict[str, object]:
-    """backendのresult.json相当の辞書を作る。"""
+    """Build a dict equivalent to the backend's result.json."""
     device: dict[str, object] = {
         "kernel_name": kernel_name,
         "serial": serial,
@@ -107,7 +107,7 @@ def phase2_result(
     verdict: str = "Spec Mismatch",
     port_path: str | None = None,
 ) -> dict[str, object]:
-    """backend第2期形式のresult.json相当の辞書を作る（詳細QRの材料が全部入る）。"""
+    """Build a dict like a backend phase-2 result.json (with all detail-QR inputs)."""
     steps: list[dict[str, object]] = [
         {
             "name": "malware",
@@ -162,7 +162,7 @@ def phase2_result(
 
 
 class FakeRunner:
-    """argvの前置一致で登録した出力を返す偽Runner。"""
+    """Fake Runner that returns outputs registered by argv prefix."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
@@ -176,11 +176,11 @@ class FakeRunner:
         stdout: str = "",
         timed_out: bool = False,
     ) -> None:
-        """argvの前置に対する出力を登録する。"""
+        """Register output for an argv prefix."""
         self.registered[tuple(argv)] = CommandOutput(returncode, stdout, timed_out)
 
     def run(self, argv: list[str], *, timeout_s: float) -> CommandOutput:
-        """登録済みの出力のうち最長一致を返す。未登録ならAssertionError。"""
+        """Return the longest-matching registered output. AssertionError if none is registered."""
         args = tuple(argv)
         self.calls.append(args)
         matches = [key for key in self.registered if args[: len(key)] == key]

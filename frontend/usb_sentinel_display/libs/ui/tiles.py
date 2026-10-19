@@ -17,7 +17,7 @@ from .theme import (
     Fonts,
 )
 
-# シリアル表示の上限（設計書1.2）。
+# Serial display limit (design doc 1.2).
 SERIAL_MAX = 14
 SERIAL_HEAD = 13
 FALLBACK_HEAD = 9
@@ -27,12 +27,12 @@ TEXT_X = 8
 
 
 def local_hhmm(ts: float) -> str:
-    """エポック秒をローカル時刻のHH:MMにする。"""
+    """Turn epoch seconds into local-time HH:MM."""
     return datetime.fromtimestamp(ts, tz=UTC).astimezone().strftime("%H:%M")
 
 
 def finished_hhmm(finished_at: str, fallback_ts: float) -> str:
-    """finished_at（ISO 8601）をHH:MMにする。解析できなければfallback_tsを使う。"""
+    """Turn finished_at (ISO 8601) into HH:MM. Use fallback_ts if unparsable."""
     try:
         parsed = datetime.fromisoformat(finished_at)
     except ValueError:
@@ -43,12 +43,12 @@ def finished_hhmm(finished_at: str, fallback_ts: float) -> str:
 
 
 def truncate(text: str, head: int) -> str:
-    """head文字を超えたらhead文字＋「…」にする。"""
+    """Beyond head chars, return head chars plus an ellipsis."""
     return text if len(text) <= head else text[:head] + "…"
 
 
 def serial_text(slot: Slot, rows: int) -> str:
-    """2行目のシリアル表示。fallbackならカーネル名を添える（設計書1.2）。"""
+    """Serial shown on line 2. With fallback, add the kernel name (design doc 1.2)."""
     serial = ""
     if slot.result is not None:
         serial = slot.result.serial
@@ -64,7 +64,7 @@ def serial_text(slot: Slot, rows: int) -> str:
 
 
 def status_text(slot: Slot, now: float, dots: int, lang: str) -> str:
-    """3行目の状態文言と時刻。検査中は経過分数と「…」×dots。"""
+    """State text and time on line 3. While inspecting, elapsed minutes and dots ellipses."""
     state = slot.state
     if state is SlotState.EMPTY:
         return ""
@@ -81,7 +81,7 @@ def status_text(slot: Slot, now: float, dots: int, lang: str) -> str:
 
 
 def title_text(slot: Slot, lang: str) -> str:
-    """1行目のポート名と判定（判定が無い状態では状態の文言）。"""
+    """Port name and verdict on line 1 (state text when there is no verdict)."""
     label = text(lang, "fallback_label") if slot.fallback else slot.label
     if slot.state in (SlotState.DONE, SlotState.REMOVED) and slot.result is not None:
         return f"{label} {verdict_label(lang, slot.result.verdict)}"
@@ -89,7 +89,7 @@ def title_text(slot: Slot, lang: str) -> str:
 
 
 def tile_color(slot: Slot) -> str:
-    """タイルの背景色。完了は判定色、抜去は判定色を暗くしたもの。"""
+    """Tile background color. Done uses the verdict color; removed a darkened verdict color."""
     if slot.state in (SlotState.DONE, SlotState.REMOVED) and slot.result is not None:
         color = theme.verdict_color(slot.result.verdict)
         return theme.darken(color) if slot.state is SlotState.REMOVED else color
@@ -97,7 +97,7 @@ def tile_color(slot: Slot) -> str:
 
 
 def is_malware(slot: Slot) -> bool:
-    """点滅対象（接続中のMalware Detected）か。"""
+    """Whether it should blink (a connected Malware Detected)."""
     return (
         slot.state is SlotState.DONE
         and slot.result is not None
@@ -106,7 +106,7 @@ def is_malware(slot: Slot) -> bool:
 
 
 class TilesView:
-    """左160pxのタイル4枚と◀／言語／▶ボタンを描く。"""
+    """Draw the 4 tiles in the left 160 px and the prev/language/next buttons."""
 
     def __init__(
         self,
@@ -117,15 +117,15 @@ class TilesView:
         on_language: Callable[[], None],
         rows: int,
     ) -> None:
-        """描画先とコールバックを受け取り、タップ判定を束縛する。
+        """Take the target and callbacks, and bind tap detection.
 
         Args:
-            canvas: 左側160pxのCanvas。
-            fonts: 解決済みのフォント一式。
-            on_select: タイルをタップしたときに呼ぶ関数（スロット番号）。
-            on_step: ◀／▶をタップしたときに呼ぶ関数（-1／+1）。
-            on_language: 言語ボタンをタップしたときに呼ぶ関数。
-            rows: タイル1枚の行数（2または3。theme.row_layout()で決める）。
+            canvas: The left-side 160 px Canvas.
+            fonts: The resolved font set.
+            on_select: Function called when a tile is tapped (slot index).
+            on_step: Function called when prev/next is tapped (-1/+1).
+            on_language: Function called when the language button is tapped.
+            rows: Lines per tile (2 or 3, decided by theme.row_layout()).
         """
         self.canvas = canvas
         self.fonts = fonts
@@ -138,7 +138,7 @@ class TilesView:
         canvas.bind("<Button-1>", self._on_click)
 
     def _on_click(self, event: tk.Event) -> None:
-        """タップ位置からタイルかボタンを判定する。◀▶の意味（ポートかページか）はAppが決める。"""
+        """Map a tap to a tile or button. App decides what prev/next mean (port or page)."""
         index = int(event.y) // TILE_H
         if index < TILE_COUNT:
             self.on_select(index)
@@ -150,7 +150,7 @@ class TilesView:
             self.on_step(1)
 
     def _frame(self, y0: int, outer: str, inner: str | None, background: str) -> None:
-        """外周4pxと、必要なら内側2pxの枠を塗る。"""
+        """Paint the 4 px outer frame and, if needed, a 2 px inner frame."""
         canvas = self.canvas
         canvas.create_rectangle(0, y0, TILE_W, y0 + TILE_H, fill=outer, width=0)
         if inner is not None:
@@ -165,7 +165,7 @@ class TilesView:
         )
 
     def _tile(self, slot: Slot, selected: bool, blink_on: bool, now: float, dots: int) -> None:
-        """タイル1枚を描く。"""
+        """Draw one tile."""
         y0 = slot.index * TILE_H
         background = tile_color(slot)
         blink = theme.COLORS["blink"] if blink_on else background
@@ -195,7 +195,7 @@ class TilesView:
         canvas.create_text(TEXT_X, y, text=status, anchor="nw", fill=color, font=self.fonts.body)
 
     def _buttons(self, lang: str) -> None:
-        """◀／言語／▶ボタンを描く。言語ボタンは切替先の名前を14pxで出す。"""
+        """Draw the prev/language/next buttons. The language button shows the target in 14 px."""
         canvas = self.canvas
         y0 = TILE_H * TILE_COUNT
         cy = y0 + theme.BTN_H // 2
@@ -215,15 +215,15 @@ class TilesView:
     def render(
         self, slots: list[Slot], selected: int, blink_on: bool, dots: int, now: float, lang: str
     ) -> None:
-        """4タイルとボタン列を全部描き直す。
+        """Redraw all 4 tiles and the button row.
 
         Args:
-            slots: スロット一覧（4件）。
-            selected: 選択中のスロット番号。
-            blink_on: Malwareの点滅枠を明赤にするか。
-            dots: 「検査中」の末尾の「…」の個数。
-            now: 現在時刻（経過分数の計算に使う）。
-            lang: 'en'または'ja'。
+            slots: Slot list (4 items).
+            selected: Index of the selected slot.
+            blink_on: Whether the Malware blink frame is bright red.
+            dots: Number of ellipses after "inspecting".
+            now: Current time (used to compute elapsed minutes).
+            lang: 'en' or 'ja'.
         """
         self._lang = lang
         self.canvas.delete("all")

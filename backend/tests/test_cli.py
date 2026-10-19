@@ -1,7 +1,8 @@
-"""cli.main()のinspectとSQLite完了記録の結線。
+"""Wiring between cli.main() inspect and the SQLite completion record.
 
-QR生成が失敗（ValueError）してもresult.jsonが書けていれば完了行を残し、終了コードは
-3のまま変えないことを確かめる。外部コマンドはFakeRunnerで差し替える。
+Verify that even if QR generation fails (ValueError), a completion row is kept as long as
+result.json was written, and the exit code stays 3. External commands are replaced by
+FakeRunner.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ from usb_sentinel.libs import cli as cli_mod
 from usb_sentinel.libs import report as report_mod
 from usb_sentinel.libs.report.json_report import digest
 
-# 検査シーケンス全体を通すFakeRunner（SYS_BLOCK・SYS_USB_DEVICESのmonkeypatch込み）を流用する。
+# Reuse the FakeRunner that runs the full inspection sequence (including the SYS_BLOCK and
+# SYS_USB_DEVICES monkeypatches).
 full_runner = test_orchestrator.full_runner
 
 
@@ -65,7 +67,8 @@ class TestMain:
     def test_inspect_records_completed_row(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full_runner: FakeRunner
     ) -> None:
-        """正常なinspectでcompleted行が1行残り、終了コードは判定どおり（Inconclusiveで1）。"""
+        """A normal inspect leaves one completed row, and the exit code follows the verdict
+        (1 for Inconclusive)."""
         db = tmp_path / "db" / "inspections.sqlite"
         db.parent.mkdir()
 
@@ -87,7 +90,8 @@ class TestMain:
     def test_qr_failure_still_records_completed_and_exits_3(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full_runner: FakeRunner
     ) -> None:
-        """QR生成がValueErrorでもresult.jsonは存在し、completed行が残り、終了コードは3。"""
+        """Even if QR generation raises ValueError, result.json exists, the completed row
+        remains, and the exit code is 3."""
         db = tmp_path / "db" / "inspections.sqlite"
         db.parent.mkdir()
         digests: list[str] = []

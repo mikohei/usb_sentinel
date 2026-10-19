@@ -1,6 +1,7 @@
-"""速度ステップの参照値（公称＞種別＞なし）、リンク上限の警告、重大度の境界。
+"""Speed step reference values (nominal > kind > none), link-limit warnings, and severity
+boundaries.
 
-材料（fio_runner、_step、_with_speed、_with_link）はtest_speed.pyから借りる。
+Fixtures (fio_runner, _step, _with_speed, _with_link) are borrowed from test_speed.py.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ fio_runner = test_speed.fio_runner
 
 
 class TestReference:
-    """参照値の決定（公称 > 種別 > なし）と種別の根拠。"""
+    """Reference value selection (nominal > kind > none) and the basis for the kind."""
 
     def test_nominal_takes_priority_over_class(
         self, ctx: StepContext, fio_runner: FakeRunner
@@ -110,7 +111,8 @@ class TestReference:
     def test_usb11_link_with_nominal_has_no_basis_warning(
         self, ctx: StepContext, fio_runner: FakeRunner
     ) -> None:
-        """リンク12Mbpsでも公称値が設定済みなら判定でき、「判定基準なし」の警告は出さない。"""
+        """Even at a 12 Mbps link, a configured nominal value allows judging, and no
+        "no criterion" warning is emitted."""
         result = _step().run(_with_link(_with_speed(ctx, nominal_read_mb_s=90.0), 12))
 
         assert result.status is StepStatus.PASS
@@ -129,7 +131,8 @@ class TestReference:
 
 
 class TestLinkCeiling:
-    """基準値がリンク速度の実効上限を超えるときの警告。判定自体は変えない。"""
+    """Warning when the reference exceeds the link speed's effective limit. The verdict itself
+    does not change."""
 
     def test_nvme_on_gen1_warns(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
         without_link = _step().run(_with_speed(ctx, device_class="nvme_ssd"))
@@ -160,7 +163,8 @@ class TestLinkCeiling:
     def test_nominal_reference_does_not_warn(
         self, ctx: StepContext, fio_runner: FakeRunner
     ) -> None:
-        """公称値が基準のときは実効上限を超えていてもリンク速度と比べない。"""
+        """When the nominal value is the reference, do not compare against link speed even if
+        it exceeds the effective limit."""
         result = _step().run(
             _with_link(
                 _with_speed(
@@ -196,7 +200,8 @@ class TestSeverity:
         status: StepStatus,
         severity: str | None,
     ) -> None:
-        """公称100.0に対し50%未満がsevere、50%以上80%未満がminor、80%以上はPASS。"""
+        """Against nominal 100.0: below 50% is severe, 50% to below 80% is minor, 80% or more
+        is PASS."""
         fio_runner.register(READ_ARGV, stdout=fio_json("read", bw_bytes=bw_bytes))
 
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=100.0))

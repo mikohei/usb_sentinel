@@ -1,8 +1,8 @@
-"""SQLiteへの検査記録（libs/store/）。
+"""Inspection records in SQLite (libs/store/).
 
-記録は検査の成否に影響させない。破損DBやスキーマ版が新しいDBでも例外を外へ出さず、
-理由文字列を返すことを確かめる。DBはtmp_pathのファイルで作る（:memory:はWALやchmodを
-検証できない）。
+Recording must not affect inspection success. Verify that even with a corrupt DB or a DB with a
+newer schema version, no exception escapes and a reason string is returned. The DB is created as
+a file under tmp_path (:memory: cannot verify WAL or chmod).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _device() -> DeviceInfo:
 
 
 def _started(tmp_path: Path, inspection_id: str = INSPECTION_ID) -> InspectionResult:
-    """inspect()が開始記録を呼ぶ時点の結果（ステップなし、advertised_checkのみ）。"""
+    """Result at the point inspect() calls the start record (no steps, advertised_check only)."""
     result = InspectionResult(_device(), STARTED_AT, output_dir=str(tmp_path / inspection_id))
     result.advertised_check = {
         "nominal_bytes": 29_000_000_000,
@@ -56,7 +56,7 @@ def _started(tmp_path: Path, inspection_id: str = INSPECTION_ID) -> InspectionRe
 
 
 def _completed(tmp_path: Path) -> InspectionResult:
-    """全ステップが埋まった完了時の結果。"""
+    """Completed result with every step filled in."""
     result = _started(tmp_path)
     result.steps = [
         StepResult(
@@ -158,7 +158,8 @@ class TestSchema:
     def test_first_open_creates_schema(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """初回接続でuser_version=1、inspectionsテーブルと5本のインデックスができる。"""
+        """The first connection sets user_version=1 and creates the inspections table and five
+        indexes."""
         assert store.record_started(_started(tmp_path)) is None
 
         assert _pragma(db_path, "user_version") == SCHEMA_VERSION == 1
@@ -192,7 +193,7 @@ class TestSchema:
     def test_newer_schema_is_not_written(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """user_versionが新しいDBには書き込まず、理由文字列を返す。"""
+        """Do not write to a DB with a newer user_version; return a reason string."""
         conn = sqlite3.connect(str(db_path))
         conn.execute("PRAGMA user_version = 2")
         conn.close()

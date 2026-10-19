@@ -1,6 +1,8 @@
-"""容量・速度ステップで共用する部品（時間予算、権限判定、lsblk問い合わせ、コマンド実行と失敗文言）。
+"""Parts shared by the capacity and speed steps.
 
-summaryの文言はresult.jsonに出るため、ここに置く定数と関数の文字列を変えると外部の互換性に関わる。
+Time budget, permission checks, lsblk queries, command execution, and failure wording.
+summary wording appears in result.json, so changing the strings of constants and functions here
+affects external compatibility.
 """
 
 from collections.abc import Callable, Iterable
@@ -11,70 +13,71 @@ from ..models import StepResult
 from ..runner import CommandResult, CommandRunner
 from . import StepContext
 
-# fioのjobs[0].errorで権限不足とみなすerrno（EPERM、EACCES、EROFS）。
+# errno values in fio jobs[0].error treated as permission errors (EPERM, EACCES, EROFS).
 PERMISSION_ERRNOS: frozenset[int] = frozenset({1, 13, 30})
 
 _PERMISSION_PHRASES = ("Permission denied", "Read-only file system", "Operation not permitted")
 
-# 外部コマンドがタイムアウトした、または時間予算を使い切ったときのsummary。
+# summary when an external command times out or the time budget is used up.
 TIMEOUT_SUMMARY = "タイムアウト"
-# 書き込みが権限不足・書き込み保護で拒否されたときのsummary。
+# summary when a write is denied for lack of permission or write protection.
 WRITE_DENIED_SUMMARY = "権限不足: 書き込みが拒否された"
-# summaryに載せるstderrの先頭文字数。
+# Number of leading stderr characters included in summary.
 STDERR_HEAD_CHARS = 200
-# details["raw_stdout_head"]に残すstdoutの先頭文字数。
+# Number of leading stdout characters kept in details["raw_stdout_head"].
 RAW_STDOUT_HEAD_CHARS = 500
 
 
 class Budget:
-    """ステップ全体の時間予算。各外部コマンドに残り秒数をtimeout_sとして渡す。"""
+    """Time budget for a whole step. Remaining seconds are passed to each external command as
+    timeout_s."""
 
     def __init__(self, timeout_s: float, monotonic: Callable[[], float]) -> None:
-        """開始時刻を記録する。
+        """Record the start time.
 
         Args:
-            timeout_s: ステップ全体に許す秒数。
-            monotonic: 単調増加時刻を返す関数（テストでは差し替える）。
+            timeout_s: Seconds allowed for the whole step.
+            monotonic: Function returning monotonic time (replaced in tests).
         """
         self.timeout_s = timeout_s
         self.monotonic = monotonic
         self.started = monotonic()
 
     def remaining(self) -> float:
-        """残り秒数を返す。超過後は0.0に張り付く。"""
+        """Return the remaining seconds. Stays at 0.0 once exceeded."""
         return max(0.0, self.timeout_s - (self.monotonic() - self.started))
 
 
 def bytes_to_mb_s(bytes_per_s: float) -> float:
-    """バイト/秒をMB/s（10^6バイト/秒）に換算する。"""
+    """Convert bytes/s to MB/s (10^6 bytes/s)."""
     return bytes_per_s / 1e6
 
 
 def is_permission_error(text: str) -> bool:
-    """stdout/stderrの文言が権限不足・書き込み保護を示すか。
+    """Whether stdout/stderr wording indicates lack of permission or write protection.
 
-    util-linuxのmount -wが書き込み保護デバイスで出す
-    「cannot mount /dev/sdX read-only」も拾うため、大文字小文字を無視したread-onlyを含める。
+    Case-insensitive "read-only" is included to also catch "cannot mount /dev/sdX read-only",
+    which util-linux mount -w prints for a write-protected device.
     """
     return any(phrase in text for phrase in _PERMISSION_PHRASES) or "read-only" in text.lower()
 
 
 class DeviceQueryError(RuntimeError):
-    """lsblkによるデバイス情報の取得に失敗した（環境異常）。"""
+    """Getting device information with lsblk failed (environment problem)."""
 
 
 def query_block_info(runner: CommandRunner, path: str) -> dict[str, Any]:
-    """device.block_info()を呼び、失敗をDeviceQueryErrorに包む。
+    """Call device.block_info() and wrap failures in DeviceQueryError.
 
     Args:
-        runner: コマンド実行器。
-        path: 対象デバイスのパス。
+        runner: Command runner.
+        path: Path of the target device.
 
     Returns:
-        lsblkの先頭ブロックデバイスの辞書。
+        Dict of the first block device from lsblk.
 
     Raises:
-        DeviceQueryError: lsblkの失敗、JSON不正、blockdevicesキー欠落のいずれか。
+        DeviceQueryError: On lsblk failure, invalid JSON, or a missing blockdevices key.
     """
     try:
         return block_info(runner, path)
@@ -83,26 +86,28 @@ def query_block_info(runner: CommandRunner, path: str) -> dict[str, Any]:
 
 
 def not_found_summary(command: str) -> str:
-    """「<コマンド>が見つからない」。which()の不在とCommandNotFoundErrorの両方で使う。
+    """The "<command> not found" summary (in Japanese).
+
+    Used both when which() finds nothing and for CommandNotFoundError.
 
     Args:
-        command: コマンド名（CommandNotFoundErrorならstr(exc)）。
+        command: Command name (str(exc) for CommandNotFoundError).
 
     Returns:
-        summaryに入れる文言。
+        Wording for summary.
     """
     return f"{command}が見つからない"
 
 
 def missing_command(runner: CommandRunner, commands: Iterable[str]) -> str | None:
-    """which()で見つからない最初のコマンド名を返す。全部あればNone。
+    """Return the first command name that which() cannot find. None if all exist.
 
     Args:
-        runner: コマンド実行器。
-        commands: 確認するコマンド名の並び（この順に確認し、最初の不在で止める）。
+        runner: Command runner.
+        commands: Command names to check (checked in order; stops at the first missing one).
 
     Returns:
-        見つからなかったコマンド名。全部あればNone。
+        The missing command name. None if all exist.
     """
     for command in commands:
         if runner.which(command) is None:
@@ -113,19 +118,19 @@ def missing_command(runner: CommandRunner, commands: Iterable[str]) -> str | Non
 def run_within_budget(
     ctx: StepContext, budget: Budget, argv: list[str], commands: list[list[str]]
 ) -> CommandResult | None:
-    """残り予算があればargvをcommandsに記録してから実行する。予算が無ければ実行せずNone。
+    """If budget remains, record argv in commands and run it. Otherwise return None unrun.
 
-    budget.remaining()は予算の確認で1回、timeout_sの決定で1回の計2回呼ぶ。固定クロックの
-    テストがこの呼び出し回数に依存するため、回数を変えない。
+    budget.remaining() is called twice: once to check the budget and once to set timeout_s.
+    Tests with a fixed clock depend on this call count, so do not change it.
 
     Args:
-        ctx: ステップ文脈（runnerを使う）。
-        budget: 時間予算。
-        argv: 実行するargv（リスト固定）。
-        commands: 実行したargvの記録先（実行直前に追記する）。
+        ctx: Step context (its runner is used).
+        budget: Time budget.
+        argv: argv to run (fixed list).
+        commands: Where run argv values are recorded (appended right before running).
 
     Returns:
-        コマンドの実行結果。予算切れで実行しなかったときはNone。
+        Result of the command. None if it was not run because the budget ran out.
     """
     if budget.remaining() <= 0:
         return None
@@ -134,24 +139,28 @@ def run_within_budget(
 
 
 def mark_timed_out(result: StepResult) -> None:
-    """details["timed_out"] = Trueとsummary「タイムアウト」を書く。
+    """Set details["timed_out"] = True and the timeout summary (TIMEOUT_SUMMARY).
 
     Args:
-        result: 書き込み先のステップ結果。
+        result: Step result to write to.
     """
     result.details["timed_out"] = True
     result.summary = TIMEOUT_SUMMARY
 
 
 def failure_summary(run: CommandResult, what: str) -> str:
-    """コマンド失敗のsummary。権限不足の文言ならWRITE_DENIED_SUMMARY、それ以外はstderrの先頭を添える。
+    """summary for a failed command.
+
+    WRITE_DENIED_SUMMARY for permission-error wording; otherwise the head of stderr is
+    appended.
 
     Args:
-        run: 失敗したコマンドの実行結果。
-        what: 失敗の見出し（例: "f3write失敗"、"fioの出力を解析できない"）。
+        run: Result of the failed command.
+        what: Failure heading (e.g. the Japanese for "f3write failed" or "cannot parse fio
+            output").
 
     Returns:
-        summaryに入れる文言。
+        Wording for summary.
     """
     if is_permission_error(run.stdout + run.stderr):
         return WRITE_DENIED_SUMMARY
@@ -159,10 +168,10 @@ def failure_summary(run: CommandResult, what: str) -> str:
 
 
 def record_raw_stdout(target: dict[str, Any], run: CommandResult) -> None:
-    """解析できなかったstdoutの先頭をtarget["raw_stdout_head"]に残す。
+    """Keep the head of unparsable stdout in target["raw_stdout_head"].
 
     Args:
-        target: 書き込み先（result.detailsや読み書きごとのentry）。
-        run: 解析に失敗したコマンドの実行結果。
+        target: Where to write (result.details or a per-read/write entry).
+        run: Result of the command whose output could not be parsed.
     """
     target["raw_stdout_head"] = run.stdout[:RAW_STDOUT_HEAD_CHARS]

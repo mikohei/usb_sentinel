@@ -1,8 +1,9 @@
-"""SQLite記録のスキーマ定義（設計書第5.2節・第5.3節）。
+"""Schema definition for SQLite records (design doc sections 5.2 and 5.3).
 
-列名はQRペイロードのキーに対応させる。容量はバイト、速度はMB/s、時刻はISO 8601（UTC）で、
-result.jsonと同じ単位・形式にする。版はPRAGMA user_versionで管理し、以降の版では
-ALTER TABLE ... ADD COLUMNだけを使う（列の削除・改名はしない）。
+Column names correspond to QR payload keys. Capacity is in bytes, speed in MB/s, and times in
+ISO 8601 (UTC), matching the units and formats of result.json. The version is managed with
+PRAGMA user_version; later versions use only ALTER TABLE ... ADD COLUMN (columns are never
+dropped or renamed).
 """
 
 SCHEMA_VERSION = 1
@@ -70,5 +71,6 @@ CREATE_INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_inspections_digest ON inspections (result_digest)",
 )
 
-# (版, その版に上げるためのSQL文の並び)。user_versionが小さいDBには順に適用する。
+# (version, SQL statements to upgrade to that version). Applied in order to DBs whose
+# user_version is lower.
 MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = ((1, (CREATE_TABLE, *CREATE_INDEXES)),)

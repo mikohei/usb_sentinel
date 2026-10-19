@@ -1,4 +1,4 @@
-"""詳細QRの上限処理（150バイト、sの短縮、ページ番号）と3枚の結合のテスト。"""
+"""Tests for detail-QR limits (150 bytes, shortening s, page numbers) and joining 3 pages."""
 
 import random
 
@@ -11,7 +11,7 @@ from usb_sentinel_display.libs.qr_payload import build_detail_page, build_detail
 
 class TestDetailLimits:
     def test_page1_shortens_serial_only_when_oversize(self) -> None:
-        """1枚目は150バイト超のときだけsを16文字に切る。最悪値では切られない。"""
+        """Page 1 cuts s to 16 chars only above 150 bytes. Worst-case values are not cut."""
         base = summary(serial="A" * 32, malware_count=9999, detail=WORST_DETAIL)
         assert check(build_detail_page(base, 1))["s"] == "A" * 32
         huge = summary(serial="A" * 32, malware_count=10**20, detail=WORST_DETAIL)
@@ -19,12 +19,12 @@ class TestDetailLimits:
         assert data["s"] == "A" * 16
 
     def test_page1_oversize_raises(self) -> None:
-        """切っても150バイトを超える1枚目はValueError。"""
+        """Page 1 that still exceeds 150 bytes after truncation raises ValueError."""
         with pytest.raises(ValueError, match="payload"):
             build_detail_page(summary(malware_count=10**120), 1)
 
     def test_other_pages_unaffected_by_page1_failure(self) -> None:
-        """1枚目が生成できなくても2枚目・3枚目は作れる。"""
+        """Pages 2 and 3 can be built even if page 1 cannot."""
         s = summary(malware_count=10**120, detail=TYPICAL_DETAIL)
         check(build_detail_page(s, 2))
         check(build_detail_page(s, 3))
@@ -35,9 +35,9 @@ class TestDetailLimits:
             build_detail_page(summary(), page)
 
     def test_merge_in_shuffled_order(self) -> None:
-        """シャッフルした順でも結合でき、全キーが揃う。"""
+        """Pages join in shuffled order and all keys are present."""
         pages = build_detail_pages(summary(detail=TYPICAL_DETAIL))
-        random.Random(0).shuffle(pages)  # noqa: S311  # 読み取り順の再現用の固定シード
+        random.Random(0).shuffle(pages)  # noqa: S311  # fixed seed to reproduce the read order
         merged = merge_detail_pages(pages)
         assert set(merged) == ALL_KEYS
         assert merged["cx"] == 29500 and merged["hd"] == "abcdef0123456789"
@@ -45,7 +45,7 @@ class TestDetailLimits:
         assert set(merge_detail_pages(with_k)) == ALL_KEYS | {"k"}
 
     def test_merge_rejects_other_inspection(self) -> None:
-        """dが違う枚は別の検査なので結合しない。"""
+        """Pages with a different d belong to another inspection and are not joined."""
         pages = build_detail_pages(summary(detail=TYPICAL_DETAIL))
         other = build_detail_pages(summary(detail=TYPICAL_DETAIL))[2].replace(
             "0123456789ab", "ba9876543210"

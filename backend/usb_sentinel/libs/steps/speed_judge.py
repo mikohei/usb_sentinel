@@ -1,7 +1,8 @@
-"""速度判定の材料を組む純関数群（参照値の決定・重大度・警告文）。
+"""Pure functions that build the inputs of the speed judgment (references, severity,
+warnings).
 
-fioは呼ばない。speed.pyのrun()からだけ使う。業界最低値の表と種別の決定は
-speed_floor.pyが持ち、ここはそれを読み・書きの参照値と文言に落とす。
+fio is not called. Used only from run() in speed.py. speed_floor.py owns the industry minimum
+table and class resolution; this module turns them into read/write references and wording.
 """
 
 from collections.abc import Iterable
@@ -11,9 +12,10 @@ from ..speed_floor import DEVICE_FLOORS, USB2_HIGH_SPEED_MBPS, Reference, effect
 
 Mode = Literal["read", "write"]
 
-# 実測 / 基準値 がこの値未満のFAILはsevere、それ以外のFAILはminor。
+# A FAIL with measured / reference below this is severe; any other FAIL is minor.
 SEVERE_RATIO = 0.50
-# 種別の基準値がリンク速度の実効上限のこの割合以上なら「頭打ちの可能性」を警告する。
+# Warn of a possible ceiling when the class reference is at least this fraction of the link
+# speed's effective ceiling.
 LINK_CEILING_RATIO = 0.9
 
 FAIL_PREFIX: dict[str, str] = {
@@ -23,15 +25,15 @@ FAIL_PREFIX: dict[str, str] = {
 
 
 def reference_for(mode: Mode, nominal: float | None, device_class: str | None) -> Reference:
-    """公称値 > 種別の最低値 > なし、の優先順位で基準値を決める。
+    """Decide the reference with priority: nominal value > class minimum > none.
 
     Args:
-        mode: "read" または "write"。
-        nominal: `nominal_*_mb_s`の設定値。未設定ならNone。
-        device_class: resolve_device_class()が決めた種別キー。不明ならNone。
+        mode: "read" or "write".
+        nominal: Value of `nominal_*_mb_s`. None if unset.
+        device_class: Class key resolved by resolve_device_class(). None if unknown.
 
     Returns:
-        基準値と根拠。両方無ければvalue None・basis "none"。
+        Reference value and basis. If neither exists, value None and basis "none".
     """
     if nominal is not None:
         return Reference(nominal, "nominal", device_class)
@@ -49,17 +51,18 @@ def class_warnings(
     *,
     has_nominal: bool,
 ) -> list[str]:
-    """種別決定に関する警告（リンク速度からの推定、USB1.1リンク）を返す。
+    """Return warnings about class resolution (inferred from link speed, USB 1.1 link).
 
     Args:
-        configured: `[speed] device_class`の設定値。
-        class_basis: resolve_device_class()が返した根拠。
-        link_speed_mbps: USBリンク速度（Mbps）。不明ならNone。
-        has_nominal: `nominal_read_mb_s`・`nominal_write_mb_s`のどちらかが設定済みならTrue。
-            設定済みなら公称値で判定できるので「`nominal_*`を設定」の警告は出さない。
+        configured: Value of `[speed] device_class`.
+        class_basis: Basis returned by resolve_device_class().
+        link_speed_mbps: USB link speed (Mbps). None if unknown.
+        has_nominal: True if either `nominal_read_mb_s` or `nominal_write_mb_s` is set. If so,
+            the judgment can use the nominal value, so the "set `nominal_*`" warning is not
+            emitted.
 
     Returns:
-        警告文のリスト。該当が無ければ空。
+        List of warnings. Empty if none apply.
     """
     warnings: list[str] = []
     if class_basis == "link_speed":
@@ -80,16 +83,16 @@ def class_warnings(
 def link_ceiling_warning(
     references: Iterable[Reference], link_speed_mbps: int | None
 ) -> str | None:
-    """種別の基準値がリンク速度の実効上限に迫るときの警告を1件だけ返す。
+    """Return at most one warning when a class reference nears the link's effective ceiling.
 
-    公称値（basis "nominal"）は利用者が与えた値なので比べない。
+    Nominal values (basis "nominal") are given by the user, so they are not compared.
 
     Args:
-        references: 読み・書きの基準値。
-        link_speed_mbps: USBリンク速度（Mbps）。Noneなら判定しない。
+        references: Read and write references.
+        link_speed_mbps: USB link speed (Mbps). No check if None.
 
     Returns:
-        警告文。該当が無ければNone。
+        Warning text. None if none applies.
     """
     if link_speed_mbps is None:
         return None
@@ -109,18 +112,18 @@ def link_ceiling_warning(
 
 
 def basis_text(ref: Reference, pass_ratio: float, class_basis: str) -> str:
-    """FAILのsummaryに付ける根拠の括弧書きを組む。
+    """Build the parenthesized basis appended to a FAIL summary (Japanese text).
 
-    公称「（公称90.0×0.80）」、種別設定「（USB3.0フラッシュ既定50.0×0.80）」、
-    種別推定「（USB3.0フラッシュ既定50.0×0.80・種別推定）」。
+    Nominal: "(nominal 90.0 x 0.80)"; configured class: "(USB3.0 flash default 50.0 x 0.80)";
+    inferred class: "(USB3.0 flash default 50.0 x 0.80, class inferred)".
 
     Args:
-        ref: 比較した基準値。valueがNoneなら空文字。
-        pass_ratio: 合格比率。
-        class_basis: 種別の根拠。"link_speed"なら「・種別推定」を付ける。
+        ref: Reference that was compared. Empty string if value is None.
+        pass_ratio: Pass ratio.
+        class_basis: Basis of the class. "link_speed" adds the "class inferred" suffix.
 
     Returns:
-        括弧書きの文字列。
+        The parenthesized string.
     """
     if ref.value is None:
         return ""
@@ -132,12 +135,13 @@ def basis_text(ref: Reference, pass_ratio: float, class_basis: str) -> str:
 
 
 def severity_for(ratios: Iterable[float]) -> str:
-    """閾値を下回った項目の比率から全体の重大度を決める。一方がsevereなら全体もsevere。
+    """Decide the overall severity from the ratios of items below threshold. If either is
+    severe, the overall result is severe.
 
     Args:
-        ratios: 実測 / 基準値（下回った項目だけ）。
+        ratios: Measured / reference (only for items below threshold).
 
     Returns:
-        "severe" または "minor"。
+        "severe" or "minor".
     """
     return "severe" if any(ratio < SEVERE_RATIO for ratio in ratios) else "minor"

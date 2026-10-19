@@ -1,261 +1,263 @@
-# QRペイロード仕様（ファイル用v:3・通常QR v:2・詳細QR v:3）とSQLiteの対応
+[日本語版](qr-payload.ja.md)
 
-usb_sentinelが出すQRコードの中身と、`result.json`・Pi側SQLiteとの対応を定める。読み取りアプリ（Flutter）の実装者がbackendのコードを読まずに済むことを目的にする。
+# QR payload specification (file v:3, normal QR v:2, detail QR v:3) and the SQLite mapping
 
-| 記号 | 意味 |
+This document defines the content of the QR codes that usb_sentinel produces, and how they map to `result.json` and the SQLite database on the Pi. Its purpose is to let the developer of the reader app (Flutter) work without reading the backend code.
+
+| Term | Meaning |
 |---|---|
-| backend | Pi上のDockerコンテナで動く検査プログラム（`backend/`） |
-| frontend | Piの3.5インチ画面に結果とQRを出すプログラム（`frontend/`） |
-| 読み取りアプリ | QRを読んでケース情報と結び付けるFlutterアプリ（本仕様の読み手） |
+| backend | The inspection program that runs in a Docker container on the Pi (`backend/`) |
+| frontend | The program that shows results and QR codes on the Pi's 3.5-inch display (`frontend/`) |
+| reader app | The Flutter app that reads QR codes and links them to case information (the reader of this specification) |
 
-## 1. 目的と3種のQRの使い分け
+## 1. Purpose and the three kinds of QR
 
-| 種類 | 置き場所 | `v` | 文字 | 上限 | 用途 |
+| Kind | Location | `v` | Characters | Limit | Use |
 |---|---|---|---|---|---|
-| ファイル用QR | 結果ディレクトリの`result-qr.png` | `3` | UTF-8 | 2953バイト、誤り訂正L | 持ち出し媒体に入れる全文。数値・理由文・シグネチャまで入る |
-| 通常QR | 画面（frontend） | `2` | ASCII | 150バイト、誤り訂正M | 検査の同定。判定・シリアル・開始時刻・ダイジェスト・ステップ状態 |
-| 詳細QR | 画面（frontend）、3枚をページ送り | `3` | ASCII | 各150バイト、誤り訂正M | 人が判断する材料になる数値（容量・速度・台帳）。3枚を結合して1件にする |
+| File QR | `result-qr.png` in the results directory | `3` | UTF-8 | 2953 bytes, error correction L | The full text to put on the transfer medium. Includes numbers, reason sentences, and signatures |
+| Normal QR | Screen (frontend) | `2` | ASCII | 150 bytes, error correction M | Identifies the inspection. Verdict, serial, start time, digest, step states |
+| Detail QR | Screen (frontend), 3 codes shown with page turning | `3` | ASCII | 150 bytes each, error correction M | Numbers a person uses to judge (capacity, speed, inventory). The 3 codes are combined into one record |
 
-読み取りアプリはまずJSONとして解釈し、`v`で分岐する。`v`が`2`なら通常QR、`3`で`p`キーがあれば詳細QR、`3`で`p`が無ければファイル用QRである。未知の`v`は「対応していない形式」として扱い、生の文字列を保存しておく。
+The reader app first parses the content as JSON and branches on `v`. If `v` is `2`, it is a normal QR. If `v` is `3` and the `p` key exists, it is a detail QR. If `v` is `3` and `p` does not exist, it is a file QR. An unknown `v` is treated as "unsupported format", and the raw string is saved.
 
-同じ検査を指すQRは、開始時刻・シリアル・`result.json`のダイジェストの3つで突き合わせる（第7節）。ダイジェストはファイル用QRが64桁、通常QRが先頭16桁、詳細QRが先頭12桁で、短いものは長いものの接頭辞になる。
+QR codes that point to the same inspection are matched by three values: the start time, the serial, and the digest of `result.json` (Section 7). The digest is 64 digits in the file QR, the first 16 digits in the normal QR, and the first 12 digits in the detail QR; the shorter ones are prefixes of the longer ones.
 
-## 2. 共通規則
+## 2. Common rules
 
-- 形式はJSONオブジェクト1つ。`json.dumps(..., separators=(",", ":"))`で区切り文字の後の空白を詰める。
-- 画面用（通常QR・詳細QR）はASCIIだけ（`ensure_ascii=True`）。非ASCIIのシリアルは`?`に置き換える。ファイル用QRはUTF-8（`ensure_ascii=False`）で、理由文の日本語はそのまま入る。1文字が3バイトになる。
-- 値が無い項目は`null`で出し、キーは省かない。読み取りアプリは「値が無い」と「読み落とし」を区別できる。例外は通常QR・詳細QRの`k`だけで、`s`がカーネル名のとき`1`、シリアルのときはキー自体を省く。
-- 時刻はすべてUTC。ファイル用QRと`result.json`はISO 8601（`2025-06-01T12:00:00.123456+00:00`）、画面用は`YYYYmmddTHHMMSSZ`の16文字（`20250601T120000Z`）。
-- 容量はバイト（10進）。詳細QRだけMB（10^6バイト、切り捨て）にする。150バイトに収めるためで、精度は1MB（32GBに対して0.003%）である。正確なバイト値は`result.json`とSQLiteにある。
-- 速度はMB/s（10^6バイト/秒）。
-- 比率（`lost_ratio`など）は小数で、小数4桁に丸める。
-- 判定・ステップ状態・種別などの符号は第6節のコード表で引く。表に無い値は「不明」として扱い、生の値を残す。
+- The format is a single JSON object. `json.dumps(..., separators=(",", ":"))` removes the spaces after separators.
+- Screen QR codes (normal and detail) are ASCII only (`ensure_ascii=True`). A non-ASCII serial is replaced with `?`. The file QR is UTF-8 (`ensure_ascii=False`), and the Japanese in the reason sentences goes in as it is. One character takes 3 bytes.
+- An item with no value is written as `null`, and the key is not omitted. The reader app can tell "no value" from "missed reading". The only exception is `k` in the normal and detail QR: it is `1` when `s` is a kernel name, and the key itself is omitted when `s` is a serial.
+- All times are UTC. The file QR and `result.json` use ISO 8601 (`2025-06-01T12:00:00.123456+00:00`), and the screen QR uses the 16 characters `YYYYmmddTHHMMSSZ` (`20250601T120000Z`).
+- Capacity is in bytes (decimal). Only the detail QR uses MB (10^6 bytes, rounded down), to fit in 150 bytes; the precision is 1MB (0.003% for 32GB). The exact byte values are in `result.json` and SQLite.
+- Speed is in MB/s (10^6 bytes/second).
+- Ratios (such as `lost_ratio`) are decimals rounded to 4 places.
+- Codes for verdicts, step states, classes, and so on are looked up in the code tables in Section 6. A value not in a table is treated as "unknown", and the raw value is kept.
 
-## 3. ファイル用QR v:3（`result-qr.png`）
+## 3. File QR v:3 (`result-qr.png`)
 
-結果ディレクトリ（`<timestamp>-<serial>/`）の`result-qr.png`に入る。v:1のキーは全て残し、第2期で足した項目を加えた。`v`は`3`（`2`は通常QRが使っている）。
+It goes in `result-qr.png` in the results directory (`<timestamp>-<serial>/`). All keys of v:1 remain, and the items added in phase 2 are included. `v` is `3` (`2` is used by the normal QR).
 
-### 3.1 キー表
+### 3.1 Key table
 
-| キー | 型 | 由来（`result.json`） | v:1からの変更 |
+| Key | Type | Source (`result.json`) | Change from v:1 |
 |---|---|---|---|
 | `v` | int | — | `1`→`3` |
-| `verdict` | str | `verdict`（判定名の文字列。第6.1節） | — |
+| `verdict` | str | `verdict` (the verdict name as a string; Section 6.1) | — |
 | `serial` | str | `device.serial` | — |
-| `kernel_name` | str | `device.kernel_name`（`sda`など） | 追加 |
-| `port_path` | str \| null | `device.port_path`（`1-1.3`など） | 追加 |
-| `started_at`、`finished_at` | str | 同名 | 追加 |
-| `elapsed_s` | float \| null | 同名（検査全体の所要秒数、小数2桁） | 追加 |
-| `steps` | dict | `steps[].name → status`（第6.2節） | — |
+| `kernel_name` | str | `device.kernel_name` (such as `sda`) | Added |
+| `port_path` | str \| null | `device.port_path` (such as `1-1.3`) | Added |
+| `started_at`, `finished_at` | str | Same names | Added |
+| `elapsed_s` | float \| null | Same name (total seconds of the inspection, 2 decimal places) | Added |
+| `steps` | dict | `steps[].name → status` (Section 6.2) | — |
 | `clamav_db` | str \| null | `steps[malware].details.database.db_version` | — |
-| `clamav_db_date` | str \| null | `…database.db_date`の先頭10文字（`YYYY-MM-DD`） | 追加 |
-| `digest` | str | `result.json`のSHA-256（64桁） | — |
+| `clamav_db_date` | str \| null | The first 10 characters of `…database.db_date` (`YYYY-MM-DD`) | Added |
+| `digest` | str | SHA-256 of `result.json` (64 digits) | — |
 | `malware_count` | int | `len(steps[malware].details.detections)` | — |
-| `signatures` | list[str] | 検知シグネチャ名の重複除去 | — |
-| `advertised_over` | bool | `advertised_check.exceeded`（申告容量の非破壊チェック）。`nominal_bytes`未設定なら`false` | 追加 |
-| `capacity` | dict \| null | `steps[capacity].details`の`nominal_bytes`、`advertised_bytes`、`actual_bytes`、`kind`、`lost_ratio`、`counterfeit_reasons`、`probe_verdict_line`。容量ステップが無いか、PASS／FAIL以外（SKIPPED・ERROR）なら`null`。辞書があっても個々の値が`null`のことがある | 追加 |
-| `link_speed_mbps` | int \| null | `device.link_speed_mbps`（USBリンク速度、Mbps） | 追加 |
-| `device_class` | str \| null | `steps[speed].details.device_class`（第6.4節のキー） | 追加 |
-| `speed` | dict \| null | `read_mb_s`、`write_mb_s`、`threshold_read_mb_s`、`threshold_write_mb_s`、`basis_read`、`basis_write`、`severity`。fioの測定値が無ければ`null` | 追加 |
-| `reason_codes` | list[str] | 同名（第6.8節） | 追加 |
-| `reasons` | list[str] | 同名（日本語の理由文） | 追加 |
-| `hash_inventory_digest` | str \| null | `steps[hash_inventory].details.digest`（`hash-inventory.tsv`のSHA-256、64桁） | 追加 |
-| `hash_inventory_lines` | int \| null | `…details.lines`（台帳の行数） | 追加 |
-| `truncated` | bool | 省略が起きたとき`true`。省略が無ければ`false`（常にキーを出す） | — |
+| `signatures` | list[str] | Detected signature names with duplicates removed | — |
+| `advertised_over` | bool | `advertised_check.exceeded` (the non-destructive check of the advertised capacity). `false` if `nominal_bytes` is not set | Added |
+| `capacity` | dict \| null | `nominal_bytes`, `advertised_bytes`, `actual_bytes`, `kind`, `lost_ratio`, `counterfeit_reasons`, and `probe_verdict_line` of `steps[capacity].details`. `null` if there is no capacity step, or its status is neither PASS nor FAIL (SKIPPED or ERROR). Even when the dict exists, individual values can be `null` | Added |
+| `link_speed_mbps` | int \| null | `device.link_speed_mbps` (USB link speed, Mbps) | Added |
+| `device_class` | str \| null | `steps[speed].details.device_class` (the key from Section 6.4) | Added |
+| `speed` | dict \| null | `read_mb_s`, `write_mb_s`, `threshold_read_mb_s`, `threshold_write_mb_s`, `basis_read`, `basis_write`, `severity`. `null` if there is no fio measurement | Added |
+| `reason_codes` | list[str] | Same name (Section 6.8) | Added |
+| `reasons` | list[str] | Same name (reason sentences in Japanese) | Added |
+| `hash_inventory_digest` | str \| null | `steps[hash_inventory].details.digest` (SHA-256 of `hash-inventory.tsv`, 64 digits) | Added |
+| `hash_inventory_lines` | int \| null | `…details.lines` (the number of rows in the inventory) | Added |
+| `truncated` | bool | `true` when something was cut. `false` when nothing was cut (the key is always present) | — |
 
-`capacity`の中身:
+Contents of `capacity`:
 
-| キー | 型 | 意味 |
+| Key | Type | Meaning |
 |---|---|---|
-| `nominal_bytes` | int \| null | 設定された公称容量（商品ページの値）。未設定なら`null` |
-| `advertised_bytes` | int | lsblkが報告した申告容量 |
-| `actual_bytes` | int \| null | 実測容量 |
-| `kind` | str \| null | `ok` / `short` / `defect` / `counterfeit` / `unverified`（第6.5節） |
-| `lost_ratio` | float \| null | f3readで消失したセクタの比率。f3probeモードは`null` |
-| `counterfeit_reasons` | list[str] \| null | 偽装疑いの理由コード（第6.7節）。疑いが無ければ`[]` |
-| `probe_verdict_line` | str \| null | f3probeの`Good news:`／`Bad news:`の行。f3writeモードは`null` |
+| `nominal_bytes` | int \| null | The configured nominal capacity (the value on the product page). `null` if not set |
+| `advertised_bytes` | int | The advertised capacity reported by lsblk |
+| `actual_bytes` | int \| null | The measured capacity |
+| `kind` | str \| null | `ok` / `short` / `defect` / `counterfeit` / `unverified` (Section 6.5) |
+| `lost_ratio` | float \| null | The ratio of sectors lost in f3read. `null` in f3probe mode |
+| `counterfeit_reasons` | list[str] \| null | Reason codes for counterfeit suspicion (Section 6.7). `[]` if there is no suspicion |
+| `probe_verdict_line` | str \| null | The `Good news:` / `Bad news:` line of f3probe. `null` in f3write mode |
 
-`speed`の中身:
+Contents of `speed`:
 
-| キー | 型 | 意味 |
+| Key | Type | Meaning |
 |---|---|---|
-| `read_mb_s`、`write_mb_s` | float \| null | fioの実測値 |
-| `threshold_read_mb_s`、`threshold_write_mb_s` | float \| null | 判定の閾値（基準値×`pass_ratio`）。判定対象外は`null` |
-| `basis_read`、`basis_write` | str \| null | 基準の根拠。`nominal`（公称値）/ `class`（種別の最低値）/ `none` |
-| `severity` | str \| null | FAILのときの重大度。`severe` / `minor`。FAIL以外は`null` |
+| `read_mb_s`, `write_mb_s` | float \| null | Values measured by fio |
+| `threshold_read_mb_s`, `threshold_write_mb_s` | float \| null | The thresholds for the verdict (reference value × `pass_ratio`). `null` if not judged |
+| `basis_read`, `basis_write` | str \| null | The basis of the reference. `nominal` (nominal value) / `class` (class minimum) / `none` |
+| `severity` | str \| null | The severity when FAIL. `severe` / `minor`. `null` when not FAIL |
 
-### 3.2 サイズ上限と省略順序
+### 3.2 Size limit and the cutting order
 
-上限は2953バイト（QRバイトモードの最大、誤り訂正L）。典型的な検査（5ステップ、理由1件、シリアル12文字）は1.2KB前後で収まる。超えるときは次の順で縮め、各段階の後に再計算して上限以下になった時点で止める。どこかで削ったら`truncated`を`true`にする。
+The limit is 2953 bytes (the maximum of QR byte mode, error correction L). A typical inspection (5 steps, 1 reason, a 12-character serial) fits in about 1.2KB. When the content exceeds the limit, it is shrunk in the following order; after each stage the size is recomputed, and the process stops as soon as it is at or below the limit. If anything is cut, `truncated` is set to `true`.
 
-1. `signatures`を3件に切る。
-2. `reasons`の各要素を120文字に切り、切った要素の末尾に`…`を付ける。
-3. `signatures`を1件ずつ0件まで減らす。
-4. `reasons`を空にする（`reason_codes`は残るので理由はコードで追える）。
-5. `serial`を128文字に切る。
-6. `capacity.probe_verdict_line`を`null`にする。
-7. それでも超えればQRを生成せずエラーにする（検査自体は`result.json`まで完了している）。
+1. Cut `signatures` to 3 entries.
+2. Cut each element of `reasons` to 120 characters, and append `…` to the end of the cut elements.
+3. Reduce `signatures` one by one down to 0 entries.
+4. Empty `reasons` (`reason_codes` remains, so the reasons can still be traced by code).
+5. Cut `serial` to 128 characters.
+6. Set `capacity.probe_verdict_line` to `null`.
+7. If it still exceeds the limit, no QR is generated and an error is raised (the inspection itself has completed up to `result.json`).
 
-読み取りアプリは`truncated`が`true`なら「シグネチャ・理由文は一部」と表示し、全文は`result.json`で確認するよう促す。`malware_count`は削られないので検知数は常に正しい。
+When `truncated` is `true`, the reader app shows that signatures and reason sentences are partial, and prompts the user to check `result.json` for the full text. `malware_count` is never cut, so the detection count is always correct.
 
-### 3.3 v:1との差分
+### 3.3 Differences from v:1
 
-- `v`が`1`から`3`になった。
-- 追加キー: `kernel_name`、`port_path`、`started_at`、`finished_at`、`elapsed_s`、`clamav_db_date`、`advertised_over`、`capacity`、`link_speed_mbps`、`device_class`、`speed`、`reason_codes`、`reasons`、`hash_inventory_digest`、`hash_inventory_lines`。
-- `truncated`は省略が無いときも`false`で出る（v:1は省略時だけ`true`を出した）。
-- `verdict`に`Counterfeit Suspected`が増えた。
-- 既存キー（`verdict`、`serial`、`steps`、`clamav_db`、`digest`、`malware_count`、`signatures`）の意味と形式は変わらない。
+- `v` changed from `1` to `3`.
+- Added keys: `kernel_name`, `port_path`, `started_at`, `finished_at`, `elapsed_s`, `clamav_db_date`, `advertised_over`, `capacity`, `link_speed_mbps`, `device_class`, `speed`, `reason_codes`, `reasons`, `hash_inventory_digest`, `hash_inventory_lines`.
+- `truncated` is output as `false` even when nothing is cut (v:1 output `true` only when something was cut).
+- `Counterfeit Suspected` was added to `verdict`.
+- The meaning and format of the existing keys (`verdict`, `serial`, `steps`, `clamav_db`, `digest`, `malware_count`, `signatures`) are unchanged.
 
-## 4. 通常QR v:2（画面）
+## 4. Normal QR v:2 (screen)
 
-frontendが画面に出す同定用のQR。150バイト以下、ASCIIのみ、誤り訂正M、QRバージョン8以下。
+The identification QR that the frontend shows on the screen. 150 bytes or less, ASCII only, error correction M, QR version 8 or lower.
 
 ```json
 {"v":2,"r":"I","s":"ABC123456789","t":"20250601T120000Z","d":"0123456789abcdef","st":"m:P,h:P,c:S,s:S","n":0}
 ```
 
-| キー | 意味 | 値 | 最大バイト（値のみ） |
+| Key | Meaning | Value | Max bytes (value only) |
 |---|---|---|---|
-| `v` | 形式バージョン | `2`固定 | 1 |
-| `r` | 判定 | `N`=No Defect、`M`=Malware Detected、`C`=Counterfeit Suspected、`S`=Spec Mismatch、`D`=Defective、`I`=Inconclusive。対応表に無い判定は`?` | 1 |
-| `s` | シリアル | `result.json`の`device.serial`をASCII化（非ASCIIは`?`）した先頭32文字。空なら`device.kernel_name`を入れ`k`を`1`にする | 32 |
-| `k` | `s`がカーネル名であることを示す | `1`。`s`がシリアルのときはキー自体を省く | 1 |
-| `t` | 検査開始時刻（UTC） | `started_at`を`YYYYmmddTHHMMSSZ`に直した16文字。結果ディレクトリ名の先頭16文字と一致する | 16 |
-| `d` | `result.json`のSHA-256先頭16桁 | 小文字hex | 16 |
-| `st` | ステップ状態 | `名前:状態`をカンマ区切り。名前は`m`=malware、`h`=hash_inventory、`c`=capacity、`s`=speed、`u`=unmount、その他は先頭3文字。状態は`P`=pass、`F`=fail、`E`=error、`S`=skipped、`N`=not_implemented | 約30 |
-| `n` | マルウェア検知数 | `steps[malware].details.detections`の要素数。無ければ`0` | 4 |
+| `v` | Format version | Fixed at `2` | 1 |
+| `r` | Verdict | `N`=No Defect, `M`=Malware Detected, `C`=Counterfeit Suspected, `S`=Spec Mismatch, `D`=Defective, `I`=Inconclusive. A verdict not in the mapping is `?` | 1 |
+| `s` | Serial | The first 32 characters of `device.serial` in `result.json`, converted to ASCII (non-ASCII becomes `?`). If it is empty, put `device.kernel_name` here and set `k` to `1` | 32 |
+| `k` | Indicates that `s` is a kernel name | `1`. The key itself is omitted when `s` is a serial | 1 |
+| `t` | Inspection start time (UTC) | The 16 characters of `started_at` converted to `YYYYmmddTHHMMSSZ`. Matches the first 16 characters of the results directory name | 16 |
+| `d` | First 16 digits of the SHA-256 of `result.json` | Lowercase hex | 16 |
+| `st` | Step states | `name:state` separated by commas. The names are `m`=malware, `h`=hash_inventory, `c`=capacity, `s`=speed, `u`=unmount, and the first 3 characters for others. The states are `P`=pass, `F`=fail, `E`=error, `S`=skipped, `N`=not_implemented | About 30 |
+| `n` | Number of malware detections | The number of elements in `steps[malware].details.detections`. `0` if absent | 4 |
 
-- 150バイトを超えたら`s`を16文字に切り、それでも超えたら`st`を落とす。ASCII化後の`s`は最大32バイトなので、ここに来るのは将来キーを増やした場合だけである。
-- ステップ順は`result.json`の`steps`配列の順。
-- `r`の`C`（Counterfeit Suspected）は第2期で加わった。これより前のfrontendは`?`を出す。
+- If the payload exceeds 150 bytes, `s` is cut to 16 characters, and if it still exceeds, `st` is dropped. After ASCII conversion `s` is at most 32 bytes, so this is reached only if keys are added in the future.
+- The step order is the order of the `steps` array in `result.json`.
+- `C` (Counterfeit Suspected) in `r` was added in phase 2. A frontend older than that shows `?`.
 
-## 5. 詳細QR v:3（画面、3枚）
+## 5. Detail QR v:3 (screen, 3 codes)
 
-frontendが通常QRの次のページとして出す。お薬手帳のQR（JAHIS規格）と同じく、各枚に共通ヘッダー（版、枚目／枚数、識別子）を置き、読み取り順を問わず結合する。枚数は3で固定する（2枚では容量・速度の数値が入らない）。制約は通常QRと同じで、各枚150バイト以下、ASCIIのみ、誤り訂正M、QRバージョン8以下。
+The frontend shows these as the pages after the normal QR. As in the medicine notebook QR (the JAHIS standard), each code carries a common header (version, code number / total, identifier), and the codes are combined regardless of reading order. The number of codes is fixed at 3 (2 codes cannot hold the capacity and speed numbers). The constraints are the same as for the normal QR: each code is 150 bytes or less, ASCII only, error correction M, and QR version 8 or lower.
 
-### 5.1 共通ヘッダー（全枚、先頭に置く）
+### 5.1 Common header (all codes, placed first)
 
-| キー | 型 | 値 |
+| Key | Type | Value |
 |---|---|---|
 | `v` | int | `3` |
-| `p` | str | `"1/3"`、`"2/3"`、`"3/3"` |
-| `d` | str | `result.json`のSHA-256先頭12桁。通常QRの`d`（16桁）の先頭12桁と一致する |
+| `p` | str | `"1/3"`, `"2/3"`, `"3/3"` |
+| `d` | str | The first 12 digits of the SHA-256 of `result.json`. Matches the first 12 digits of `d` (16 digits) of the normal QR |
 
-### 5.2 1枚目（同定と判定）
+### 5.2 Code 1 (identification and verdict)
 
-| キー | 型 | 由来 | 最大バイト |
+| Key | Type | Source | Max bytes |
 |---|---|---|---|
-| `t` | str | 開始時刻`YYYYmmddTHHMMSSZ`（通常QRと同じ） | 16 |
-| `s` | str | シリアルのASCII化、32文字（通常QRと同じ） | 32 |
-| `k` | int | `s`がカーネル名なら`1`、それ以外はキーを省く | 1 |
-| `r` | str | 判定コード（`N`/`M`/`C`/`S`/`D`/`I`） | 1 |
-| `e` | int | `elapsed_s`を整数秒に丸めた値 | 6 |
-| `m` | int | マルウェア検知数 | 4 |
-| `dv` | int \| null | ClamAV DBバージョン（`db_version`を整数化。失敗なら`null`） | 6 |
+| `t` | str | Start time `YYYYmmddTHHMMSSZ` (same as the normal QR) | 16 |
+| `s` | str | The serial converted to ASCII, 32 characters (same as the normal QR) | 32 |
+| `k` | int | `1` if `s` is a kernel name; otherwise the key is omitted | 1 |
+| `r` | str | Verdict code (`N`/`M`/`C`/`S`/`D`/`I`) | 1 |
+| `e` | int | `elapsed_s` rounded to whole seconds | 6 |
+| `m` | int | Number of malware detections | 4 |
+| `dv` | int \| null | ClamAV DB version (`db_version` as an integer; `null` on failure) | 6 |
 
-### 5.3 2枚目（容量とデバイス）
+### 5.3 Code 2 (capacity and device)
 
-| キー | 型 | 由来 | 単位・形式 |
+| Key | Type | Source | Unit / format |
 |---|---|---|---|
-| `cn` | int \| null | `advertised_check.nominal_bytes`（設定された公称容量。容量ステップがSKIPPEDでも入る） | MB（10^6バイト、切り捨て） |
-| `ca` | int | `device.advertised_bytes`（申告容量） | MB |
-| `cx` | int \| null | `steps[capacity].details.actual_bytes`（実測容量） | MB |
-| `ck` | str | 容量の区別1文字（第6.5節）。`-`=ok、`S`=short、`D`=defect、`C`=counterfeit、`U`=unverified、`?`=ステップがPASS／FAIL以外 | 1 |
-| `co` | int \| null | 申告容量の非破壊チェック。`1`=申告容量が公称×`over_ratio`を超過、`0`=超過なし、`null`=`nominal_bytes`未設定。容量ステップがSKIPPEDでも値が入る | 1 |
-| `cl` | float \| null | `lost_ratio`（小数4桁） | 比率 |
+| `cn` | int \| null | `advertised_check.nominal_bytes` (the configured nominal capacity; present even when the capacity step is SKIPPED) | MB (10^6 bytes, rounded down) |
+| `ca` | int | `device.advertised_bytes` (advertised capacity) | MB |
+| `cx` | int \| null | `steps[capacity].details.actual_bytes` (measured capacity) | MB |
+| `ck` | str | One-character capacity classification (Section 6.5). `-`=ok, `S`=short, `D`=defect, `C`=counterfeit, `U`=unverified, `?`=the step is neither PASS nor FAIL | 1 |
+| `co` | int \| null | Non-destructive check of the advertised capacity. `1`=the advertised capacity exceeds nominal × `over_ratio`, `0`=no excess, `null`=`nominal_bytes` is not set. The value is present even when the capacity step is SKIPPED | 1 |
+| `cl` | float \| null | `lost_ratio` (4 decimal places) | Ratio |
 | `ls` | int \| null | `device.link_speed_mbps` | Mbps |
-| `dc` | str \| null | `device_class`の2文字コード（第6.4節） | 2 |
-| `hn` | int \| null | `steps[hash_inventory].details.lines`（台帳の行数） | 行 |
+| `dc` | str \| null | Two-character code of `device_class` (Section 6.4) | 2 |
+| `hn` | int \| null | `steps[hash_inventory].details.lines` (the number of inventory rows) | Rows |
 
-容量超過は`ck`の`C`に含まれ、内訳は`result.json`の`counterfeit_reasons`で確認する。
+An excess in capacity is included in the `C` of `ck`; check `counterfeit_reasons` in `result.json` for the breakdown.
 
-### 5.4 3枚目（速度とDB、台帳）
+### 5.4 Code 3 (speed, DB, and inventory)
 
-| キー | 型 | 由来 | 単位 |
+| Key | Type | Source | Unit |
 |---|---|---|---|
-| `sr`、`sw` | float \| null | `steps[speed].details.read.mb_s`、`write.mb_s`（小数1桁） | MB/s |
-| `tr`、`tw` | float \| null | `threshold_read_mb_s`、`threshold_write_mb_s`（小数1桁） | MB/s |
-| `sb` | str | 判定根拠。`n`=nominal、`c`=class、`-`=none。読みと書きで異なるときは読みを優先し、書きは`result.json`で確認する | 1 |
-| `sv` | str | 重大度。`s`=severe、`m`=minor、`-`=なし | 1 |
-| `db` | str \| null | ClamAV DB日付`YYYYMMDD` | 8 |
-| `hd` | str \| null | `steps[hash_inventory].details.digest`の先頭16桁 | 16 |
+| `sr`, `sw` | float \| null | `steps[speed].details.read.mb_s`, `write.mb_s` (1 decimal place) | MB/s |
+| `tr`, `tw` | float \| null | `threshold_read_mb_s`, `threshold_write_mb_s` (1 decimal place) | MB/s |
+| `sb` | str | Basis of the verdict. `n`=nominal, `c`=class, `-`=none. When read and write differ, read takes priority; check `result.json` for write | 1 |
+| `sv` | str | Severity. `s`=severe, `m`=minor, `-`=none | 1 |
+| `db` | str \| null | ClamAV DB date `YYYYMMDD` | 8 |
+| `hd` | str \| null | The first 16 digits of `steps[hash_inventory].details.digest` | 16 |
 
-判定理由は別キーにしない。`ck`（容量）、`sv`（速度）、`m`（マルウェア）、通常QRの`st`（ステップ状態）で復元できる。
+The reasons for the verdict are not given a separate key. They can be reconstructed from `ck` (capacity), `sv` (speed), `m` (malware), and `st` (step states) of the normal QR.
 
-### 5.5 省略規則
+### 5.5 Cutting rules
 
-- 1枚目が150バイトを超えたら`s`を16文字に切る（通常QRと同じ）。それでも超えればその枚だけ「QR生成失敗」になり、他の枚は表示される。
-- 2枚目・3枚目は最悪値でも150バイトに収まるので省略規則を持たない。
-- 値が無い項目は`null`で出す。キーを省くのは1枚目の`k`だけ。
+- If code 1 exceeds 150 bytes, `s` is cut to 16 characters (same as the normal QR). If it still exceeds, only that code becomes "QR generation failed", and the other codes are displayed.
+- Codes 2 and 3 fit in 150 bytes even in the worst case, so they have no cutting rules.
+- An item with no value is written as `null`. The only key that is omitted is `k` in code 1.
 
-### 5.6 結合の手順と検証
+### 5.6 Combining procedure and verification
 
-1. `v == 3`かつ`p`キーを持つQRを集める。
-2. `d`が同じものを1グループにする。`d`が異なる枚は別の検査なので混ぜない。同じ検体を2回検査した場合でも`d`は`result.json`ごとに異なる。
-3. グループ内で`p`の分母が3で、分子`1`・`2`・`3`が揃ったら結合する。
-4. 同じ`p`を2回読んだら内容が一致することを確認し、違えば読み直しを促す。
-5. 通常QR（v:2）も読んでいれば、その`d`の先頭12桁が詳細QRの`d`と一致することを確かめる。
+1. Collect the QR codes with `v == 3` and a `p` key.
+2. Put those with the same `d` in one group. Codes with a different `d` belong to different inspections and are not mixed. Even when the same sample is inspected twice, `d` differs for each `result.json`.
+3. When the denominator of `p` in the group is 3 and the numerators `1`, `2`, and `3` are all present, combine them.
+4. If the same `p` is read twice, confirm that the contents match, and prompt the user to read again if they differ.
+5. If the normal QR (v:2) has also been read, confirm that the first 12 digits of its `d` match the `d` of the detail QR.
 
-### 5.7 読み取りUIの推奨
+### 5.7 Recommendations for the reading UI
 
-- 3枚読み終えたら自動で結合し、1枚ずつ「1/3 読み取り済み」のように進捗を出す。
-- `d`が異なる枚を読んだら「別の検査のQRです」と警告し、現在のグループを捨てるか選ばせる。
-- 通常QRと詳細QRを切り替えて読めるようにする。通常QRだけで同定して後からファイル用QRで数値を補う運用も可能である。
-- 数値はコードのまま出さず、第6節の表で日本語（または英語）に直して表示する。
+- When all 3 codes have been read, combine them automatically, and show progress for each code, such as "1/3 read".
+- When a code with a different `d` is read, warn "This is the QR of a different inspection" and let the user choose whether to discard the current group.
+- Let the user read normal QR and detail QR in either order. An operation is also possible in which the normal QR alone identifies the inspection and the numbers are added later from the file QR.
+- Do not show the numbers as raw codes; convert them to Japanese (or English) with the tables in Section 6 for display.
 
-### 5.8 frontendの表示操作（補足）
+### 5.8 Frontend display controls (supplement)
 
-ペイロードの仕様ではなく、frontendが詳細QRをどう見せるかの補足である。読み取りアプリの実装には影響しない。
+This is not part of the payload specification; it supplements how the frontend presents the detail QR. It does not affect the implementation of the reader app.
 
-- 通常QR（v:2）と詳細QR（v:3）の切替は、QR領域（画面右側）のタップかキー`Q`で行う。通常QRから切り替えると詳細QRの1枚目が出る。
-- 詳細QR表示中は◀▶ボタンと矢印キーがページ送りになる（1/3→2/3→3/3→1/3。◀は逆順）。ポートの切替はタイルのタップかキー`1`〜`4`で行う。
-- 情報ストリップには「詳細n/3」（英語表示では「Detail n/3」）と`d`（12桁）を出す。
-- 画面の言語（日本語／英語）はペイロードに影響しない。`d`も言語で変わらない。
-- 1枚目が省略規則（第5.5節）を適用しても150バイトに収まらないときは、その枚だけ「QR生成失敗」と表示し、他の枚はそのまま表示する。
-- タイルの英語ラベルは幅（160px、18px太字）に収めるための短縮形で、`Malware Detected`は「Malware」、`Counterfeit Suspected`は「Counterfeit」、`Spec Mismatch`は「Mismatch」と出す。読み取りアプリは第6.1節のフル表記でよい（ペイロードの`r`は変わらない）。
+- Switching between the normal QR (v:2) and the detail QR (v:3) is done by tapping the QR area (the right side of the screen) or pressing `Q`. Switching from the normal QR shows code 1 of the detail QR.
+- While a detail QR is shown, the ◀▶ buttons and the arrow keys turn pages (1/3→2/3→3/3→1/3; ◀ goes in reverse). Ports are switched by tapping a tile or pressing `1` to `4`.
+- The info strip shows "Detail n/3" (the Japanese display shows the equivalent text in Japanese) and `d` (12 digits).
+- The screen language (Japanese / English) does not affect the payload. `d` does not change with the language either.
+- If code 1 still does not fit in 150 bytes after the cutting rules (Section 5.5) are applied, "QR generation failed" is shown for that code only, and the other codes are displayed as they are.
+- The English tile labels are shortened forms that fit the width (160px, 18px bold): `Malware Detected` is shown as "Malware", `Counterfeit Suspected` as "Counterfeit", and `Spec Mismatch` as "Mismatch". The reader app may use the full names of Section 6.1 (`r` in the payload does not change).
 
-## 6. コード表
+## 6. Code tables
 
-### 6.1 判定（`r`、`verdict`、`verdict_code`）
+### 6.1 Verdict (`r`, `verdict`, `verdict_code`)
 
-| コード | `verdict`の文字列 | 日本語表示 | 意味 |
+| Code | `verdict` string | Japanese label (romanized) | Meaning |
 |---|---|---|---|
-| `N` | `No Defect` | 不良なし | 全ステップPASS |
-| `M` | `Malware Detected` | マルウェア検知 | ClamAVが検知。他の失敗より優先 |
-| `C` | `Counterfeit Suspected` | 偽装疑い | 申告容量または実容量が公称の107%超、f3probeの`Bad news`、消失50%以上のいずれか。「疑い」であり断定ではない |
-| `S` | `Spec Mismatch` | 仕様不一致 | 容量不足または速度不足 |
-| `D` | `Defective` | 不良 | 容量は足りているがf3readが消失・破損・変化・上書きセクタを検知 |
-| `I` | `Inconclusive` | 判定不能 | ERROR、SKIPPED、未実装のステップが残る |
+| `N` | `No Defect` | Fuguai nashi | All steps PASS |
+| `M` | `Malware Detected` | Marueya kenchi | Detected by ClamAV. Takes priority over other failures |
+| `C` | `Counterfeit Suspected` | Gisou utagai | Any of: the advertised or real capacity exceeds 107% of the nominal capacity, f3probe `Bad news`, 50% or more lost. This is a suspicion, not a conclusion |
+| `S` | `Spec Mismatch` | Shiyou fuitchi | Insufficient capacity or insufficient speed |
+| `D` | `Defective` | Furyou | The capacity is sufficient, but f3read detected lost, corrupted, changed, or overwritten sectors |
+| `I` | `Inconclusive` | Hantei fuka | ERROR, SKIPPED, or unimplemented steps remain |
 
-優先順位は`M` > `C` > `D` > `S` > `N`で、ERRORやSKIPPEDが残れば`I`になる。
+The priority is `M` > `C` > `D` > `S` > `N`, and if any ERROR or SKIPPED remains the verdict is `I`.
 
-frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語「偽装疑い」、英語表示は「Counterfeit Suspected」のまま、色はマルウェア検知の赤`#B71C1C`と不良の紫`#6A1B9A`と区別できる濃いマゼンタ系`#AD1457`を推奨する。読み取りアプリも同じ配色にすると画面と揃う。
+Request to the frontend (phase 2): show `Counterfeit Suspected` as the Japanese label for "counterfeit suspected" in Japanese display and as "Counterfeit Suspected" in English display, with the dark magenta `#AD1457`, which can be told apart from the red `#B71C1C` for Malware Detected and the purple `#6A1B9A` for Defective. Using the same colors in the reader app keeps it consistent with the screen.
 
-### 6.2 ステップ状態（`st`の状態、`steps`の値、`step_*`列）
+### 6.2 Step state (state in `st`, values of `steps`, `step_*` columns)
 
-| コード | `result.json`の値 | 意味 |
+| Code | Value in `result.json` | Meaning |
 |---|---|---|
-| `P` | `pass` | 合格 |
-| `F` | `fail` | 不合格（判定に効く） |
-| `E` | `error` | 実行できなかった、またはタイムアウト（`Inconclusive`） |
-| `S` | `skipped` | 実行しなかった（マルウェア検知後、`allow_destructive = false`など） |
-| `N` | `not_implemented` | 未実装 |
+| `P` | `pass` | Passed |
+| `F` | `fail` | Failed (affects the verdict) |
+| `E` | `error` | Could not run, or timed out (`Inconclusive`) |
+| `S` | `skipped` | Not run (after a malware detection, with `allow_destructive = false`, and so on) |
+| `N` | `not_implemented` | Not implemented |
 
-### 6.3 ステップ名（`st`の名前、`reason_codes`の略号）
+### 6.3 Step names (names in `st`, abbreviations in `reason_codes`)
 
-| コード | ステップ名 | 内容 |
+| Code | Step name | Content |
 |---|---|---|
-| `m` | `malware` | ClamAVスキャン |
-| `h` | `hash_inventory` | SHA-256ハッシュ台帳（`hash-inventory.tsv`） |
-| `c` | `capacity` | 容量検証（f3write＋f3read、またはf3probe） |
-| `s` | `speed` | 速度検証（fio） |
-| `u` | `unmount` | アンマウント |
+| `m` | `malware` | ClamAV scan |
+| `h` | `hash_inventory` | SHA-256 hash inventory (`hash-inventory.tsv`) |
+| `c` | `capacity` | Capacity verification (f3write + f3read, or f3probe) |
+| `s` | `speed` | Speed verification (fio) |
+| `u` | `unmount` | Unmount |
 
-通常QRの`st`では表に無い名前は先頭3文字、`reason_codes`では先頭1文字を使う。
+In `st` of the normal QR, a name not in the table uses its first 3 characters, and in `reason_codes` it uses its first character.
 
-### 6.4 デバイス種別（`dc`、`device_class`）
+### 6.4 Device class (`dc`, `device_class`)
 
-| 2文字コード | `device_class` | 種別 | 最低値 読み／書き（MB/s） |
+| 2-character code | `device_class` | Class | Minimum read / write (MB/s) |
 |---|---|---|---|
 | `h5` | `hdd_5400` | HDD 5400rpm | 80 / 80 |
 | `h7` | `hdd_7200` | HDD 7200rpm | 120 / 120 |
@@ -263,165 +265,165 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 | `ns` | `nvme_ssd` | NVMe / USB3.2 SSD | 500 / 500 |
 | `s1` | `sd_c10` | SD Class10 / U1 | 25 / 10 |
 | `s3` | `sd_u3` | SD U3 / V30 | 90 / 30 |
-| `u2` | `usb2_flash` | USB2.0フラッシュ | 15 / 5 |
-| `u3` | `usb3_flash` | USB3.0フラッシュ | 50 / 15 |
+| `u2` | `usb2_flash` | USB2.0 flash | 15 / 5 |
+| `u3` | `usb3_flash` | USB3.0 flash | 50 / 15 |
 
-`device_class_basis`（`result.json`・SQLite）は種別の由来で、`config`（設定値）、`link_speed`（USBリンク速度から推定。480Mbpsで`usb2_flash`、5000Mbps以上で`usb3_flash`）、`unknown`のいずれか。
+`device_class_basis` (`result.json` and SQLite) is the origin of the class, and is one of `config` (the configured value), `link_speed` (inferred from the USB link speed: `usb2_flash` at 480Mbps and `usb3_flash` at 5000Mbps or more), and `unknown`.
 
-### 6.5 容量の区別（`ck`、`kind`、`capacity_kind`）
+### 6.5 Capacity classification (`ck`, `kind`, `capacity_kind`)
 
-| `ck` | `kind` | 意味 |
+| `ck` | `kind` | Meaning |
 |---|---|---|
-| `-` | `ok` | 合格 |
-| `S` | `short` | 容量不足（実容量が基準の93%未満） |
-| `D` | `defect` | 容量は足りているがセクタ不良 |
-| `C` | `counterfeit` | 偽装疑い（内訳は`counterfeit_reasons`） |
-| `U` | `unverified` | 検証済み領域が閾値に届かない（f3writeモードでほぼ満杯の検体。ERROR） |
-| `?` | — | 容量ステップがPASS／FAIL以外（SKIPPED・ERROR・未実装）で`kind`が無い |
+| `-` | `ok` | Passed |
+| `S` | `short` | Insufficient capacity (the real capacity is below 93% of the reference) |
+| `D` | `defect` | The capacity is sufficient, but there are bad sectors |
+| `C` | `counterfeit` | Counterfeit suspected (the breakdown is in `counterfeit_reasons`) |
+| `U` | `unverified` | The verified area does not reach the threshold (a nearly full sample in f3write mode. ERROR) |
+| `?` | — | The capacity step is neither PASS nor FAIL (SKIPPED, ERROR, or not implemented), so there is no `kind` |
 
-### 6.6 申告容量の超過（`co`、`advertised_over`）
+### 6.6 Excess over the advertised capacity (`co`, `advertised_over`)
 
-| `co` | `advertised_over` | 意味 |
+| `co` | `advertised_over` | Meaning |
 |---|---|---|
-| `1` | `true` | lsblkの申告容量が公称×`over_ratio`（既定1.07）を超えた |
-| `0` | `false` | 超えていない |
-| `null` | `false` | `nominal_bytes`が未設定で比べていない |
+| `1` | `true` | The advertised capacity from lsblk exceeded nominal × `over_ratio` (default 1.07) |
+| `0` | `false` | It did not exceed |
+| `null` | `false` | `nominal_bytes` is not set, so no comparison was made |
 
-このチェックはマウントもスキャンもしていない検査開始直後に行い、`allow_destructive = false`でもマルウェア検知で止まっても記録される。ファイル用QRの`advertised_over`は`nominal_bytes`未設定でも`false`になるので、「未設定」を区別したいときは`capacity.nominal_bytes`（または詳細QRの`cn`）が`null`かどうかを見る。
+This check is made right at the start of the inspection, before any mounting or scanning, and is recorded even with `allow_destructive = false` and even when a malware detection stops the inspection. `advertised_over` of the file QR is `false` even when `nominal_bytes` is not set, so to tell "not set" apart, look at whether `capacity.nominal_bytes` (or `cn` of the detail QR) is `null`.
 
-### 6.7 速度の根拠と重大度（`sb`、`sv`）、偽装理由（`counterfeit_reasons`）
+### 6.7 Speed basis and severity (`sb`, `sv`), counterfeit reasons (`counterfeit_reasons`)
 
-| `sb` | `basis_read`／`basis_write` | 意味 |
+| `sb` | `basis_read` / `basis_write` | Meaning |
 |---|---|---|
-| `n` | `nominal` | 設定した公称速度を基準にした |
-| `c` | `class` | デバイス種別の最低値を基準にした |
-| `-` | `none` | 基準が無く判定対象外 |
+| `n` | `nominal` | The configured nominal speed was used as the reference |
+| `c` | `class` | The minimum for the device class was used as the reference |
+| `-` | `none` | There is no reference, so it is not judged |
 
-| `sv` | `severity` | 意味 |
+| `sv` | `severity` | Meaning |
 |---|---|---|
-| `s` | `severe` | 測定値が基準値の50%未満（「速度不足（著しく下回る）」） |
-| `m` | `minor` | 50%以上80%未満（「速度不足（わずかに下回る）」） |
-| `-` | `null` | FAILではない |
+| `s` | `severe` | The measured value is below 50% of the reference (the summary says the speed is far below) |
+| `m` | `minor` | 50% or more and below 80% (the summary says the speed is slightly below) |
+| `-` | `null` | Not FAIL |
 
-| `counterfeit_reasons`の値 | 意味 |
+| Value of `counterfeit_reasons` | Meaning |
 |---|---|
-| `over_advertised` | 申告容量（lsblk）が公称×`over_ratio`を超えた |
-| `over_actual` | 実測容量が公称×`over_ratio`を超えた |
-| `probe_bad_news` | f3probeが`Bad news:`を報告した |
-| `lost_ratio` | f3readの消失セクタが50%以上 |
+| `over_advertised` | The advertised capacity (lsblk) exceeded nominal × `over_ratio` |
+| `over_actual` | The measured capacity exceeded nominal × `over_ratio` |
+| `probe_bad_news` | f3probe reported `Bad news:` |
+| `lost_ratio` | f3read lost 50% or more of the sectors |
 
-複数が同時に立つことがある。順序は固定（`over_advertised` → `over_actual` → `probe_bad_news` → `lost_ratio`）。
+Several can be set at the same time. The order is fixed (`over_advertised` → `over_actual` → `probe_bad_news` → `lost_ratio`).
 
-### 6.8 判定理由コード（`reason_codes`）
+### 6.8 Verdict reason codes (`reason_codes`)
 
-`<ステップ略号>:<理由>`の形。順序は`result.json`の`steps`の順で、非破壊チェック由来の`c:over`は先頭に置く。
+The form is `<step abbreviation>:<reason>`. The order follows the order of `steps` in `result.json`, and `c:over`, which comes from the non-destructive check, is placed first.
 
-| コード | 意味 |
+| Code | Meaning |
 |---|---|
-| `m:found` | マルウェア検知（malware FAIL） |
-| `c:over` | 申告容量または実測容量が公称×`over_ratio`を超過（非破壊チェックと容量ステップの両方で立っても1回） |
-| `c:probe` | f3probeの`Bad news` |
-| `c:lost` | 消失セクタ50%以上 |
-| `c:short` | 容量不足 |
-| `c:defect` | セクタ不良（`Defective`） |
-| `s:severe` | 速度不足、著しく下回る |
-| `s:minor` | 速度不足、わずかに下回る |
-| `<略号>:timeout` | そのステップがタイムアウト（`m:timeout`、`c:timeout`、`s:timeout`、`h:timeout`） |
-| `<略号>:error` | そのステップがERROR（タイムアウト以外） |
-| `<略号>:skipped` | そのステップがSKIPPED |
-| `<略号>:not_implemented` | そのステップが未実装 |
+| `m:found` | Malware detected (malware FAIL) |
+| `c:over` | The advertised or measured capacity exceeded nominal × `over_ratio` (counted once even if both the non-destructive check and the capacity step set it) |
+| `c:probe` | f3probe `Bad news` |
+| `c:lost` | 50% or more lost sectors |
+| `c:short` | Insufficient capacity |
+| `c:defect` | Bad sectors (`Defective`) |
+| `s:severe` | Insufficient speed, far below |
+| `s:minor` | Insufficient speed, slightly below |
+| `<abbreviation>:timeout` | That step timed out (`m:timeout`, `c:timeout`, `s:timeout`, `h:timeout`) |
+| `<abbreviation>:error` | That step is ERROR (other than a timeout) |
+| `<abbreviation>:skipped` | That step is SKIPPED |
+| `<abbreviation>:not_implemented` | That step is not implemented |
 
-例: `nominal_bytes`を設定し`allow_destructive = false`で申告容量が超過した検査は`["c:over", "c:skipped", "s:skipped"]`になる。
+Example: an inspection with `nominal_bytes` set, `allow_destructive = false`, and an advertised capacity in excess gives `["c:over", "c:skipped", "s:skipped"]`.
 
-## 7. `result.json`との対応
+## 7. Mapping to `result.json`
 
-詳細QRのキーを基準に並べる。`…details`は`steps[]`のうち該当ステップの`details`。
+The rows are arranged by the keys of the detail QR. `…details` is the `details` of the relevant step in `steps[]`.
 
-| 項目 | 詳細QR v:3 | 通常QR v:2 | ファイル用QR v:3 | `result.json` | SQLite列 | 単位 |
+| Item | Detail QR v:3 | Normal QR v:2 | File QR v:3 | `result.json` | SQLite column | Unit |
 |---|---|---|---|---|---|---|
-| 形式版 | `v`=3 | `v`=2 | `v`=3 | — | — | — |
-| 枚目 | `p` | — | — | — | — | — |
-| ダイジェスト | `d`（12桁） | `d`（16桁） | `digest`（64桁） | （ファイルのSHA-256） | `result_digest` | hex |
-| 開始時刻 | `t` | `t` | `started_at` | `started_at` | `started_at`、`started_compact` | UTC |
-| 終了時刻 | — | — | `finished_at` | `finished_at` | `finished_at` | UTC |
-| 所要時間 | `e` | — | `elapsed_s` | `elapsed_s` | `elapsed_s` | 秒 |
-| シリアル | `s`、`k` | `s`、`k` | `serial`、`kernel_name` | `device.serial`、`device.kernel_name` | `serial`、`kernel_name` | — |
-| ポートパス | — | — | `port_path` | `device.port_path` | `port_path` | — |
-| 判定 | `r` | `r` | `verdict` | `verdict` | `verdict`、`verdict_code` | — |
-| ステップ状態 | — | `st` | `steps` | `steps[].status` | `step_*` | — |
-| マルウェア検知数 | `m` | `n` | `malware_count` | `len(steps[malware].details.detections)` | `malware_count` | 件 |
-| ClamAV DB版 | `dv` | — | `clamav_db` | `…details.database.db_version` | `clamav_db_version` | — |
-| ClamAV DB日付 | `db` | — | `clamav_db_date` | `…details.database.db_date` | `clamav_db_date` | 日 |
-| 公称容量 | `cn` | — | `capacity.nominal_bytes` | `advertised_check.nominal_bytes`（常に入る）、`steps[capacity].details.nominal_bytes`（容量ステップが走ったとき） | `nominal_bytes` | QR: MB、他: バイト |
-| 申告容量 | `ca` | — | `capacity.advertised_bytes` | `device.advertised_bytes` | `advertised_bytes` | 同上 |
-| 実測容量 | `cx` | — | `capacity.actual_bytes` | `…details.actual_bytes` | `actual_bytes` | 同上 |
-| 容量の区別 | `ck` | — | `capacity.kind` | `…details.kind` | `capacity_kind` | — |
-| 申告容量の超過（非破壊） | `co` | — | `advertised_over` | `advertised_check.exceeded` | `advertised_over` | 0/1 |
-| 消失比率 | `cl` | — | `capacity.lost_ratio` | `…details.lost_ratio` | `lost_ratio` | 比率 |
-| 偽装理由 | （`ck`=`C`） | — | `capacity.counterfeit_reasons` | `…details.counterfeit_reasons` | `counterfeit_reasons` | — |
-| f3probeの判定行 | — | — | `capacity.probe_verdict_line` | `…details.probe_verdict_line` | `probe_verdict_line` | — |
-| リンク速度 | `ls` | — | `link_speed_mbps` | `device.link_speed_mbps` | `link_speed_mbps` | Mbps |
-| デバイス種別 | `dc`（2文字） | — | `device_class` | `steps[speed].details.device_class` | `device_class` | — |
-| 速度 読み／書き | `sr`、`sw` | — | `speed.read_mb_s`、`write_mb_s` | `…details.read.mb_s`、`write.mb_s` | `read_mb_s`、`write_mb_s` | MB/s |
-| 閾値 読み／書き | `tr`、`tw` | — | `speed.threshold_*_mb_s` | `…details.threshold_*_mb_s` | `threshold_*_mb_s` | MB/s |
-| 判定根拠 | `sb`（読みを優先） | — | `speed.basis_read`、`basis_write` | `…details.basis_read`、`basis_write` | `speed_basis_read`、`speed_basis_write` | — |
-| 重大度 | `sv` | — | `speed.severity` | `…details.severity` | `speed_severity` | — |
-| 判定理由コード | （`ck`、`sv`、`m`） | — | `reason_codes` | `reason_codes` | `reason_codes` | — |
-| 判定理由（文） | — | — | `reasons` | `reasons` | `reasons` | — |
-| 台帳ダイジェスト | `hd`（16桁） | — | `hash_inventory_digest`（64桁） | `steps[hash_inventory].details.digest` | `hash_inventory_digest` | hex |
-| 台帳行数 | `hn` | — | `hash_inventory_lines` | `…details.lines` | `hash_inventory_lines` | 行 |
-| 結果ディレクトリ | — | — | — | `output_dir` | `output_dir`、`inspection_id` | — |
-| 状態 | — | — | — | — | `state` | — |
+| Format version | `v`=3 | `v`=2 | `v`=3 | — | — | — |
+| Code number | `p` | — | — | — | — | — |
+| Digest | `d` (12 digits) | `d` (16 digits) | `digest` (64 digits) | (SHA-256 of the file) | `result_digest` | hex |
+| Start time | `t` | `t` | `started_at` | `started_at` | `started_at`, `started_compact` | UTC |
+| End time | — | — | `finished_at` | `finished_at` | `finished_at` | UTC |
+| Elapsed time | `e` | — | `elapsed_s` | `elapsed_s` | `elapsed_s` | Seconds |
+| Serial | `s`, `k` | `s`, `k` | `serial`, `kernel_name` | `device.serial`, `device.kernel_name` | `serial`, `kernel_name` | — |
+| Port path | — | — | `port_path` | `device.port_path` | `port_path` | — |
+| Verdict | `r` | `r` | `verdict` | `verdict` | `verdict`, `verdict_code` | — |
+| Step states | — | `st` | `steps` | `steps[].status` | `step_*` | — |
+| Malware detection count | `m` | `n` | `malware_count` | `len(steps[malware].details.detections)` | `malware_count` | Count |
+| ClamAV DB version | `dv` | — | `clamav_db` | `…details.database.db_version` | `clamav_db_version` | — |
+| ClamAV DB date | `db` | — | `clamav_db_date` | `…details.database.db_date` | `clamav_db_date` | Date |
+| Nominal capacity | `cn` | — | `capacity.nominal_bytes` | `advertised_check.nominal_bytes` (always present), `steps[capacity].details.nominal_bytes` (when the capacity step ran) | `nominal_bytes` | QR: MB, others: bytes |
+| Advertised capacity | `ca` | — | `capacity.advertised_bytes` | `device.advertised_bytes` | `advertised_bytes` | Same as above |
+| Measured capacity | `cx` | — | `capacity.actual_bytes` | `…details.actual_bytes` | `actual_bytes` | Same as above |
+| Capacity classification | `ck` | — | `capacity.kind` | `…details.kind` | `capacity_kind` | — |
+| Excess over the advertised capacity (non-destructive) | `co` | — | `advertised_over` | `advertised_check.exceeded` | `advertised_over` | 0/1 |
+| Lost ratio | `cl` | — | `capacity.lost_ratio` | `…details.lost_ratio` | `lost_ratio` | Ratio |
+| Counterfeit reasons | (`ck`=`C`) | — | `capacity.counterfeit_reasons` | `…details.counterfeit_reasons` | `counterfeit_reasons` | — |
+| f3probe verdict line | — | — | `capacity.probe_verdict_line` | `…details.probe_verdict_line` | `probe_verdict_line` | — |
+| Link speed | `ls` | — | `link_speed_mbps` | `device.link_speed_mbps` | `link_speed_mbps` | Mbps |
+| Device class | `dc` (2 characters) | — | `device_class` | `steps[speed].details.device_class` | `device_class` | — |
+| Speed read / write | `sr`, `sw` | — | `speed.read_mb_s`, `write_mb_s` | `…details.read.mb_s`, `write.mb_s` | `read_mb_s`, `write_mb_s` | MB/s |
+| Threshold read / write | `tr`, `tw` | — | `speed.threshold_*_mb_s` | `…details.threshold_*_mb_s` | `threshold_*_mb_s` | MB/s |
+| Basis of the verdict | `sb` (read takes priority) | — | `speed.basis_read`, `basis_write` | `…details.basis_read`, `basis_write` | `speed_basis_read`, `speed_basis_write` | — |
+| Severity | `sv` | — | `speed.severity` | `…details.severity` | `speed_severity` | — |
+| Verdict reason codes | (`ck`, `sv`, `m`) | — | `reason_codes` | `reason_codes` | `reason_codes` | — |
+| Verdict reasons (sentences) | — | — | `reasons` | `reasons` | `reasons` | — |
+| Inventory digest | `hd` (16 digits) | — | `hash_inventory_digest` (64 digits) | `steps[hash_inventory].details.digest` | `hash_inventory_digest` | hex |
+| Inventory row count | `hn` | — | `hash_inventory_lines` | `…details.lines` | `hash_inventory_lines` | Rows |
+| Results directory | — | — | — | `output_dir` | `output_dir`, `inspection_id` | — |
+| State | — | — | — | — | `state` | — |
 
-## 8. SQLite（Pi側）との対応
+## 8. Mapping to SQLite (on the Pi)
 
-backendは検査1件につき`/var/lib/usb-sentinel/db/inspections.sqlite`の`inspections`テーブルへ1行を書く。開始時に`state = 'started'`で挿入し、`result.json`を書いた後に全列を埋めて`state = 'completed'`に更新する。`result.json`が正本で、DBは一覧・検索のための索引である。スキーマ版は`PRAGMA user_version`（現在`1`）で管理し、以降の版では列の追加だけを行う（削除・改名はしない）。
+For each inspection, the backend writes one row to the `inspections` table of `/var/lib/usb-sentinel/db/inspections.sqlite`. It inserts the row with `state = 'started'` at the start, and after writing `result.json` it fills in all columns and updates the row to `state = 'completed'`. `result.json` is the source of truth, and the DB is an index for listing and searching. The schema version is managed with `PRAGMA user_version` (currently `1`), and later versions only add columns (no deletions or renames).
 
-### 8.1 列
+### 8.1 Columns
 
-| 列 | 型 | 由来 |
+| Column | Type | Source |
 |---|---|---|
-| `inspection_id` | TEXT 主キー | 結果ディレクトリ名（`<timestamp>-<serial>`） |
+| `inspection_id` | TEXT primary key | The results directory name (`<timestamp>-<serial>`) |
 | `state` | TEXT | `started` / `completed` |
-| `verdict`、`verdict_code` | TEXT | 判定名と1文字コード（完了時に入る。開始行はNULL） |
-| `serial`、`kernel_name`、`port_path`、`vendor`、`model` | TEXT | `result.json`の`device.*` |
-| `started_at` | TEXT | ISO 8601（UTC） |
-| `started_compact` | TEXT | `YYYYmmddTHHMMSSZ`（通常QR・詳細QRの`t`と同じ） |
-| `finished_at` | TEXT | ISO 8601。開始行はNULL |
-| `elapsed_s` | REAL | 所要秒数 |
-| `result_digest` | TEXT | `result.json`のSHA-256（64桁） |
-| `step_malware`、`step_hash_inventory`、`step_capacity`、`step_speed`、`step_unmount` | TEXT | 各ステップの状態（`pass`など）。無いステップはNULL |
-| `malware_count` | INTEGER | 検知数 |
-| `clamav_db_version`、`clamav_db_date` | TEXT | DB版と日付（`YYYY-MM-DD`） |
-| `clamav_scanned_files` | INTEGER | clamscan集計行の`Scanned files` |
-| `clamav_scan_time_s` | REAL | clamscan集計行の`Time` |
-| `nominal_bytes`、`advertised_bytes`、`actual_bytes` | INTEGER | 公称（`advertised_check.nominal_bytes`）・申告・実測（バイト） |
-| `advertised_over` | INTEGER | 非破壊チェックの超過（1/0） |
+| `verdict`, `verdict_code` | TEXT | The verdict name and its 1-character code (filled in on completion; NULL on a started row) |
+| `serial`, `kernel_name`, `port_path`, `vendor`, `model` | TEXT | `device.*` of `result.json` |
+| `started_at` | TEXT | ISO 8601 (UTC) |
+| `started_compact` | TEXT | `YYYYmmddTHHMMSSZ` (same as `t` of the normal and detail QR) |
+| `finished_at` | TEXT | ISO 8601. NULL on a started row |
+| `elapsed_s` | REAL | Elapsed seconds |
+| `result_digest` | TEXT | SHA-256 of `result.json` (64 digits) |
+| `step_malware`, `step_hash_inventory`, `step_capacity`, `step_speed`, `step_unmount` | TEXT | The state of each step (such as `pass`). NULL for a step that does not exist |
+| `malware_count` | INTEGER | Detection count |
+| `clamav_db_version`, `clamav_db_date` | TEXT | DB version and date (`YYYY-MM-DD`) |
+| `clamav_scanned_files` | INTEGER | `Scanned files` in the clamscan summary |
+| `clamav_scan_time_s` | REAL | `Time` in the clamscan summary |
+| `nominal_bytes`, `advertised_bytes`, `actual_bytes` | INTEGER | Nominal (`advertised_check.nominal_bytes`), advertised, and measured (bytes) |
+| `advertised_over` | INTEGER | Excess found by the non-destructive check (1/0) |
 | `capacity_kind` | TEXT | `ok` / `short` / `defect` / `counterfeit` / `unverified` |
-| `counterfeit_reasons` | TEXT | JSON配列。非破壊チェックの`over_advertised`と容量ステップの理由を重複なしで和集合にしたもの |
-| `lost_ratio` | REAL | 消失比率 |
-| `probe_verdict_line` | TEXT | f3probeの判定行 |
-| `link_speed_mbps` | INTEGER | USBリンク速度 |
-| `device_class`、`device_class_basis` | TEXT | 種別とその由来 |
-| `read_mb_s`、`write_mb_s` | REAL | 実測速度 |
-| `threshold_read_mb_s`、`threshold_write_mb_s` | REAL | 閾値 |
-| `speed_basis_read`、`speed_basis_write` | TEXT | 判定根拠 |
+| `counterfeit_reasons` | TEXT | JSON array. The union, without duplicates, of `over_advertised` from the non-destructive check and the reasons from the capacity step |
+| `lost_ratio` | REAL | Lost ratio |
+| `probe_verdict_line` | TEXT | The verdict line of f3probe |
+| `link_speed_mbps` | INTEGER | USB link speed |
+| `device_class`, `device_class_basis` | TEXT | The class and its origin |
+| `read_mb_s`, `write_mb_s` | REAL | Measured speed |
+| `threshold_read_mb_s`, `threshold_write_mb_s` | REAL | Thresholds |
+| `speed_basis_read`, `speed_basis_write` | TEXT | Basis of the verdict |
 | `speed_severity` | TEXT | `severe` / `minor` |
-| `reason_codes`、`reasons` | TEXT | JSON配列（`reasons`は日本語をエスケープしない） |
-| `hash_inventory_digest` | TEXT | 台帳のSHA-256（64桁） |
-| `hash_inventory_lines` | INTEGER | 台帳の行数 |
-| `output_dir` | TEXT | 結果ディレクトリの絶対パス |
-| `warnings` | TEXT | JSON配列。各ステップの警告をステップ順に連結し、検査全体の警告を続けたもの |
-| `created_at`、`updated_at` | TEXT | 行の作成・更新時刻（UTC） |
+| `reason_codes`, `reasons` | TEXT | JSON arrays (`reasons` does not escape Japanese) |
+| `hash_inventory_digest` | TEXT | SHA-256 of the inventory (64 digits) |
+| `hash_inventory_lines` | INTEGER | Number of inventory rows |
+| `output_dir` | TEXT | Absolute path of the results directory |
+| `warnings` | TEXT | JSON array. The warnings of each step concatenated in step order, followed by the warnings of the whole inspection |
+| `created_at`, `updated_at` | TEXT | Row creation and update time (UTC) |
 
-索引は`started_at`、`(serial, started_at)`、`(port_path, started_at)`、`state`、`result_digest`に張ってある。
+Indexes exist on `started_at`, `(serial, started_at)`, `(port_path, started_at)`, `state`, and `result_digest`.
 
-### 8.2 読み取りのクエリ例
+### 8.2 Query examples for reading
 
-frontendや他の読み取り側は読み取り専用で開く（`sqlite3.connect("file:...?mode=ro", uri=True)`、`PRAGMA query_only = ON`、`busy_timeout = 1000`）。
+The frontend and other readers open the DB read-only (`sqlite3.connect("file:...?mode=ro", uri=True)`, `PRAGMA query_only = ON`, `busy_timeout = 1000`).
 
 ```sql
--- ポートごとの最新（接続時刻以降）
+-- Latest per port (since the connection time)
 SELECT inspection_id, state, verdict, serial, kernel_name, port_path, started_at,
        finished_at, step_malware, step_hash_inventory, step_capacity, step_speed,
        malware_count, advertised_over, result_digest, output_dir
@@ -429,53 +431,53 @@ FROM inspections
 WHERE port_path = ? AND started_at >= ?
 ORDER BY started_at DESC LIMIT 1;
 
--- 開始したが未完了（USB切断の疑い）
+-- Started but not completed (the USB drive may have been disconnected)
 SELECT inspection_id, serial, port_path, started_at
 FROM inspections WHERE state = 'started' AND started_at < ?;
 
--- 同一シリアルの履歴
+-- History of the same serial
 SELECT started_at, verdict, capacity_kind, speed_severity
 FROM inspections WHERE serial = ? ORDER BY started_at DESC;
 
--- QRのダイジェスト（先頭12桁以上）から検査を探す
+-- Find an inspection from the QR digest (the first 12 digits or more)
 SELECT inspection_id, verdict, serial, started_at, output_dir
 FROM inspections WHERE result_digest LIKE ? || '%';
 ```
 
-`state = 'started'`の行は検査中か、`result.json`を書けずに終わった（USB切断など）ことを示す。`result.json`が存在するのに`started`のままなら完了記録に失敗しており、journalに「SQLite記録失敗（完了）」が残っている。
+A row with `state = 'started'` means the inspection is running, or that it ended without writing `result.json` (for example the USB drive was disconnected). If `result.json` exists but the row is still `started`, recording the completion failed, and "SQLite record failed (completion)" remains in the journal.
 
-## 9. 読み取りアプリ（Flutter）側のスキーマ推奨
+## 9. Recommended schema on the reader app (Flutter) side
 
-Pi側の列（第8.1節）をそのまま持ち、ケース情報を列として足す。Pi側はケース情報を一切持たないので、商品との結び付けは読み取りアプリ側で完結する。
+Keep the columns of the Pi side (Section 8.1) as they are, and add the case information as columns. The Pi side holds no case information at all, so linking to the product is completed on the reader app side.
 
-- 主キーは`result_digest`。ファイル用QRなら64桁、通常QRなら16桁、詳細QRなら12桁が得られる。先頭12桁を主キーにしてよい（1万件で偶然一致する確率は約2×10^-7）。長い桁を後から読んだら上書きして伸ばす。
-- `started_compact`（16桁）と`serial`を補助キーにし、ダイジェストが読めなかった場合の突き合わせに使う。
-- `nominal_bytes`は2列に分ける。`nominal_bytes_pi`（Piの`config.toml`で設定した値。QRの`cn`／`capacity.nominal_bytes`）と`nominal_bytes_product`（読み取りアプリで入力した商品ページの値）。Piの設定はホストで1つなので、同時に検査した別商品には合わない値が入っていることがある。
-- 足すケース情報の例: 商品ID、ブランド、商品名、価格、商品ページURL、調査員、写真ファイル名、入力日時、備考。
-- QRごとの生文字列（`raw_file_qr`、`raw_normal_qr`、`raw_detail_qr_1`〜`3`）を保存しておくと、後で形式が変わっても再解釈できる。
-- 詳細QRの数値はMB単位なので、Pi側の列（バイト）と合わせる場合は×10^6して保存するか、別列（`*_mb`）にする。
+- The primary key is `result_digest`. You get 64 digits from the file QR, 16 digits from the normal QR, and 12 digits from the detail QR. Using the first 12 digits as the primary key is acceptable (the probability of an accidental collision among 10,000 records is about 2×10^-7). If you later read a longer digest, overwrite the key and extend it.
+- Use `started_compact` (16 digits) and `serial` as auxiliary keys, for matching when the digest could not be read.
+- Split `nominal_bytes` into two columns: `nominal_bytes_pi` (the value set in `config.toml` on the Pi; `cn` of the QR / `capacity.nominal_bytes`) and `nominal_bytes_product` (the value from the product page entered in the reader app). The Pi setting is one per host, so it may contain a value that does not fit a different product inspected at the same time.
+- Examples of case information to add: product ID, brand, product name, price, product page URL, inspector, photo file name, entry date and time, and remarks.
+- Saving the raw string of each QR (`raw_file_qr`, `raw_normal_qr`, `raw_detail_qr_1` to `3`) lets you reinterpret it later even if the format changes.
+- The numbers in the detail QR are in MB, so when matching them with the Pi-side columns (bytes), either multiply by 10^6 before saving or keep them in separate columns (`*_mb`).
 
-## 10. 検証手順
+## 10. Verification procedure
 
-持ち出した結果が改変されていないことを確かめる。
+Confirm that the carried-out result has not been tampered with.
 
-1. `result.json`の検証。ネットワーク接続PCで`sha256sum result.json`を取り、ファイル用QRの`digest`（64桁）と比べる。通常QRなら`sha256sum result.json | cut -c1-16`と`d`、詳細QRなら`cut -c1-12`と`d`を比べる。`result.json`はbackendが書いたバイト列をそのままハッシュしているので、再整形せずファイルのまま計算する。
-2. `hash-inventory.tsv`の検証。`sha256sum hash-inventory.tsv`と、ファイル用QRの`hash_inventory_digest`（64桁）または詳細QR 3枚目の`hd`（先頭16桁）を比べる。行数は`wc -l`と`hash_inventory_lines`／`hn`で確かめる。
-3. 1と2が一致すれば、`result.json`の中の値（検知数、容量、速度）はQRに書かれた時点のものと同じである。一致しなければファイルの差し替えか読み取りミスを疑い、QRを読み直す。
-4. ファイル用QRの`truncated`が`true`なら、シグネチャ・理由文の全文は`result.json`で確認する。
+1. Verify `result.json`. On a PC connected to the network, take `sha256sum result.json` and compare it with `digest` (64 digits) of the file QR. For the normal QR, compare `sha256sum result.json | cut -c1-16` with `d`; for the detail QR, compare `cut -c1-12` with `d`. `result.json` is hashed as the exact bytes written by the backend, so compute it on the file as it is, without reformatting.
+2. Verify `hash-inventory.tsv`. Compare `sha256sum hash-inventory.tsv` with `hash_inventory_digest` (64 digits) of the file QR or `hd` (first 16 digits) of code 3 of the detail QR. Check the row count with `wc -l` against `hash_inventory_lines` / `hn`.
+3. If 1 and 2 match, the values inside `result.json` (detection count, capacity, speed) are the same as when they were written to the QR. If they do not match, suspect that a file was swapped or a QR was misread, and read the QR again.
+4. If `truncated` of the file QR is `true`, check `result.json` for the full text of signatures and reason sentences.
 
-## 11. 変更履歴と互換性
+## 11. Change history and compatibility
 
-| 版 | 対象 | 変更 |
+| Version | Target | Change |
 |---|---|---|
-| ファイル用QR v:1 | `result-qr.png` | 初版。`verdict`、`serial`、`steps`、`clamav_db`、`digest`、`malware_count`、`signatures`、省略時のみ`truncated` |
-| 通常QR v:2 | 画面 | 初版。`r`は`N`/`M`/`S`/`D`/`I` |
-| ファイル用QR v:3 | `result-qr.png` | 第2期。第3.3節の追加キー。`truncated`を常に出す。`verdict`に`Counterfeit Suspected` |
-| 通常QR v:2 | 画面 | 第2期。`r`に`C`（Counterfeit Suspected）を追加。形式は不変 |
-| 詳細QR v:3 | 画面 | 第2期で新設。3枚固定 |
-| SQLite `user_version` 1 | `inspections.sqlite` | 第2期で新設 |
+| File QR v:1 | `result-qr.png` | First version. `verdict`, `serial`, `steps`, `clamav_db`, `digest`, `malware_count`, `signatures`, and `truncated` only when something was cut |
+| Normal QR v:2 | Screen | First version. `r` is `N`/`M`/`S`/`D`/`I` |
+| File QR v:3 | `result-qr.png` | Phase 2. The keys added in Section 3.3. `truncated` is always output. `Counterfeit Suspected` in `verdict` |
+| Normal QR v:2 | Screen | Phase 2. Added `C` (Counterfeit Suspected) to `r`. The format is unchanged |
+| Detail QR v:3 | Screen | New in phase 2. Fixed at 3 codes |
+| SQLite `user_version` 1 | `inspections.sqlite` | New in phase 2 |
 
-- 読み取りアプリは`v`で分岐し、v:1のファイル用QRも読めるようにしておく（第2期より前の結果ディレクトリが残っている）。v:1には`truncated`キーが無いことがあるので、無ければ`false`と解釈する。
-- ファイル用QR v:3は、将来キーを足すときも既存キーの意味を変えない。読み取りアプリは未知のキーを無視し、既知のキーが無ければ`null`扱いにする。
-- 判定名の文字列（`Counterfeit Suspected`など）はbackendの`Verdict`の値で、変更時は`backend/AGENTS.md`に従って報告される。読み取りアプリは第6.1節の表に無い値を「不明」として扱い、生の値を残す。
-- SQLiteは以降の版で列の追加だけを行う。読み取り側は列名で参照し、列の位置に依存しない。
+- The reader app branches on `v` and should also be able to read file QR v:1 (results directories from before phase 2 remain). v:1 may not have the `truncated` key; if it is absent, interpret it as `false`.
+- When keys are added to file QR v:3 in the future, the meaning of existing keys will not change. The reader app ignores unknown keys and treats a missing known key as `null`.
+- Verdict name strings (such as `Counterfeit Suspected`) are values of the backend's `Verdict`, and a change is reported in accordance with `backend/AGENTS.md`. The reader app treats a value not in the table in Section 6.1 as "unknown" and keeps the raw value.
+- SQLite only adds columns in later versions. Readers refer to columns by name and do not depend on column position.

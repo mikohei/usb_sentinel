@@ -1,4 +1,4 @@
-"""result.jsonのsteps[*].detailsからResultDetailを組むparse_detail()のテスト。"""
+"""Tests for parse_detail(), which builds ResultDetail from steps[*].details in result.json."""
 
 import pytest
 
@@ -8,7 +8,7 @@ from usb_sentinel_display.libs.result_detail import parse_detail
 
 
 def set_step(data: dict[str, object], name: str, **changes: object) -> None:
-    """stepsの該当ステップのキーを書き換える（status／detailsの差し替え用）。"""
+    """Rewrite a key of the matching step in steps (to swap status/details)."""
     steps = data["steps"]
     assert isinstance(steps, list)
     for step in steps:
@@ -20,7 +20,7 @@ def set_step(data: dict[str, object], name: str, **changes: object) -> None:
 
 class TestParseDetail:
     def test_full_phase2(self) -> None:
-        """第2期形式のresult.jsonから全フィールドが入る（バイト単位のまま）。"""
+        """A phase-2 result.json fills every field (values stay in bytes)."""
         detail = parse_detail(phase2_result())
         assert detail == ResultDetail(
             elapsed_s=312.5,
@@ -48,25 +48,25 @@ class TestParseDetail:
         )
 
     def test_phase1_all_none(self) -> None:
-        """第1期形式（新キーなし）は全None、reason_codesは空タプル。"""
+        """Phase-1 format (no new keys) gives all None and an empty reason_codes tuple."""
         detail = parse_detail(sample_result())
         assert detail == ResultDetail()
         assert detail.reason_codes == ()
         assert detail.advertised_over is None
 
     def test_capacity_skipped_ignores_kind(self) -> None:
-        """容量ステップがskippedならdetailsにkindがあってもcapacity_kindはNone。"""
+        """If the capacity step is skipped, capacity_kind is None even if details has kind."""
         data = phase2_result()
         set_step(data, "capacity", status="skipped")
         detail = parse_detail(data)
         assert detail.capacity_kind is None
         assert detail.lost_ratio is None
         assert detail.counterfeit_reasons is None
-        # actual_bytesはstatusを問わず読む。
+        # actual_bytes is read regardless of status.
         assert detail.actual_bytes == 29_500_000_000
 
     def test_capacity_error_reads_actual_bytes(self) -> None:
-        """errorでもactual_bytesだけは拾う（無ければNone）。"""
+        """Even on error, actual_bytes is picked up (None if absent)."""
         data = phase2_result()
         set_step(data, "capacity", status="error", details={"actual_bytes": 1_000})
         detail = parse_detail(data)
@@ -74,7 +74,7 @@ class TestParseDetail:
         assert detail.capacity_kind is None
 
     def test_nominal_null_makes_advertised_over_none(self) -> None:
-        """advertised_check.nominal_bytesがnullならexceededがFalseでもadvertised_overはNone。"""
+        """If advertised_check.nominal_bytes is null, advertised_over is None even when not over."""
         data = phase2_result()
         data["advertised_check"] = {"nominal_bytes": None, "exceeded": False}
         detail = parse_detail(data)
@@ -87,7 +87,7 @@ class TestParseDetail:
         assert parse_detail(data).advertised_over is True
 
     def test_counterfeit_reasons_tuple(self) -> None:
-        """counterfeit_reasonsはstr要素だけのタプルになる。"""
+        """counterfeit_reasons becomes a tuple of only its str elements."""
         data = phase2_result()
         set_step(
             data,
@@ -102,7 +102,7 @@ class TestParseDetail:
         assert detail.counterfeit_reasons == ("over_actual", "lost_ratio")
 
     def test_wrong_types_become_none(self) -> None:
-        """型違いの値はNone（elapsed_sが文字列、linesが文字列、boolの整数）。"""
+        """Wrong-typed values become None (elapsed_s str, lines str, bool as int)."""
         data = phase2_result()
         data["elapsed_s"] = "312"
         data["reason_codes"] = ["c:short", 3, None]
@@ -125,7 +125,7 @@ class TestParseDetail:
         assert detail.advertised_over is None
 
     def test_elapsed_int_and_db_version_int(self) -> None:
-        """elapsed_sの整数はfloatに、db_versionの整数は文字列に直す。"""
+        """An int elapsed_s becomes float; an int db_version becomes str."""
         data = phase2_result()
         data["elapsed_s"] = 300
         set_step(data, "malware", details={"database": {"db_version": 27650, "db_date": 20250601}})
@@ -137,7 +137,7 @@ class TestParseDetail:
 
     @pytest.mark.parametrize("broken", [None, "text", 1, []])
     def test_non_dict_containers(self, broken: object) -> None:
-        """device／advertised_check／details／databaseが辞書でなければその部分はNone。"""
+        """If device/advertised_check/details/database is not a dict, that part is None."""
         data = phase2_result()
         data["advertised_check"] = broken
         set_step(data, "malware", details={"database": broken})
@@ -146,7 +146,7 @@ class TestParseDetail:
         assert detail.nominal_bytes is None
         assert detail.clamav_db_version is None
         assert detail.device_class is None
-        # 他のステップは影響を受けない。
+        # Other steps are unaffected.
         assert detail.hash_lines == 1234
 
     def test_steps_not_list(self) -> None:

@@ -1,4 +1,4 @@
-"""容量ステップのf3probeモード（use_probe = true）。"""
+"""f3probe mode of the capacity step (use_probe = true)."""
 
 from __future__ import annotations
 
@@ -110,7 +110,8 @@ class TestProbeMode:
         assert runner.calls == [("f3probe", "--destructive", "--time-ops", "/dev/sda")]
 
     def test_bad_news_is_counterfeit(self, probe_ctx: StepContext, runner: FakeRunner) -> None:
-        # 終了コードが非0でも解析結果だけで判定する。Bad news行は偽装疑い。
+        # Judge from the parsed output alone even with a non-zero exit code. A Bad news
+        # line means suspected counterfeit.
         runner.register(["f3probe"], returncode=1, stdout=F3PROBE_FAKE)
 
         result = _step().run(probe_ctx)
@@ -126,7 +127,8 @@ class TestProbeMode:
     def test_probe_verdict_line_copied_to_top_level(
         self, probe_ctx: StepContext, runner: FakeRunner
     ) -> None:
-        """QR・SQLiteがdetails.probeを掘らずに読めるようトップレベルにも写す。"""
+        """Copy to the top level too, so QR and SQLite can read it without digging into
+        details.probe."""
         runner.register(["f3probe"], stdout=F3PROBE_GENUINE)
 
         result = _step().run(probe_ctx)

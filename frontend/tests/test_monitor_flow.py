@@ -1,6 +1,6 @@
-"""Monitor.tick()のsystemctl呼び出し・結果の結び付け・接続時刻のフォールバックのテスト。
+"""Tests for Monitor.tick(): systemctl calls, result binding, and connect-time fallback.
 
-build()／static()などの組み立て補助はtest_monitorから借りる。
+Assembly helpers such as build() and static() are borrowed from test_monitor.
 """
 
 import json
@@ -46,7 +46,7 @@ class TestSystemctl:
 
 class TestResultsFlow:
     def test_result_bound_from_store(self, tmp_path: Path) -> None:
-        """結果ルートのresult.jsonがスロットに結び付く。"""
+        """result.json under the results root is bound to the slot."""
         root = tmp_path / "results"
         make_result(root, "20250601T120000Z-ABC123", sample_result(port_path="1-1.3"), 1100.0)
         disks = [AttachedDisk("sda", "1-1.3", "ABC123", 1000.0)]
@@ -96,7 +96,7 @@ class TestResultsFlow:
         assert seen == [1200.0]
 
     def test_real_sysfs_listing(self, fake_sysfs: FakeSysfs) -> None:
-        """既定のlist_usb_disksで偽ツリーから2台を読む。"""
+        """The default list_usb_disks reads two disks from the fake tree."""
         root = fake_sysfs.root / "results"
         root.mkdir()
         config = DisplayConfig(results_dir=root, sys_block=fake_sysfs.sys_block)
@@ -112,7 +112,7 @@ class TestFallbackTime:
     def test_uses_boot_time_or_first_seen(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """boot_timeが無ければ初見時刻を返し、同じカーネル名では値が変わらない。"""
+        """Without boot_time, return the first-seen time; it is stable for the same kernel name."""
         (tmp_path / "results").mkdir()
         monitor = build(tmp_path, list_disks=static([]), now=4242.0)
         import usb_sentinel_display.libs.monitor as monitor_mod

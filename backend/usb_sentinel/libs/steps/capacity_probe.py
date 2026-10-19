@@ -1,6 +1,6 @@
-"""容量ステップのf3probeモード（use_probe = true）。
+"""f3probe mode of the capacity step (use_probe = true).
 
-f3probeはファイルシステムを介さずデバイスに直接書くため、マウントは行わない。
+f3probe writes directly to the device without a filesystem, so nothing is mounted.
 """
 
 import re
@@ -23,13 +23,13 @@ _ANNOUNCED = re.compile(r"Announced size: .*\((\d+) blocks\)")
 _BLOCK_SIZE = re.compile(r"Physical block size: .*\(2\^(\d+) Bytes\)")
 _VERDICT = re.compile(r"^(Good news|Bad news):.*$", re.MULTILINE)
 
-# Physical block size行が無いときのブロックサイズ。
+# Block size used when there is no Physical block size line.
 DEFAULT_BLOCK_SIZE = 512
 
 
 @dataclass
 class ProbeSummary:
-    """f3probeのstdoutから取り出した集計。"""
+    """Summary extracted from f3probe stdout."""
 
     usable_blocks: int
     announced_blocks: int | None
@@ -38,10 +38,10 @@ class ProbeSummary:
 
 
 def parse_f3probe(text: str) -> ProbeSummary:
-    """f3probeのstdoutを解析する。
+    """Parse f3probe stdout.
 
     Raises:
-        ValueError: `*Usable* size`行が無いとき。
+        ValueError: If there is no `*Usable* size` line.
     """
     usable = _USABLE.search(text)
     if usable is None:
@@ -60,18 +60,19 @@ def parse_f3probe(text: str) -> ProbeSummary:
 def run_probe(
     ctx: StepContext, result: StepResult, budget: Budget, commands: list[list[str]]
 ) -> int | None:
-    """f3probeを実行して実容量（バイト）を返す。
+    """Run f3probe and return the actual capacity (bytes).
 
-    失敗時はresultをERRORにしてNoneを返す。CommandNotFoundErrorは呼び出し側に伝える。
+    On failure, result is left as ERROR and None is returned. CommandNotFoundError propagates
+    to the caller.
 
     Args:
-        ctx: ステップ文脈。
-        result: 書き込み先のステップ結果。
-        budget: 時間予算。
-        commands: 実行したargvの記録先（実行直前に追記する）。
+        ctx: Step context.
+        result: Step result to write to.
+        budget: Time budget.
+        commands: Where run argv values are recorded (appended right before running).
 
     Returns:
-        usable_blocks * block_size。失敗時はNone。
+        usable_blocks * block_size. None on failure.
     """
     if ctx.runner.which("f3probe") is None:
         result.summary = not_found_summary("f3probe")

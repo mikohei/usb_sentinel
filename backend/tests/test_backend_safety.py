@@ -70,7 +70,7 @@ def test_nonboolean_flags_rejected(config: Config) -> None:
 
 
 def test_rw_mount_always_uses_noexec_nosuid_nodev(ctx: StepContext, runner: FakeRunner) -> None:
-    """容量検査のrwマウントでも感染ファイルの実行余地を残さない。"""
+    """Even the capacity check's rw mount leaves no room to execute infected files."""
     runner.register(["lsblk"], stdout=LSBLK_UNMOUNTED)
     runner.register(["mount"])
     runner.register(["umount"])
@@ -86,7 +86,8 @@ def test_rw_mount_always_uses_noexec_nosuid_nodev(ctx: StepContext, runner: Fake
 
 
 def test_rw_mount_unmounts_even_when_body_raises(ctx: StepContext, runner: FakeRunner) -> None:
-    """検体へのrwマウントは例外経路でも必ず解除する（残ると次回検査のゲートで止まる）。"""
+    """The rw mount of the sample is always released, even on exception paths (a leftover mount
+    stops the next inspection at the gate)."""
     runner.register(["mount"])
     runner.register(["umount"])
     with (
@@ -99,7 +100,8 @@ def test_rw_mount_unmounts_even_when_body_raises(ctx: StepContext, runner: FakeR
 
 @pytest.fixture
 def infected_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
-    """EICARを検知する検査シーケンス全体のFakeRunner（破壊的コマンドも登録して呼ばれないことを見る）。"""
+    """FakeRunner for a full inspection sequence that detects EICAR (destructive commands are
+    registered too, to confirm they are never called)."""
     sys_block = tmp_path / "sys_block"
     (sys_block / "sda").mkdir(parents=True)
     (sys_block / "sda" / "removable").write_text("1\n")
@@ -126,7 +128,8 @@ def infected_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunn
 def test_permitted_gate_skips_destructive_steps_after_malware(
     infected_runner: FakeRunner, config: Config
 ) -> None:
-    """malware FAIL＋hash_inventory PASSでもcapacity・speedはSKIPPED（permittedの回帰）。"""
+    """Even with malware FAIL + hash_inventory PASS, capacity and speed are SKIPPED (regression
+    test for permitted)."""
     result = inspect(infected_runner, replace(config, allow_destructive=True), "/dev/sda")
 
     statuses = {s.name: s.status for s in result.steps}
@@ -140,7 +143,8 @@ def test_permitted_gate_skips_destructive_steps_after_malware(
 def test_no_write_commands_after_malware_detection(
     infected_runner: FakeRunner, config: Config
 ) -> None:
-    """感染検知後に呼ばれる外部コマンドはroのmount・umountと問い合わせだけ。"""
+    """After infection is detected, the only external commands called are ro mount, umount, and
+    queries."""
     inspect(infected_runner, replace(config, allow_destructive=True), "/dev/sda")
 
     allowed = {"lsblk", "udevadm", "findmnt", "clamscan", "mount", "umount"}
@@ -152,7 +156,7 @@ def test_no_write_commands_after_malware_detection(
 
 
 def test_fio_read_pass_is_readonly(ctx: StepContext, runner: FakeRunner) -> None:
-    """読み取り測定ではfio自身にも書き込みを拒否させる。"""
+    """For read measurement, fio itself is also made to refuse writes."""
     runner.register(["lsblk"], stdout=LSBLK_UNMOUNTED)
     runner.register(["fio", "--name=seq_read"], stdout=fio_json("read"))
     runner.register(["fio", "--name=seq_write"], stdout=fio_json("write"))

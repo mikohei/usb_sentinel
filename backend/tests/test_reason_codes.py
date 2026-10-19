@@ -1,4 +1,4 @@
-"""理由コード（reason_codes_for）。材料はtest_classify.pyから借りる。"""
+"""Reason codes (reason_codes_for). Fixtures are borrowed from test_classify.py."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ class TestReasonCodes:
 
         assert reason_codes_for(severe) == ["s:severe"]
         assert reason_codes_for(minor) == ["s:minor"]
-        # severityはFEAT-003で入る。無ければコードを出さない。
+        # severity is added in FEAT-003. Without it, no code is emitted.
         assert reason_codes_for(unknown) == []
 
     def test_timeout_takes_precedence_over_error(self) -> None:

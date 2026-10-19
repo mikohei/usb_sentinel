@@ -1,8 +1,8 @@
-"""容量検証ステップ（f3write+f3read、またはf3probe）。
+"""Capacity verification step (f3write+f3read, or f3probe).
 
-破壊的検査であり、orchestratorのゲートを通過したときだけ呼ばれる。
-外部コマンドはすべてctx.runner.run()経由で、argvはリストで固定する。
-f3writeモードの実行はcapacity_write.py、f3probeモードはcapacity_probe.pyにある。
+A destructive test, called only after passing the orchestrator gate. All external commands go
+through ctx.runner.run(), with argv as a fixed list. f3write mode lives in capacity_write.py and
+f3probe mode in capacity_probe.py.
 """
 
 import math
@@ -25,16 +25,16 @@ from .common import (
     not_found_summary,
 )
 
-# evaluate()はcapacity_judge.pyへ移した。既存の参照先として名前を残す。
+# evaluate() moved to capacity_judge.py. The name is kept here for existing importers.
 __all__ = ["DEFAULT_MONOTONIC", "DEFAULT_STATVFS", "CapacityStep", "evaluate"]
 
-# 統合テストからmonkeypatchで差し替えるためのモジュール変数。
+# Module variables that integration tests replace with monkeypatch.
 DEFAULT_STATVFS: Callable[[str], os.statvfs_result] = os.statvfs
 DEFAULT_MONOTONIC: Callable[[], float] = time.monotonic
 
-# f3readの非OKセクタ種別（filesystems[].{key}_sectorsのキー）。
+# f3read non-OK sector kinds (keys of filesystems[].{key}_sectors).
 _BAD_SECTOR_KEYS = ("lost", "corrupted", "slightly_changed", "overwritten")
-# rwマウントが権限不足・書き込み保護で失敗したときのsummary。
+# summary when an rw mount fails for lack of permission or write protection.
 _MOUNT_NOT_WRITABLE_SUMMARY = "権限不足: 書き込み可能でマウントできない"
 
 
@@ -44,21 +44,21 @@ class CapacityStep:
         statvfs: Callable[[str], os.statvfs_result] | None = None,
         monotonic: Callable[[], float] | None = None,
     ) -> None:
-        """依存を注入する。Noneなら呼び出し時点のモジュール変数を使う。"""
+        """Inject dependencies. If None, the module variables at call time are used."""
         self.statvfs = statvfs or DEFAULT_STATVFS
         self.monotonic = monotonic or DEFAULT_MONOTONIC
 
     def run(self, ctx: StepContext) -> StepResult:
-        """容量検証を実行する。use_probeならf3probe、そうでなければf3write+f3read。
+        """Run capacity verification: f3probe if use_probe, otherwise f3write+f3read.
 
-        例外（コマンド不在、lsblk失敗、マウント失敗、パーサ失敗、umount失敗）はここで
-        ERRORのsummaryに変換し、外へは出さない。
+        Exceptions (missing command, lsblk failure, mount failure, parser failure, umount
+        failure) are converted to an ERROR summary here and never propagate.
 
         Args:
-            ctx: ステップ文脈。
+            ctx: Step context.
 
         Returns:
-            PASS／FAIL／ERRORのいずれかを持つステップ結果。
+            Step result with PASS, FAIL, or ERROR.
         """
         result = StepResult("capacity", StepStatus.ERROR)
         config = ctx.config.capacity
@@ -104,8 +104,8 @@ class CapacityStep:
         except NotWritableError:
             result.summary = _MOUNT_NOT_WRITABLE_SUMMARY
         except ValueError as exc:
-            # parse_f3write()・parse_f3read()の変換済みメッセージ
-            # （run_probe()は自前でsummaryを確定する）。
+            # Already-converted messages from parse_f3write() / parse_f3read()
+            # (run_probe() finalizes its own summary).
             result.summary = str(exc)
         except UnmountError as exc:
             cause = exc.__cause__
@@ -117,7 +117,7 @@ class CapacityStep:
         return result
 
     def _judge_f3write(self, result: StepResult, totals: Totals) -> StepResult:
-        """f3writeモードの判定（umount完了後に行う）。判定本体はcapacity_judge.judge()。"""
+        """Judgment for f3write mode (done after umount). The core is capacity_judge.judge()."""
         entries = result.details["filesystems"]
         bad = {key: sum(entry[f"{key}_sectors"] for entry in entries) for key in _BAD_SECTOR_KEYS}
         sectors = sum(entry["ok_sectors"] for entry in entries) + sum(bad.values())
@@ -142,7 +142,7 @@ class CapacityStep:
         return result
 
     def _judge_probe(self, result: StepResult, actual: int) -> StepResult:
-        """f3probeモードの判定。bad_sectorsの情報が無いためdefectは常にFalse。"""
+        """Judgment for f3probe mode. There is no bad_sectors data, so defect is always False."""
         self._judge(
             result,
             actual=actual,
@@ -164,7 +164,7 @@ class CapacityStep:
         probe_verdict_line: str | None,
         verified_bytes: int | None,
     ) -> CapacityVerdict:
-        """judge()を呼び、status・summaryと両モード共通のdetailsをresultに書く。"""
+        """Call judge() and write status, summary, and details common to both modes to result."""
         details = result.details
         advertised: int = details["advertised_bytes"]
         nominal: int | None = details["nominal_bytes"]

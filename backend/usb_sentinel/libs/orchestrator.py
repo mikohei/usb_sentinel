@@ -19,18 +19,19 @@ from .store import InspectionStore, NullStore
 
 
 def result_dir_for(root: Path, started: datetime, device: DeviceInfo) -> Path:
-    """結果ディレクトリ`<root>/<YYYYmmddTHHMMSSZ>-<serial>`を決める。
+    """Decide the result directory `<root>/<YYYYmmddTHHMMSSZ>-<serial>`.
 
-    シリアルは英数字と`_.-`以外を`_`に置き換えて128文字に切る。空なら`<kernel_name>-unknown-serial`。
-    frontendの`result_file.serial_for_dir()`と同じ規則。
+    In the serial, characters other than alphanumerics and `_.-` are replaced with `_`, and the
+    result is cut to 128 characters. If empty, `<kernel_name>-unknown-serial` is used. Same rule
+    as the frontend's `result_file.serial_for_dir()`.
 
     Args:
-        root: 結果ルート（config.results_dir）。
-        started: 検査開始時刻（UTC）。
-        device: デバイス情報。
+        root: Results root (config.results_dir).
+        started: Inspection start time (UTC).
+        device: Device information.
 
     Returns:
-        結果ディレクトリのパス（作成はしない）。
+        Path of the result directory (not created).
     """
     serial = device.serial or f"{device.kernel_name}-unknown-serial"
     serial = re.sub(r"[^a-zA-Z0-9_.-]", "_", serial)[:128]
@@ -38,8 +39,8 @@ def result_dir_for(root: Path, started: datetime, device: DeviceInfo) -> Path:
 
 
 def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
-    """判定を決める。優先順位はMalware→Counterfeit Suspected→Defective→Spec Mismatch
-    →No Defect→Inconclusive。"""
+    """Decide the verdict. Priority: Malware -> Counterfeit Suspected -> Defective ->
+    Spec Mismatch -> No Defect -> Inconclusive."""
     malware = result.step("malware")
     if malware and malware.status == StepStatus.FAIL:
         return Verdict.MALWARE_DETECTED, [
@@ -47,14 +48,15 @@ def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
         ]
     failures = [step for step in result.steps if step.status == StepStatus.FAIL]
     reasons = [f"{step.name}: {step.summary}" for step in failures]
-    # 非破壊チェック（マウント前の申告容量比較）の超過も偽装疑いの条件に含める。
+    # An excess found by the non-destructive check (reported capacity comparison before
+    # mounting) also counts as suspected counterfeit.
     over_advertised = result.advertised_check.get("exceeded") is True
     if over_advertised:
         reasons.insert(0, result.advertised_check["summary"])
     if over_advertised or any(step.details.get("counterfeit") is True for step in failures):
         return Verdict.COUNTERFEIT_SUSPECTED, reasons
     if any(step.details.get("defect") is True for step in failures):
-        # 容量は申告どおりだがデータが壊れる（f3readが非OKセクタを報告）。
+        # Capacity matches the report but data gets corrupted (f3read reports non-OK sectors).
         return Verdict.DEFECTIVE, reasons
     if failures:
         return Verdict.SPEC_MISMATCH, reasons
@@ -65,9 +67,9 @@ def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
     ]
 
 
-# reason_codesのステップ略号（画面QRのstと同じ）。
+# Step abbreviations for reason_codes (same as st in the on-screen QR code).
 _STEP_ABBR = {"malware": "m", "hash_inventory": "h", "capacity": "c", "speed": "s", "unmount": "u"}
-# 容量ステップのcounterfeit_reasons → コード。
+# Capacity step counterfeit_reasons -> codes.
 _COUNTERFEIT_CODES = {
     "over_advertised": "c:over",
     "over_actual": "c:over",
@@ -77,7 +79,7 @@ _COUNTERFEIT_CODES = {
 
 
 def _fail_codes(step: StepResult) -> list[str]:
-    """FAILステップの理由コード。"""
+    """Reason codes for a FAIL step."""
     if step.name == "malware":
         return ["m:found"]
     if step.name == "capacity":
@@ -87,17 +89,18 @@ def _fail_codes(step: StepResult) -> list[str]:
         codes += {"short": ["c:short"], "defect": ["c:defect"]}.get(step.details.get("kind"), [])
         return codes
     if step.name == "speed":
-        # severityはspeed.pyの重大度判定で入る。無ければコードを出さない。
+        # severity is set by the severity judgment in speed.py. No code if absent.
         severity = step.details.get("severity")
         return [f"s:{severity}"] if severity in ("severe", "minor") else []
     return []
 
 
 def reason_codes_for(result: InspectionResult) -> list[str]:
-    """各ステップのstatusとdetailsから機械可読の理由コードを組む。classify()とは独立。
+    """Build machine-readable reason codes from each step's status and details.
 
-    形式は「<ステップ略号>:<コード>」。c:overは非破壊チェックとステップの両方で
-    発火しても1回だけ入れる。result.stepsの順に並べる。
+    Independent of classify(). The format is "<step abbreviation>:<code>". c:over is added only
+    once even if both the non-destructive check and the step trigger it. Codes follow the order
+    of result.steps.
     """
     codes: list[str] = []
     if result.advertised_check.get("exceeded") is True:
@@ -119,12 +122,12 @@ def reason_codes_for(result: InspectionResult) -> list[str]:
 
 
 def scan_executed(malware: StepResult) -> bool:
-    """clamscanがスキャンを実行したか（実行後にだけdetectionsが入る）。"""
+    """Whether clamscan ran a scan (detections is set only after a run)."""
     return "detections" in malware.details
 
 
 def _timed(run: Callable[[StepContext], StepResult], ctx: StepContext) -> StepResult:
-    """ステップを実行し、所要時間（秒、小数2桁）をelapsed_sに入れて返す。"""
+    """Run the step and return it with its duration (seconds, 2 decimals) in elapsed_s."""
     started = time.monotonic()
     result = run(ctx)
     result.elapsed_s = round(time.monotonic() - started, 2)
@@ -134,23 +137,26 @@ def _timed(run: Callable[[StepContext], StepResult], ctx: StepContext) -> StepRe
 def inspect(
     runner: CommandRunner, config: Config, path: str, store: InspectionStore | None = None
 ) -> InspectionResult:
-    """検査シーケンス全体を駆動する（probe→安全ガード→roマウント→malware→台帳→破壊的検査→判定）。
+    """Drive the whole inspection sequence.
 
-    マルウェア検知時は破壊的検査（f3、fio）に進まない。破壊的検査に進む条件`permitted`
-    （全ステップPASSかつallow_destructiveかつアンマウント済み）は安全ゲートであり緩めない。
-    ハッシュ台帳はclamscanがスキャンを実行した後にだけ作る。
+    probe -> safety guard -> ro mount -> malware -> inventory -> destructive tests -> verdict.
+
+    When malware is detected, destructive tests (f3, fio) are not run. The condition `permitted`
+    for running destructive tests (all steps PASS, allow_destructive, and unmounted) is a safety
+    gate and must not be relaxed. The hash inventory is built only after clamscan has run a
+    scan.
 
     Args:
-        runner: コマンド実行器。
-        config: 設定。
-        path: 対象デバイスのパス。
-        store: 開始記録の保存先。Noneなら記録しない（NullStore）。
+        runner: Command runner.
+        config: Configuration.
+        path: Path of the target device.
+        store: Destination for the start record. None disables recording (NullStore).
 
     Returns:
-        判定・理由コード・所要時間まで埋めた検査結果。
+        Inspection result with verdict, reason codes, and duration filled in.
 
     Raises:
-        UnsafeDeviceError: 安全ガードを満たさないデバイス（マウントもスキャンもしない）。
+        UnsafeDeviceError: For a device that fails the safety guard (no mount, no scan).
     """
     if store is None:
         store = NullStore()
@@ -163,12 +169,14 @@ def inspect(
         output = output.with_name(f"{output.name}-{started.strftime('%f')}")
     output.mkdir(parents=True)
     result = InspectionResult(device, started.isoformat(), output_dir=str(output))
-    # 申告容量の非破壊チェック。probe()済みのlsblk値だけを使い、デバイスには触れない。
-    # result.stepsには入れない（permittedと画面QRのstの桁数に影響させない）。
+    # Non-destructive check of the reported capacity. Uses only the lsblk values already read
+    # by probe() and does not touch the device. Not added to result.steps (so it does not
+    # affect permitted or the number of digits of st in the on-screen QR code).
     result.advertised_check = precheck_advertised(
         device.advertised_bytes, config.capacity.nominal_bytes, config.capacity.over_ratio
     )
-    # 開始記録。失敗しても検査は続ける（storeは例外を出さず理由文字列を返す）。
+    # Start record. The inspection continues on failure (store never raises; it returns a
+    # reason string).
     failure = store.record_started(result)
     if failure:
         result.warnings.append(f"SQLite記録失敗（開始）: {failure}")
@@ -177,8 +185,9 @@ def inspect(
         with mounted(ctx):
             malware = _timed(MalwareScanStep().run, ctx)
             result.steps.append(malware)
-            # 台帳はclamscanがファイルを開いた後にだけ作る（SOP: スキャン前にファイルを開かない）。
-            # スキャン後なら結果（PASS・FAIL・ERROR・タイムアウト）にかかわらず作る。
+            # Build the inventory only after clamscan has opened the files (SOP: do not open
+            # files before the scan). After a scan, build it regardless of the result (PASS,
+            # FAIL, ERROR, or timeout).
             if not config.hash_inventory:
                 result.steps.append(
                     StepResult(

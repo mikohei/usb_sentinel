@@ -13,11 +13,12 @@ from .store import store_for
 
 
 def main() -> int:
-    """`usb-sentinel [--config PATH] {selftest | inspect DEVICE}`の入口。
+    """Entry point for `usb-sentinel [--config PATH] {selftest | inspect DEVICE}`.
 
     Returns:
-        終了コード。inspectは判定がNo Defectなら0、それ以外は1。検査拒否（UnsafeDeviceError）は2、
-        実行エラーは3。selftestは必要なコマンドとClamAV定義DBが揃っていれば0、欠けていれば3。
+        Exit code. inspect returns 0 when the verdict is No Defect, otherwise 1. A refused
+        inspection (UnsafeDeviceError) returns 2, and an execution error returns 3. selftest
+        returns 0 when all required commands and the ClamAV definition DB are present, else 3.
     """
     parser = argparse.ArgumentParser(description="USB 検査バックエンド")
     parser.add_argument("--config", type=Path, default=Path("/etc/usb-sentinel/config.toml"))
@@ -50,14 +51,15 @@ def main() -> int:
             missing |= not version.ok or "/" not in version.stdout
             return 3 if missing else 0
         config = load_config(args.config)
-        # 開始記録（inspect()内）と完了記録で同じstoreを使う。
+        # Use the same store for the start record (inside inspect()) and the completion record.
         store = store_for(config)
         result = inspect(runner, config, args.device, store)
         output = Path(result.output_dir)
         try:
             write_all(result, output, emit_qr=config.emit_qr)
         finally:
-            # 正本result.jsonが書けていれば、QR生成の成否を問わず完了記録を残す。
+            # If the authoritative result.json was written, record completion regardless of
+            # whether QR generation succeeded.
             if (output / "result.json").exists():
                 failure = store.record_completed(result, digest(result))
                 if failure:

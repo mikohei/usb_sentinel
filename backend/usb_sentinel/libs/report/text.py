@@ -1,7 +1,8 @@
-"""result.txt／コンソール表示。
+"""result.txt / console output.
 
-先頭3行（判定・デバイス・公称容量）とステップ行（`[ OK ] step: summary`）の形式は変えない。
-第2期で足した項目は`details.get()`で読み、値が無ければ行ごと省く（設計書第6.1節）。
+The format of the first three lines (verdict, device, nominal capacity) and of the step lines
+(`[ OK ] step: summary`) must not change. Items added in phase 2 are read with `details.get()`,
+and the whole line is omitted when the value is absent (design doc section 6.1).
 """
 
 from typing import Any
@@ -18,12 +19,12 @@ _LABELS = {
 
 
 def _gb(size: int) -> str:
-    """バイト数を「12.34 GB」（10^9、空白あり）にする。capacity_judge._gb()とは空白の有無が違う。"""
+    """Format bytes as "12.34 GB" (10^9, with a space). Unlike capacity_judge._gb(), has a space."""
     return f"{size / 1e9:.2f} GB"
 
 
 def _header_lines(result: InspectionResult) -> list[str]:
-    """判定・デバイス・公称容量の3行と、値があるときだけ出す追加行。"""
+    """The verdict, device, and nominal capacity lines, plus extra lines only when values exist."""
     size = result.device.advertised_bytes
     lines = [
         f"判定: {result.verdict}",
@@ -41,7 +42,7 @@ def _header_lines(result: InspectionResult) -> list[str]:
 
 
 def _step_detail_lines(step: StepResult) -> list[str]:
-    """ステップ固有の追加行。新キーが無ければ空。"""
+    """Step-specific extra lines. Empty when the new keys are absent."""
     details: dict[str, Any] = step.details
     lines: list[str] = []
     if step.name == "capacity":
@@ -59,13 +60,13 @@ def _step_detail_lines(step: StepResult) -> list[str]:
 
 
 def render_text(result: InspectionResult) -> str:
-    """検査結果を人が読むテキストにする。
+    """Render the inspection result as human-readable text.
 
     Args:
-        result: 検査結果。
+        result: Inspection result.
 
     Returns:
-        改行区切りのテキスト（末尾に改行1つ）。
+        Newline-separated text (with one trailing newline).
     """
     lines = _header_lines(result)
     for step in result.steps:

@@ -22,13 +22,13 @@ from usb_sentinel_display.libs.ui.i18n import (
 
 class TestMessages:
     def test_same_keys_and_no_empty(self) -> None:
-        """jaとenのキー集合が一致し、空文字が無い。"""
+        """The ja and en key sets match and contain no empty strings."""
         assert set(MESSAGES["ja"]) == set(MESSAGES["en"])
         for lang in i18n.LANGUAGES:
             assert all(value for value in MESSAGES[lang].values())
 
     def test_all_states_and_verdicts_have_labels(self) -> None:
-        """全SlotStateとVERDICT_CODESの全キーのラベルが両言語にある。"""
+        """Every SlotState and every VERDICT_CODES key has a label in both languages."""
         for lang in i18n.LANGUAGES:
             for state in SlotState:
                 assert state_label(lang, state)
@@ -47,19 +47,19 @@ class TestMessages:
         ],
     )
     def test_verdict_label(self, verdict: str, ja: str, en: str) -> None:
-        """判定6値と未知値のラベル。"""
+        """Labels for the six verdicts and an unknown value."""
         assert verdict_label("ja", verdict) == ja
         assert verdict_label("en", verdict) == en
 
     def test_language_button_label(self) -> None:
-        """言語ボタンは切替先の名前を出す。"""
+        """The language button shows the name of the language it switches to."""
         assert language_button_label("en") == "日本語"
         assert language_button_label("ja") == "EN"
         assert other_language("en") == "ja"
         assert other_language("ja") == "en"
 
     def test_text_formats_placeholders(self) -> None:
-        """プレースホルダがstr.formatで埋まる。"""
+        """Placeholders are filled by str.format."""
         assert text("ja", "overflow", count=2) == "他2台"
         assert text("en", "overflow", count=2) == "+2 more"
         assert text("en", "notice.sysfs_missing").startswith("sysfs")
@@ -69,12 +69,12 @@ class TestStateFile:
     def test_xdg_state_home_preferred(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """XDG_STATE_HOMEが空でなければそれを使う。"""
+        """Use XDG_STATE_HOME if it is not empty."""
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
         assert state_file() == tmp_path / "usb-sentinel-display" / "language"
 
     def test_fallback_to_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """XDG_STATE_HOMEが無ければHOME/.local/state。空文字も無いものとして扱う。"""
+        """Without XDG_STATE_HOME, use HOME/.local/state. An empty string counts as unset."""
         monkeypatch.delenv("XDG_STATE_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         expected = tmp_path / ".local" / "state" / "usb-sentinel-display" / "language"
@@ -85,7 +85,7 @@ class TestStateFile:
 
 class TestSaveLoad:
     def test_round_trip(self, tmp_path: Path) -> None:
-        """save→loadで同じ値が戻る（親ディレクトリも作る）。"""
+        """save -> load returns the same value (and creates the parent directory)."""
         path = tmp_path / "state" / "usb-sentinel-display" / "language"
         assert save_language(path, "ja") is None
         assert path.read_text(encoding="utf-8") == "ja\n"
@@ -93,7 +93,7 @@ class TestSaveLoad:
 
     @pytest.mark.parametrize("content", ["fr", "", "  \n"])
     def test_invalid_content_is_none(self, tmp_path: Path, content: str) -> None:
-        """不正値と空ファイルはNone。"""
+        """Invalid values and an empty file give None."""
         path = tmp_path / "language"
         path.write_text(content, encoding="utf-8")
         assert load_saved_language(path) is None
@@ -102,13 +102,13 @@ class TestSaveLoad:
         assert load_saved_language(tmp_path / "none") is None
 
     def test_binary_garbage_is_none(self, tmp_path: Path) -> None:
-        """UTF-8として読めない内容はNone。"""
+        """Content that is not valid UTF-8 gives None."""
         path = tmp_path / "language"
         path.write_bytes(b"\xff\xfe\x00ja")
         assert load_saved_language(path) is None
 
     def test_save_failure_returns_reason(self, tmp_path: Path) -> None:
-        """親がファイルなら理由文字列を返し、例外を出さない。"""
+        """If the parent is a file, return a reason string without raising."""
         blocker = tmp_path / "blocker"
         blocker.write_text("x", encoding="utf-8")
         reason = save_language(blocker / "language", "ja")
@@ -116,7 +116,7 @@ class TestSaveLoad:
         assert str(blocker / "language") in reason
 
     def test_save_failure_reason_in_target_language(self, tmp_path: Path) -> None:
-        """失敗理由は切り替え先の言語で返す（jaなら日本語、enなら英語）。"""
+        """The failure reason is in the target language (Japanese for ja, English for en)."""
         blocker = tmp_path / "blocker"
         blocker.write_text("x", encoding="utf-8")
         target = blocker / "language"
@@ -129,7 +129,7 @@ class TestSaveLoad:
 
 class TestInitialLanguage:
     def test_priority(self) -> None:
-        """記録→設定→既定の優先順位。LANGUAGES外の値は無視する。"""
+        """Priority: saved -> config -> default. Values outside LANGUAGES are ignored."""
         assert initial_language(None, None) == "en"
         assert initial_language("ja", None) == "ja"
         assert initial_language("en", "ja") == "ja"
@@ -139,6 +139,6 @@ class TestInitialLanguage:
         assert initial_language("ja", "fr") == "ja"
 
     def test_config_languages_match(self) -> None:
-        """config.pyが自前で持つ組がi18nと一致する。"""
+        """The set that config.py keeps on its own matches i18n."""
         assert config.LANGUAGES == i18n.LANGUAGES
         assert i18n.DEFAULT_LANGUAGE in i18n.LANGUAGES

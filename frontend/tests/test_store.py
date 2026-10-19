@@ -13,8 +13,8 @@ from usb_sentinel_display.libs.store import (
     SqliteIndex,
 )
 
-# backendのschema.py v1（SCHEMA_VERSION = 1）のCREATE TABLE文のコピー。frontendはbackendを
-# importしないので文字列で固定する。backendが版を上げたらここも更新する。
+# Copy of the CREATE TABLE statement from backend schema.py v1 (SCHEMA_VERSION = 1). frontend
+# does not import backend, so it is pinned as a string. Update it when backend bumps the version.
 CREATE_TABLE_V1 = """
 CREATE TABLE IF NOT EXISTS inspections (
     inspection_id          TEXT PRIMARY KEY,
@@ -78,7 +78,7 @@ NAME_2 = "20250601T123000Z-XYZ789"
 NAME_OLD = "20250531T235959Z-OLD001"
 DIGEST = "a" * 64
 
-# make_db()が埋めるNOT NULL列の既定値。
+# Defaults for the NOT NULL columns that make_db() fills.
 _DEFAULTS: dict[str, object] = {
     "state": "completed",
     "serial": "ABC123",
@@ -93,7 +93,7 @@ _DEFAULTS: dict[str, object] = {
 
 
 def db_row(inspection_id: str, **overrides: object) -> dict[str, object]:
-    """INSERTする行の辞書。NOT NULL列は既定値で埋め、started_compactはstarted_atから作る。"""
+    """Row dict to INSERT. NOT NULL columns get defaults; started_compact comes from started_at."""
     row: dict[str, object] = {"inspection_id": inspection_id, **_DEFAULTS, **overrides}
     started_at = row["started_at"]
     if "started_compact" not in row:
@@ -106,7 +106,7 @@ def db_row(inspection_id: str, **overrides: object) -> dict[str, object]:
 
 
 def make_db(path: Path, rows: list[dict[str, object]], user_version: int = 1) -> None:
-    """CREATE_TABLE_V1でテーブルを作り、user_versionを設定して行を入れる。"""
+    """Create the table with CREATE_TABLE_V1, set user_version, and insert rows."""
     conn = sqlite3.connect(path)
     try:
         conn.execute(CREATE_TABLE_V1)
@@ -121,7 +121,7 @@ def make_db(path: Path, rows: list[dict[str, object]], user_version: int = 1) ->
 
 
 class KeepOpenConnection(sqlite3.Connection):
-    """close()を無視して開いたままにする接続（query()の後に中身を調べるため）。"""
+    """Connection that ignores close() and stays open (to inspect it after query())."""
 
     def close(self) -> None:
         pass
@@ -132,18 +132,18 @@ class KeepOpenConnection(sqlite3.Connection):
 
 class TestSchemaVersion:
     def test_expected_version_is_one(self) -> None:
-        """読める版はbackendのSCHEMA_VERSION（1）と同じ。CREATE_TABLE_V1もその版のコピー。"""
+        """The readable version equals backend SCHEMA_VERSION (1); CREATE_TABLE_V1 copies it."""
         assert EXPECTED_SCHEMA_VERSION == 1
         assert "CREATE TABLE IF NOT EXISTS inspections" in CREATE_TABLE_V1
 
     def test_query_columns_match_dbrow(self) -> None:
-        """SELECTの列順はDbRowのフィールド順と同じ。"""
+        """The SELECT column order matches the DbRow field order."""
         assert tuple(DbRow.__dataclass_fields__) == QUERY_COLUMNS
 
 
 class TestQuery:
     def test_rows_at_or_after_lower_bound_in_order(self, tmp_path: Path) -> None:
-        """started_atの下限以上の行だけをstarted_at順で返し、DbRowの各列が入る。"""
+        """Return rows at/above the started_at bound, by started_at, with all DbRow columns."""
         db = tmp_path / "inspections.sqlite"
         make_db(
             db,
@@ -167,14 +167,14 @@ class TestQuery:
         ]
 
     def test_lower_bound_excludes_earlier(self, tmp_path: Path) -> None:
-        """下限より1マイクロ秒でも前の行は返さない。"""
+        """A row even 1 microsecond before the bound is not returned."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1, started_at=STARTED_1)])
         rows, _ = SqliteIndex(db).query("2025-06-01T12:00:00.123457+00:00")
         assert rows == []
 
     def test_null_columns_become_none(self, tmp_path: Path) -> None:
-        """port_pathとresult_digestのNULLはNone。"""
+        """NULL port_path and result_digest become None."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1)])
         (row,), _ = SqliteIndex(db).query("2000-01-01T00:00:00.000000+00:00")
@@ -182,7 +182,7 @@ class TestQuery:
         assert row.result_digest is None
 
     def test_wrong_typed_row_dropped(self, tmp_path: Path) -> None:
-        """列の型が想定と違う行（serialがBLOB）は捨て、他の行は残る。"""
+        """Rows with unexpected column types (BLOB serial) are dropped; other rows remain."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1, serial=b"\x00\x01"), db_row(NAME_2, started_at=STARTED_2)])
         rows, reason = SqliteIndex(db).query("2000-01-01T00:00:00.000000+00:00")
@@ -190,29 +190,29 @@ class TestQuery:
         assert [r.inspection_id for r in rows] == [NAME_2]
 
     def test_missing_db(self, tmp_path: Path) -> None:
-        """DBファイルが無ければdb_missing。"""
+        """db_missing if the DB file does not exist."""
         assert SqliteIndex(tmp_path / "none.sqlite").query(STARTED_1) == ([], NOTICE_DB_MISSING)
 
     def test_newer_schema(self, tmp_path: Path) -> None:
-        """user_versionが2ならdb_schema_new（列が増えても壊れずに走査へ戻る）。"""
+        """user_version 2 gives db_schema_new (falls back to scanning even if columns grew)."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1)], user_version=2)
         assert SqliteIndex(db).query(STARTED_1) == ([], NOTICE_DB_SCHEMA_NEW)
 
     def test_empty_file_is_missing(self, tmp_path: Path) -> None:
-        """テーブルの無い空ファイル（user_version 0）はdb_missing。"""
+        """An empty file without tables (user_version 0) gives db_missing."""
         db = tmp_path / "db.sqlite"
         db.write_bytes(b"")
         assert SqliteIndex(db).query(STARTED_1) == ([], NOTICE_DB_MISSING)
 
     def test_garbage_file_is_open_failed(self, tmp_path: Path) -> None:
-        """SQLiteでないファイルはdb_open_failed（例外を外に出さない）。"""
+        """A non-SQLite file gives db_open_failed (no exception escapes)."""
         db = tmp_path / "db.sqlite"
         db.write_bytes(b"garbage" * 100)
         assert SqliteIndex(db).query(STARTED_1) == ([], NOTICE_DB_OPEN_FAILED)
 
     def test_version_ok_but_table_missing(self, tmp_path: Path) -> None:
-        """user_versionは1だがテーブルが無いDBはdb_open_failed。"""
+        """A DB with user_version 1 but no table gives db_open_failed."""
         db = tmp_path / "db.sqlite"
         conn = sqlite3.connect(db)
         conn.execute("PRAGMA user_version = 1")
@@ -221,7 +221,7 @@ class TestQuery:
         assert SqliteIndex(db).query(STARTED_1) == ([], NOTICE_DB_OPEN_FAILED)
 
     def test_unsearchable_dir_is_open_failed(self, tmp_path: Path) -> None:
-        """DBディレクトリに実行権限が無い（Path.exists()がPermissionError）ときもdb_open_failed。"""
+        """db_open_failed too when the DB dir has no exec permission (exists() PermissionError)."""
         dbdir = tmp_path / "db"
         dbdir.mkdir()
         db = dbdir / "inspections.sqlite"
@@ -239,7 +239,7 @@ class TestQuery:
             dbdir.chmod(0o700)
 
     def test_connect_failure_is_open_failed(self, tmp_path: Path) -> None:
-        """接続そのものが失敗してもdb_open_failed。"""
+        """db_open_failed even when the connection itself fails."""
         db = tmp_path / "db.sqlite"
         make_db(db, [])
 

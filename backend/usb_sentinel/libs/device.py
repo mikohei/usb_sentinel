@@ -8,9 +8,10 @@ from .models import DeviceInfo
 from .runner import CommandRunner
 
 SYS_BLOCK = Path("/sys/block")
-# `/sys/bus/usb/devices/<port_path>/speed`にリンク速度（Mbps）が10進文字列で入っている。
+# `/sys/bus/usb/devices/<port_path>/speed` holds the link speed (Mbps) as a decimal string.
 SYS_USB_DEVICES = Path("/sys/bus/usb/devices")
-# `/sys/block/sda`のrealpath中の`.../1-1.3/1-1.3:1.0/...`からUSBポートパス`1-1.3`を取る。
+# Extract the USB port path `1-1.3` from `.../1-1.3/1-1.3:1.0/...` in the realpath of
+# `/sys/block/sda`.
 PORT_PATH_RE = re.compile(r"/(\d+-[\d.]+):\d+\.\d+/")
 
 
@@ -19,9 +20,10 @@ class UnsafeDeviceError(RuntimeError):
 
 
 def port_path_for(kernel_name: str, sys_block: Path | None = None) -> str | None:
-    """カーネル名からUSBポートパス（例: `1-1.3`）を求める。USB経由でなければNone。
+    """Find the USB port path (e.g. `1-1.3`) from the kernel name. None if not on USB.
 
-    sys_blockがNoneなら呼び出し時点のモジュール変数SYS_BLOCKを使う（テストの差し替えを効かせるため）。
+    If sys_block is None, the module variable SYS_BLOCK is read at call time (so that test
+    patches take effect).
     """
     root = SYS_BLOCK if sys_block is None else sys_block
     try:
@@ -33,17 +35,19 @@ def port_path_for(kernel_name: str, sys_block: Path | None = None) -> str | None
 
 
 def link_speed_for(port_path: str | None, sys_usb: Path | None = None) -> int | None:
-    """ポートパスからUSBリンク速度（Mbps）を読む。読めなければNone。
+    """Read the USB link speed (Mbps) from the port path. None if unreadable.
 
-    値は`480`・`5000`・`10000`などで、USB1.1は`12`または`1.5`。小数はint(float)で切り捨てる。
-    外部コマンドを呼ばないのでCommandRunnerは通さない（port_path_for()と同じ扱い）。
+    Values are like `480`, `5000`, `10000`; USB 1.1 is `12` or `1.5`. Fractions are truncated
+    with int(float). No external command is run, so CommandRunner is not used (same as
+    port_path_for()).
 
     Args:
-        port_path: `port_path_for()`が返すポートパス（例: `1-1.3`）。Noneなら読まない。
-        sys_usb: `/sys/bus/usb/devices`の差し替え先。Noneなら呼び出し時点のSYS_USB_DEVICES。
+        port_path: Port path returned by `port_path_for()` (e.g. `1-1.3`). Not read if None.
+        sys_usb: Replacement for `/sys/bus/usb/devices`. If None, SYS_USB_DEVICES at call time.
 
     Returns:
-        リンク速度（Mbps）。ポートパス不明、ファイル不在、数値でない場合はNone。
+        Link speed (Mbps). None if the port path is unknown, the file is missing, or the value
+        is not numeric.
     """
     if port_path is None:
         return None
@@ -55,19 +59,19 @@ def link_speed_for(port_path: str | None, sys_usb: Path | None = None) -> int | 
 
 
 def block_info(runner: CommandRunner, path: str) -> dict[str, Any]:
-    """lsblkでデバイスの情報（子パーティション込み）を取る。
+    """Get device information (including child partitions) with lsblk.
 
     Args:
-        runner: コマンド実行器。
-        path: 対象デバイスのパス（例: `/dev/sda`）。
+        runner: Command runner.
+        path: Path of the target device (e.g. `/dev/sda`).
 
     Returns:
-        lsblkの`blockdevices`先頭要素。
+        The first element of lsblk's `blockdevices`.
 
     Raises:
-        RuntimeError: lsblkが失敗したとき（CommandResult.check()）。
-        UnsafeDeviceError: 該当するブロックデバイスが無いとき。
-        ValueError, KeyError: lsblkの出力がJSONでない、または`blockdevices`キーが無いとき。
+        RuntimeError: If lsblk fails (CommandResult.check()).
+        UnsafeDeviceError: If there is no matching block device.
+        ValueError, KeyError: If lsblk output is not JSON or lacks the `blockdevices` key.
     """
     output = runner.run(
         [
@@ -86,17 +90,17 @@ def block_info(runner: CommandRunner, path: str) -> dict[str, Any]:
 
 
 def probe(runner: CommandRunner, path: str) -> DeviceInfo:
-    """lsblk・udevadm・sysfsからDeviceInfoを組む。デバイスには書き込まない。
+    """Build DeviceInfo from lsblk, udevadm, and sysfs. Nothing is written to the device.
 
     Args:
-        runner: コマンド実行器。
-        path: 対象デバイスのパス。
+        runner: Command runner.
+        path: Path of the target device.
 
     Returns:
-        デバイス情報（容量、ベンダ、シリアル、バス、ポートパス、リンク速度）。
+        Device information (capacity, vendor, serial, bus, port path, link speed).
 
     Raises:
-        UnsafeDeviceError: ディスク全体（type=disk）でないとき。
+        UnsafeDeviceError: If it is not a whole disk (type=disk).
     """
     info = block_info(runner, path)
     if info["type"] != "disk":
@@ -123,17 +127,17 @@ def probe(runner: CommandRunner, path: str) -> DeviceInfo:
 
 
 def ensure_safe(runner: CommandRunner, device: DeviceInfo) -> None:
-    """検査対象として安全なデバイスか確かめる安全ガード。条件は緩めない。
+    """Safety guard that checks whether the device is safe to inspect. Never relax it.
 
-    USBバス経由・リムーバブル・容量が非ゼロ・ルートファイルシステムを含まない、の4条件を
-    すべて満たさないデバイスを拒否する。
+    Rejects any device that does not meet all four conditions: on the USB bus, removable,
+    non-zero capacity, and not containing the root filesystem.
 
     Args:
-        runner: コマンド実行器（findmntでルートの元デバイスを調べる）。
-        device: probe()が返したデバイス情報。
+        runner: Command runner (findmnt is used to find the root's source device).
+        device: Device information returned by probe().
 
     Raises:
-        UnsafeDeviceError: いずれかの条件を満たさないとき。
+        UnsafeDeviceError: If any condition is not met.
     """
     if device.bus != "usb":
         raise UnsafeDeviceError("not on the USB bus")
@@ -150,13 +154,13 @@ def ensure_safe(runner: CommandRunner, device: DeviceInfo) -> None:
 
 
 def filesystems(info: dict[str, Any]) -> list[str]:
-    """lsblkの木からファイルシステム（fstypeあり）を持つデバイスパスを深さ優先で集める。
+    """Collect, depth first, device paths with a filesystem (fstype set) from the lsblk tree.
 
     Args:
-        info: block_info()の戻り値（または子ノード）。
+        info: Return value of block_info() (or a child node).
 
     Returns:
-        デバイスパスの一覧（lsblkの並び順）。
+        List of device paths (in lsblk order).
     """
     paths = [str(info["path"])] if info.get("fstype") else []
     for child in info.get("children", []):
@@ -165,13 +169,13 @@ def filesystems(info: dict[str, Any]) -> list[str]:
 
 
 def is_mounted(info: dict[str, Any]) -> bool:
-    """デバイス本体または子パーティションのどれかがマウント中か。
+    """Whether the device itself or any child partition is mounted.
 
     Args:
-        info: block_info()の戻り値（または子ノード）。
+        info: Return value of block_info() (or a child node).
 
     Returns:
-        いずれかにmountpointがあればTrue。
+        True if any of them has a mountpoint.
     """
     return bool(info.get("mountpoint")) or any(
         is_mounted(child) for child in info.get("children", [])

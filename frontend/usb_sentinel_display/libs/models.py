@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 class SlotState(StrEnum):
-    """スロットの表示状態（設計書3.4）。"""
+    """Display state of a slot (design doc 3.4)."""
 
     EMPTY = "empty"
     WAITING = "waiting"
@@ -17,7 +17,7 @@ class SlotState(StrEnum):
 
 @dataclass(frozen=True)
 class AttachedDisk:
-    """sysfsから読んだ接続中のUSBディスク。"""
+    """A connected USB disk read from sysfs."""
 
     kernel_name: str
     port_path: str
@@ -27,16 +27,16 @@ class AttachedDisk:
 
 @dataclass(frozen=True)
 class ResultDetail:
-    """詳細QR（v:3）の材料。result.jsonに無い値はNone。
+    """Inputs for the detail QR (v:3). Values missing from result.json are None.
 
-    容量はバイト単位のまま持ち、MB換算や丸め、コード化はQR生成側（qr_payload）で行う。
-    `capacity_kind`がNoneのときは「容量ステップがPASS／FAIL以外でkindが無い」を意味し、
-    QRでは`?`になる。`advertised_over`は`nominal_bytes`が未設定ならNone。
+    Capacities stay in bytes; MB conversion, rounding, and coding are done by qr_payload.
+    `capacity_kind` None means "the capacity step is not PASS/FAIL and has no kind",
+    which shows as `?` in the QR. `advertised_over` is None if `nominal_bytes` is unset.
     """
 
     elapsed_s: float | None = None
     clamav_db_version: str | None = None
-    clamav_db_date: str | None = None  # ISO 8601の文字列のまま
+    clamav_db_date: str | None = None  # kept as an ISO 8601 string
     nominal_bytes: int | None = None
     advertised_bytes: int | None = None
     actual_bytes: int | None = None
@@ -60,7 +60,7 @@ class ResultDetail:
 
 @dataclass(frozen=True)
 class ResultSummary:
-    """result.jsonから表示に必要な項目だけを取り出したもの。"""
+    """Only the fields of result.json needed for display."""
 
     dir_name: str
     path: Path
@@ -81,23 +81,23 @@ class ResultSummary:
 
 @dataclass(frozen=True)
 class ResultRecord:
-    """結果ディレクトリ1件分の読み取り結果。"""
+    """Read result for one result directory."""
 
     name: str
     mtime: float
     serial_part: str
     summary: ResultSummary | None
     broken: bool
-    # SQLiteの`state = 'started'`行（開始したが完了結果が無い）に由来するレコードか。
+    # Whether the record comes from an SQLite `state = 'started'` row (started, no final result).
     started: bool = False
-    # started行が持つ結び付け用のポートパスとカーネル名（result.jsonが無いときに使う）。
+    # Port path and kernel name of a started row, used for binding (when there is no result.json).
     port_path: str | None = None
     kernel_name: str | None = None
 
 
 @dataclass(frozen=True)
 class Slot:
-    """画面のタイル1枚に対応するスロット。"""
+    """A slot that corresponds to one tile on screen."""
 
     index: int
     label: str
@@ -106,11 +106,11 @@ class Slot:
     result: ResultSummary | None
     unit_state: str | None
     fallback: bool
-    # 抜去（REMOVED）中のフォールバックスロットが表示に使う、抜去前のカーネル名。
+    # Pre-removal kernel name shown by the fallback slot while REMOVED.
     retained_kernel: str | None = None
 
 
-# backendのVerdictの値（result.jsonの文字列）とQRペイロードの1文字コードの対応。
+# Mapping from backend Verdict values (strings in result.json) to 1-char QR payload codes.
 VERDICT_CODES: dict[str, str] = {
     "No Defect": "N",
     "Malware Detected": "M",
@@ -120,7 +120,7 @@ VERDICT_CODES: dict[str, str] = {
     "Inconclusive": "I",
 }
 
-# ステップ名の短縮コード。表に無い名前は先頭3文字を使う。
+# Short codes for step names. Names not in the table use their first 3 chars.
 STEP_CODES: dict[str, str] = {
     "malware": "m",
     "hash_inventory": "h",
@@ -129,7 +129,7 @@ STEP_CODES: dict[str, str] = {
     "unmount": "u",
 }
 
-# backendのStepStatusの値と1文字コードの対応。未知の値は"?"。
+# Mapping from backend StepStatus values to 1-char codes. Unknown values are "?".
 STATUS_CODES: dict[str, str] = {
     "pass": "P",
     "fail": "F",
@@ -138,8 +138,8 @@ STATUS_CODES: dict[str, str] = {
     "not_implemented": "N",
 }
 
-# 容量の区別（capacity.details.kind）と詳細QRの`ck`の対応（doc/qr-payload.md 6.5）。
-# kindが無い（ステップがPASS／FAIL以外）ときは"?"。
+# Mapping from capacity kind (capacity.details.kind) to detail QR `ck` (doc/qr-payload.md 6.5).
+# "?" when there is no kind (the step is not PASS/FAIL).
 CAPACITY_KIND_CODES: dict[str, str] = {
     "ok": "-",
     "short": "S",
@@ -148,7 +148,7 @@ CAPACITY_KIND_CODES: dict[str, str] = {
     "unverified": "U",
 }
 
-# デバイス種別（speed.details.device_class）と詳細QRの`dc`の対応（doc/qr-payload.md 6.4）。
+# Mapping from device class (speed.details.device_class) to detail QR `dc` (doc/qr-payload.md 6.4).
 DEVICE_CLASS_CODES: dict[str, str] = {
     "hdd_5400": "h5",
     "hdd_7200": "h7",
@@ -160,14 +160,14 @@ DEVICE_CLASS_CODES: dict[str, str] = {
     "usb3_flash": "u3",
 }
 
-# 速度判定の根拠（basis_read）と詳細QRの`sb`の対応（doc/qr-payload.md 6.7）。
+# Mapping from speed verdict basis (basis_read) to detail QR `sb` (doc/qr-payload.md 6.7).
 BASIS_CODES: dict[str, str] = {
     "nominal": "n",
     "class": "c",
     "none": "-",
 }
 
-# 速度判定の重大度（severity）と詳細QRの`sv`の対応。FAILでなければ"-"。
+# Mapping from speed severity to detail QR `sv`. "-" unless FAIL.
 SEVERITY_CODES: dict[str, str] = {
     "severe": "s",
     "minor": "m",

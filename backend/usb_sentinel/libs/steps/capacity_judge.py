@@ -1,7 +1,8 @@
-"""容量判定の純関数（f3write・f3probeの両モードと非破壊チェックが共用する）。
+"""Pure functions for capacity judgment (shared by f3write mode, f3probe mode, and the
+non-destructive check).
 
-外部コマンドもデバイスも触らない。判定の分母はnominal_bytes（商品ページの公称容量）が
-設定されていればそれ、無ければlsblkの申告容量（advertised）。
+Touches neither external commands nor the device. The denominator is nominal_bytes (nominal
+capacity from the product page) if set, otherwise the capacity reported by lsblk (advertised).
 """
 
 import math
@@ -11,28 +12,29 @@ from typing import Any
 
 from ..models import StepStatus
 
-# 消失セクタ比率がこの値以上なら偽装疑い（エイリアスメモリは実容量を超えた分が全て消える）。
+# A lost-sector ratio at or above this suggests counterfeit (aliased memory loses everything
+# beyond the real capacity).
 LOST_RATIO_COUNTERFEIT = 0.50
 
 _BAD_NEWS = "Bad news:"
 
 
 def evaluate(actual_bytes: int, advertised_bytes: int, pass_ratio: float = 0.93) -> bool:
-    """実容量が分母×pass_ratio以上か。分母が0以下ならFalse。"""
+    """Whether the actual capacity is >= denominator x pass_ratio. False if the denominator <= 0."""
     return advertised_bytes > 0 and actual_bytes >= advertised_bytes * pass_ratio
 
 
 def _gb(size: int | float) -> str:
-    """バイト数を10^9単位のGB表記にする（report/text.pyの公称容量表示と揃える）。"""
+    """Format bytes as GB in units of 10^9 (matching the nominal capacity in report/text.py)."""
     return f"{size / 1e9:.2f}GB"
 
 
 def over_threshold(nominal: int | None, over_ratio: float) -> int | None:
-    """容量超過の境界（バイト）。nominalがNoneまたは0以下ならNone。
+    """Boundary (bytes) for excess capacity. None if nominal is None or <= 0.
 
-    浮動小数のまま掛けると32_000_000_000 × 1.07 = 34240000000.000004となり、ceilで
-    1バイトずれる。Fraction(str(over_ratio))は10進表記どおりの有理数になるので、
-    境界は「公称×over_ratioをバイトに切り上げた値」に一致する。
+    Multiplying as floats gives 32_000_000_000 x 1.07 = 34240000000.000004, and ceil is off by
+    one byte. Fraction(str(over_ratio)) is the exact rational of the decimal notation, so the
+    boundary equals "nominal x over_ratio rounded up to a whole byte".
     """
     if nominal is None or nominal <= 0:
         return None
@@ -40,13 +42,14 @@ def over_threshold(nominal: int | None, over_ratio: float) -> int | None:
 
 
 def exceeds(value: int, nominal: int | None, over_ratio: float) -> bool:
-    """valueがover_threshold()を超えるか。境界がNoneなら常にFalse（整数比較のみ）。"""
+    """Whether value exceeds over_threshold(). Always False if the boundary is None (integer
+    comparison only)."""
     threshold = over_threshold(nominal, over_ratio)
     return threshold is not None and value > threshold
 
 
 def _over_text(label: str, value: int, nominal: int, over_ratio: float) -> str:
-    """容量超過の理由文言（申告容量・実容量で共用）。"""
+    """Reason wording for excess capacity (shared by reported and actual capacity)."""
     threshold = over_threshold(nominal, over_ratio)
     return (
         f"{label}{_gb(value)} > 上限{_gb(threshold or 0)}"
@@ -55,7 +58,8 @@ def _over_text(label: str, value: int, nominal: int, over_ratio: float) -> str:
 
 
 def precheck_advertised(advertised: int, nominal: int | None, over_ratio: float) -> dict[str, Any]:
-    """申告容量と公称容量の非破壊比較。常に辞書を返す（nominal未設定ならexceeded = False）。"""
+    """Non-destructive comparison of reported vs. nominal capacity. Always returns a dict
+    (exceeded = False if nominal is unset)."""
     exceeded = exceeds(advertised, nominal, over_ratio)
     summary = ""
     if exceeded and nominal is not None:
@@ -73,7 +77,7 @@ def precheck_advertised(advertised: int, nominal: int | None, over_ratio: float)
 
 @dataclass(frozen=True)
 class CapacityVerdict:
-    """容量ステップの判定結果。"""
+    """Judgment result of the capacity step."""
 
     status: StepStatus
     # "ok" | "short" | "defect" | "counterfeit" | "unverified"
@@ -95,7 +99,8 @@ def _counterfeit_reasons(
     probe_verdict_line: str | None,
     threshold: int,
 ) -> tuple[list[str], list[str]]:
-    """偽装疑いの条件を固定順（申告超過→実容量超過→f3probe→消失比率）で評価する。"""
+    """Evaluate counterfeit conditions in a fixed order (reported excess -> actual excess ->
+    f3probe -> lost ratio)."""
     codes: list[str] = []
     texts: list[str] = []
     if nominal is not None and exceeds(advertised, nominal, over_ratio):
@@ -129,22 +134,23 @@ def judge(
     verified_bytes: int | None,
     threshold: int,
 ) -> CapacityVerdict:
-    """容量の判定。優先順位はcounterfeit>short>defect>unverified>ok。
+    """Judge capacity. Priority: counterfeit > short > defect > unverified > ok.
 
     Args:
-        actual: 実容量（バイト）。
-        advertised: lsblkの申告容量（バイト）。
-        nominal: 商品ページの公称容量（バイト）。未設定ならNone。
-        pass_ratio: 容量不足の下限比率。
-        over_ratio: 容量超過の上限比率。
-        bad_sectors: f3readの非OKセクタ合計。f3probeモードはNone。
-        lost_ratio: 消失セクタ比率。f3probeモードはNone。
-        probe_verdict_line: f3probeのGood news／Bad news行。f3writeモードはNone。
-        verified_bytes: f3readで検証できたバイト数。f3probeモードはNone。
-        threshold: 容量不足の閾値（ceil(base × pass_ratio)）。
+        actual: Actual capacity (bytes).
+        advertised: Capacity reported by lsblk (bytes).
+        nominal: Nominal capacity from the product page (bytes). None if unset.
+        pass_ratio: Lower ratio for insufficient capacity.
+        over_ratio: Upper ratio for excess capacity.
+        bad_sectors: Total f3read non-OK sectors. None in f3probe mode.
+        lost_ratio: Lost-sector ratio. None in f3probe mode.
+        probe_verdict_line: f3probe Good news / Bad news line. None in f3write mode.
+        verified_bytes: Bytes verified by f3read. None in f3probe mode.
+        threshold: Threshold for insufficient capacity (ceil(base x pass_ratio)).
 
     Returns:
-        判定結果。defectのsummaryはセクタ合計だけで、内訳は呼び出し側が付ける。
+        Judgment result. The defect summary has only the sector total; the caller adds the
+        breakdown.
     """
     base = nominal or advertised
     codes, texts = _counterfeit_reasons(

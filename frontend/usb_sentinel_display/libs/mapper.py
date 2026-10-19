@@ -5,13 +5,14 @@ from .models import AttachedDisk, ResultRecord, ResultSummary, Slot, SlotState
 from .result_file import serial_for_dir
 from .units import ACTIVE_STATES, unit_name
 
-# tick間でディスクを同一視するキー（D12）。attached_atが入るので抜き差しで必ず変わる。
+# Key that identifies a disk across ticks (D12). It includes attached_at, so a re-plug
+# always changes it.
 DiskKey = tuple[str, str, float]
 
 
 @dataclass(frozen=True)
 class Retained:
-    """抜去後も表示し続ける結果と、抜去前のディスクの表示属性。"""
+    """Result kept on display after removal, and the pre-removal disk display attributes."""
 
     summary: ResultSummary
     removed_at: float
@@ -20,15 +21,15 @@ class Retained:
 
 
 def disk_key(disk: AttachedDisk) -> DiskKey:
-    """ディスクの同一性キーを返す。"""
+    """Return the identity key of a disk."""
     return (disk.kernel_name, disk.port_path, disk.attached_at)
 
 
 def bind_result(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord | None:
-    """ディスクに結び付く読めた結果を選ぶ（設計書3.5＋port_path優先）。
+    """Pick the readable result bound to a disk (design doc 3.5 plus port_path priority).
 
-    候補はmtimeが接続時刻以降で読めているもの。主キーはport_path（結果に無ければ
-    kernel_name）。複数ならディレクトリ名のシリアル一致を優先し、同点なら名前最大。
+    Candidates are readable with mtime at or after the connect time. The primary key is port_path
+    (kernel_name if the result has none). With several, prefer a dir-name serial match; tie: max.
     """
     candidates: list[ResultRecord] = []
     for record in records:
@@ -49,7 +50,7 @@ def bind_result(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord
 
 
 def bind_broken(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord | None:
-    """ディスクに結び付く読み取り不能（broken）な結果を選ぶ（D8）。"""
+    """Pick the unreadable (broken) result bound to a disk (D8)."""
     wanted = serial_for_dir(disk.serial, disk.kernel_name)
     matches = [
         record
@@ -60,11 +61,11 @@ def bind_broken(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord
 
 
 def bind_started(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord | None:
-    """ディスクに結び付く「開始したが完了結果が無い」記録を選ぶ。
+    """Pick the "started but no final result" record bound to a disk.
 
-    started行はDB経路（ResultStore.collect）だけが作る。ディレクトリ走査では従来どおり現れない。
-    候補はmtime（開始時刻）が接続時刻以降のもの。port_pathがあればport_path、無ければ
-    kernel_nameで結び付け、複数なら名前最大。
+    Only the DB path (ResultStore.collect) creates started rows; directory scans never show them.
+    Candidates have mtime (start time) at or after the connect time. Bind by port_path if present,
+    else kernel_name; with several, take the max name.
     """
     matches: list[ResultRecord] = []
     for record in records:
@@ -80,7 +81,7 @@ def bind_started(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecor
 
 
 class Mapper:
-    """ディスク・結果・ユニット状態からスロット一覧を組む。内部状態は一括で差し替える。"""
+    """Build the slot list from disks, results, and unit states. Swaps internal state at once."""
 
     def __init__(
         self,
@@ -90,13 +91,13 @@ class Mapper:
         waiting_s: float = 20.0,
         slot_count: int = 4,
     ) -> None:
-        """ポート対応表と時間の閾値を受け取り、内部状態を空で始める。
+        """Take the port mapping and time thresholds, and start with empty internal state.
 
         Args:
-            ports: スロット順のポート対応表（label、paths）。
-            retain_s: 抜去後に結果を表示し続ける秒数。
-            waiting_s: 接続直後に「待機中」とみなす秒数。これを過ぎて結果が無ければ「結果なし」。
-            slot_count: スロット数（画面のタイル数）。
+            ports: Port mapping in slot order (label, paths).
+            retain_s: Seconds to keep showing a result after removal.
+            waiting_s: Seconds after connect counted as "waiting"; later, no result is "no result".
+            slot_count: Number of slots (tiles on screen).
         """
         self.ports = ports
         self.retain_s = retain_s
@@ -110,16 +111,16 @@ class Mapper:
         self._last_done: dict[int, Retained] = {}
 
     def _label(self, index: int) -> str:
-        """スロットの表示名。対応表に無いスロットはP<n>。"""
+        """Display name of a slot. Slots not in the mapping are P<n>."""
         return self.ports[index].label if index < len(self.ports) else f"P{index + 1}"
 
     def _assign(
         self, disks: list[AttachedDisk]
     ) -> tuple[dict[int, AttachedDisk], dict[DiskKey, int], int]:
-        """ディスクをスロットに割り当てる。
+        """Assign disks to slots.
 
         Returns:
-            (スロット番号→ディスク、新しいフォールバック表、あふれた台数)。
+            (slot index -> disk, new fallback table, overflow count).
         """
         assigned: dict[int, AttachedDisk] = {}
         overflow = 0
@@ -132,7 +133,7 @@ class Mapper:
                 overflow += 1
             else:
                 assigned[index] = disk
-        # 既存のフォールバック割り当てを、確定ディスクに取られていなければ維持する。
+        # Keep existing fallback assignments unless a mapped disk has taken the slot.
         fallback: dict[DiskKey, int] = {}
         pending: list[AttachedDisk] = []
         for disk in unknown:
@@ -142,9 +143,9 @@ class Mapper:
                 fallback[disk_key(disk)] = index
             else:
                 pending.append(disk)
-        # 押し出された・初見のディスクは、空のスロット→保持中のスロット（古い順）の順で埋める。
-        # 同じtickで抜去された完了スロット（_last_doneにあり、まだ_retainedに無い）は
-        # これから保持に入るので空きとして扱わない。
+        # Pushed-out and newly seen disks fill empty slots, then retained slots (oldest first).
+        # Done slots removed in the same tick (in _last_done, not yet in _retained) are about to
+        # be retained, so they are not treated as free.
         free = [
             i
             for i in range(self.slot_count)
@@ -175,10 +176,10 @@ class Mapper:
         unit_state: str | None,
         now: float,
     ) -> SlotState:
-        """接続中ディスクのスロット状態を設計書3.4の順で決める。
+        """Decide the state of a connected disk's slot in the order of design doc 3.4.
 
-        started行（DB経路だけが作る）は、ユニット状態が分からなければ検査中、
-        分かっていて非activeなら結果なし（result.jsonを書けずに終わった）とみなす。
+        A started row (only the DB path creates one) is inspecting if the unit state is unknown,
+        and no result if known and not active (it ended without writing result.json).
         """
         if unit_state in ACTIVE_STATES:
             return SlotState.INSPECTING
@@ -200,17 +201,17 @@ class Mapper:
         unit_template: str,
         now: float,
     ) -> tuple[list[Slot], int]:
-        """1tick分のスロット一覧を計算し、成功したら内部状態を差し替える。
+        """Compute the slot list for one tick and swap in the internal state on success.
 
         Args:
-            disks: 接続中のディスク。
-            records: 結果レコード。
-            unit_states: ユニット名→ActiveState。
-            unit_template: ユニット名のテンプレート。
-            now: 現在時刻（エポック秒）。
+            disks: Connected disks.
+            records: Result records.
+            unit_states: Unit name -> ActiveState.
+            unit_template: Unit name template.
+            now: Current time (epoch seconds).
 
         Returns:
-            (スロット一覧、表示できなかった台数)。
+            (slot list, count of disks that could not be shown).
         """
         assigned, fallback, overflow = self._assign(disks)
         retained: dict[int, Retained] = {}
@@ -222,7 +223,7 @@ class Mapper:
             if disk is None:
                 kept = self._retained.get(index)
                 if kept is None and index in self._last_done:
-                    # 抜去したtick。removed_atを今に差し替えて保持を始める。
+                    # The removal tick. Set removed_at to now and start retaining.
                     kept = replace(self._last_done[index], removed_at=now)
                 if kept is not None and now - kept.removed_at < self.retain_s:
                     retained[index] = kept

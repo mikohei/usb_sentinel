@@ -54,7 +54,7 @@ def summary(
 
 
 def check(payload: str) -> dict[str, object]:
-    """上限とバージョンを検証して辞書に戻す。"""
+    """Check the limits and version, then decode back into a dict."""
     assert len(payload.encode("ascii")) <= MAX_PAYLOAD_BYTES
     assert qr_version(payload) <= MAX_VERSION
     data = json.loads(payload)
@@ -64,7 +64,7 @@ def check(payload: str) -> dict[str, object]:
 
 class TestBuildPayload:
     def test_typical(self) -> None:
-        """設計書の例と同じ内容で109バイト。"""
+        """The same content as the design doc example is 109 bytes."""
         payload = build_payload(summary())
         assert payload == (
             '{"v":2,"r":"I","s":"ABC123456789","t":"20250601T120000Z",'
@@ -74,14 +74,14 @@ class TestBuildPayload:
         check(payload)
 
     def test_worst_case_serial(self) -> None:
-        """32バイトのシリアル＋5ステップ＋n=9999で136バイト。"""
+        """A 32-byte serial + 5 steps + n=9999 is 136 bytes."""
         payload = build_payload(summary(serial="A" * 32, steps=FIVE_STEPS, malware_count=9999))
         assert len(payload) == 136
         data = check(payload)
         assert "k" not in data
 
     def test_worst_case_with_k(self) -> None:
-        """空シリアルでカーネル名を使う最悪条件でも150以下。"""
+        """Even the worst case (empty serial, kernel name used instead) is 150 or less."""
         payload = build_payload(
             summary(serial="", kernel="sdabc", steps=FIVE_STEPS, malware_count=9999)
         )
@@ -91,13 +91,13 @@ class TestBuildPayload:
         assert len(payload) <= 142
 
     def test_long_serial_truncated(self) -> None:
-        """33文字以上は32文字に切る。"""
+        """33 or more chars are truncated to 32."""
         data = check(build_payload(summary(serial="X" * 40)))
         assert data["s"] == "X" * 32
 
     @pytest.mark.parametrize("length", [32, 40])
     def test_fullwidth_serial_becomes_question_marks(self, length: int) -> None:
-        """全角のシリアルは?に置き換わり150バイト以下・バージョン8以下。"""
+        """Full-width serial chars become ?; the result is <=150 bytes and version <=8."""
         payload = build_payload(summary(serial="あ" * length, steps=FIVE_STEPS, malware_count=9999))
         data = check(payload)
         assert data["s"] == "?" * 32
@@ -117,7 +117,7 @@ class TestBuildPayload:
         }
 
     def test_unknown_codes(self) -> None:
-        """未知のVerdict／StepStatusは?、未知のステップ名は先頭3文字。"""
+        """Unknown Verdict/StepStatus becomes ?; an unknown step name becomes its first 3 chars."""
         data = check(build_payload(summary(verdict="Weird", steps=(("firmware", "odd"),))))
         assert data["r"] == "?"
         assert data["st"] == "fir:?"
@@ -127,7 +127,7 @@ class TestBuildPayload:
         assert data["st"] == "s:F,m:P"
 
     def test_started_at_fallback(self) -> None:
-        """started_atが読めなければディレクトリ名の先頭16文字。"""
+        """If started_at cannot be read, use the first 16 chars of the directory name."""
         data = check(build_payload(summary(started_at="garbage")))
         assert data["t"] == "20250601T120000Z"
 
@@ -141,12 +141,12 @@ class TestBuildPayload:
             assert check(build_payload(summary(verdict=verdict)))["r"] == code
 
     def test_oversize_raises(self) -> None:
-        """短縮しても150バイトを超えるときはValueError。"""
+        """ValueError when it still exceeds 150 bytes after shortening."""
         with pytest.raises(ValueError, match="payload"):
             build_payload(summary(malware_count=10**120))
 
     def test_shortens_serial_then_drops_steps(self) -> None:
-        """150バイト超なら先にsを16文字に、まだ超えればstを落とす。"""
+        """Above 150 bytes, first cut s to 16 chars; if still over, drop st."""
         steps = tuple((f"step{i:02d}", "pass") for i in range(6))
         data = check(build_payload(summary(serial="A" * 32, steps=steps, malware_count=9999)))
         assert data["s"] == "A" * 16

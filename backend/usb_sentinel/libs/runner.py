@@ -1,7 +1,7 @@
-"""外部コマンドの実行。
+"""Running external commands.
 
-subprocessの呼び出しはここに集約する。argvはリストで固定し、文字列の結合でコマンドを組まない。
-テストではFakeRunnerで差し替える。
+All subprocess calls are centralized here. argv is always a fixed list; commands are never
+built by string concatenation. Tests replace this with FakeRunner.
 """
 
 import shutil
@@ -24,11 +24,11 @@ class CommandResult:
 
     @property
     def ok(self) -> bool:
-        """終了コード0でタイムアウトしていなければTrue。"""
+        """True if the exit code is 0 and it did not time out."""
         return self.returncode == 0 and not self.timed_out
 
     def check(self) -> "CommandResult":
-        """okでなければRuntimeError（stderr、無ければargv）を投げる。okなら自身を返す。"""
+        """Raise RuntimeError (stderr, else argv) if not ok. Return self if ok."""
         if not self.ok:
             raise RuntimeError(self.stderr or f"command failed: {self.argv}")
         return self
@@ -36,31 +36,32 @@ class CommandResult:
 
 class CommandRunner(Protocol):
     def which(self, command: str) -> str | None:
-        """コマンドの実体パス。見つからなければNone。"""
+        """Resolved path of the command. None if not found."""
         ...
 
     def run(self, argv: list[str], *, timeout_s: float | None = None) -> CommandResult:
-        """argvを実行して結果を返す。timeout_sを超えたらtimed_out=Trueの結果にする。"""
+        """Run argv and return the result. Exceeding timeout_s yields timed_out=True."""
         ...
 
 
 class SubprocessRunner:
     def which(self, command: str) -> str | None:
-        """shutil.which()でPATHから探す。"""
+        """Search PATH with shutil.which()."""
         return shutil.which(command)
 
     def run(self, argv: list[str], *, timeout_s: float | None = None) -> CommandResult:
-        """subprocess.run()でargvを実行する。stdout／stderrはテキストで取り、不正バイトは置換する。
+        """Run argv with subprocess.run(). stdout/stderr are text; invalid bytes are replaced.
 
         Args:
-            argv: 実行するargv（リスト固定）。
-            timeout_s: 秒数。超えたら終了コード-1・timed_out=Trueの結果を返す。
+            argv: argv to run (fixed list).
+            timeout_s: Seconds. When exceeded, returns a result with exit code -1 and
+                timed_out=True.
 
         Returns:
-            コマンドの実行結果。
+            Result of the command.
 
         Raises:
-            CommandNotFoundError: argv[0]が実行できないとき。
+            CommandNotFoundError: If argv[0] cannot be executed.
         """
         try:
             process = subprocess.run(
@@ -75,17 +76,18 @@ class SubprocessRunner:
 
 class FakeRunner:
     def __init__(self, missing: set[str] | None = None) -> None:
-        """登録済みの結果を返す偽の実行器。
+        """Fake runner that returns registered results.
 
         Args:
-            missing: which()がNoneを返し、run()がCommandNotFoundErrorを投げるコマンド名。
+            missing: Command names for which which() returns None and run() raises
+                CommandNotFoundError.
         """
         self.missing = set(missing or ())
         self.calls: list[tuple[str, ...]] = []
         self.registered: dict[tuple[str, ...], CommandResult] = {}
 
     def which(self, command: str) -> str | None:
-        """missingに無いコマンドは`/usr/bin/<command>`として存在するとみなす。"""
+        """Treat any command not in missing as existing at `/usr/bin/<command>`."""
         return None if command in self.missing else f"/usr/bin/{command}"
 
     def register(
@@ -97,32 +99,32 @@ class FakeRunner:
         stderr: str = "",
         timed_out: bool = False,
     ) -> None:
-        """argvの前置一致で返す結果を登録する。同じargvを登録し直すと上書きになる。
+        """Register a result returned on an argv prefix match. Re-registering argv overwrites.
 
         Args:
-            argv: 一致させる前置（例: `["clamscan", "--version"]`）。
-            returncode: 返す終了コード。
-            stdout: 返す標準出力。
-            stderr: 返す標準エラー。
-            timed_out: タイムアウトした結果として返すか。
+            argv: Prefix to match (e.g. `["clamscan", "--version"]`).
+            returncode: Exit code to return.
+            stdout: Standard output to return.
+            stderr: Standard error to return.
+            timed_out: Whether to return it as a timed-out result.
         """
         self.registered[tuple(argv)] = CommandResult(
             tuple(argv), returncode, stdout, stderr, timed_out
         )
 
     def run(self, argv: list[str], *, timeout_s: float | None = None) -> CommandResult:
-        """呼び出しをcallsに記録し、最も長く前置一致した登録結果を返す。
+        """Record the call in calls and return the registered result with the longest prefix.
 
         Args:
-            argv: 実行するargv。
-            timeout_s: 受け取るだけで使わない（CommandRunnerプロトコルの引数）。
+            argv: argv to run.
+            timeout_s: Accepted but unused (an argument of the CommandRunner protocol).
 
         Returns:
-            登録結果（argvは実際の呼び出しに差し替える）。
+            Registered result (with argv replaced by the actual call).
 
         Raises:
-            CommandNotFoundError: argv[0]がmissingにあるとき。
-            AssertionError: 一致する登録が無いとき（テストの設定漏れ）。
+            CommandNotFoundError: If argv[0] is in missing.
+            AssertionError: If no registration matches (missing test setup).
         """
         args = tuple(argv)
         self.calls.append(args)

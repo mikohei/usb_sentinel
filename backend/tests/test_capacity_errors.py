@@ -1,7 +1,7 @@
-"""容量ステップ（CapacityStep）のERROR経路とrwマウントの後片付け。
+"""ERROR paths of the capacity step (CapacityStep) and cleanup of the rw mount.
 
-コマンド不在・タイムアウト・権限不足・解析不能と、umount失敗時に一次原因が
-`details["suppressed_error"]`に残ることを確認する。
+Covers missing commands, timeouts, insufficient permissions, and unparsable output, and verifies
+that the primary cause remains in `details["suppressed_error"]` when umount fails.
 """
 
 from __future__ import annotations
@@ -28,7 +28,8 @@ class TestErrorPaths:
     def test_nearly_full_drive_is_error_not_pass(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
-        # 既使用31GB・検証済み1GBでは合計が閾値を超えても根拠がないのでERROR。
+        # With 31 GB already used and 1 GB verified, the total exceeds the threshold but there is
+        # no evidence, so ERROR.
         f3_runner.register(["f3read"], stdout=f3read_output(1_953_125))
         stat = make_statvfs(f_frsize=4096, f_blocks=7_812_500, f_bfree=244_141)
 
@@ -60,8 +61,9 @@ class TestErrorPaths:
         assert f3_runner.calls[-1][0] == "umount"
 
     def test_f3write_unparseable_is_error(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
-        # 速度行の数値がfloatに変換できない（"1.2.3"）とき、素のValueErrorではなく
-        # f3read側と同じ形のsummaryに変換され、raw_stdout_headも残り、umountも行われる。
+        # When a speed-line number cannot be converted to float ("1.2.3"), it becomes a summary
+        # shaped like the f3read side instead of a bare ValueError, raw_stdout_head is kept,
+        # and umount still runs.
         f3_runner.register(
             ["f3write"], stdout="Average writing speed: 1.2.3 MB/s\n", stderr="odd output"
         )

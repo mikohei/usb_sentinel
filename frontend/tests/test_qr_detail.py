@@ -1,4 +1,4 @@
-"""詳細QR（v:3、3枚）のペイロード生成と結合のテスト。summary()／check()はtest_qr_payloadから借りる。"""
+"""Tests for building/joining detail QR (v:3, 3 pages). summary()/check() from test_qr_payload."""
 
 import json
 import re
@@ -38,7 +38,7 @@ TYPICAL_DETAIL = ResultDetail(
     reason_codes=("c:short", "s:minor"),
 )
 
-# 設計書7.3の最悪値（2枚目・3枚目）。
+# Worst-case values from design doc 7.3 (pages 2 and 3).
 WORST_DETAIL = ResultDetail(
     elapsed_s=86399.0,
     clamav_db_version="999999",
@@ -73,7 +73,7 @@ PAGE_RE = re.compile(r"^([1-3])/3$")
 
 
 def merge_detail_pages(pages: list[str]) -> dict[str, object]:
-    """詳細QRの3枚を読み取り順を問わず結合する（doc/qr-payload.md 5.6の読み手側の手順）。"""
+    """Join the 3 detail QR pages in any read order (reader steps in doc/qr-payload.md 5.6)."""
     merged: dict[str, object] = {}
     seen: set[int] = set()
     digest: str | None = None
@@ -102,7 +102,7 @@ class TestDetailPages:
         assert DETAIL_DIGEST_LEN == 12
 
     def test_typical_three_pages(self) -> None:
-        """典型3枚が各150バイト以下・バージョン8以下で、キー順が仕様の表どおり。"""
+        """Typical 3 pages are each <=150 bytes and <=v8, with key order per the spec table."""
         pages = build_detail_pages(summary(detail=TYPICAL_DETAIL))
         assert len(pages) == 3
         for page, text in enumerate(pages, start=1):
@@ -114,7 +114,7 @@ class TestDetailPages:
             assert list(data)[3:] == PAGE_KEYS[page]
 
     def test_typical_values(self) -> None:
-        """MB換算・丸め・コード化が仕様どおり。"""
+        """MB conversion, rounding, and coding follow the spec."""
         pages = build_detail_pages(summary(verdict="Spec Mismatch", detail=TYPICAL_DETAIL))
         one, two, three = (check(text) for text in pages)
         assert one["t"] == "20250601T120000Z"
@@ -152,7 +152,7 @@ class TestDetailPages:
         }
 
     def test_worst_case_page1_with_serial(self) -> None:
-        """1枚目の最悪値（s32文字、e=86399、m=9999、dv=999999）でも150以下で切られない。"""
+        """Page 1 worst case (s 32 chars, e=86399, m=9999, dv=999999) is <=150 and not truncated."""
         text = build_detail_page(
             summary(serial="A" * 32, malware_count=9999, detail=WORST_DETAIL), 1
         )
@@ -163,7 +163,7 @@ class TestDetailPages:
         assert data["dv"] == 999999
 
     def test_worst_case_page1_with_kernel(self) -> None:
-        """空シリアルでカーネル名を使う最悪条件でもk==1が入って150以下。"""
+        """Worst case with empty serial (kernel name used) still includes k==1 and is <=150."""
         text = build_detail_page(
             summary(serial="", kernel="sdabc", malware_count=9999, detail=WORST_DETAIL), 1
         )
@@ -173,7 +173,7 @@ class TestDetailPages:
         assert list(data) == ["v", "p", "d", "t", "s", "k", "r", "e", "m", "dv"]
 
     def test_worst_case_page2(self) -> None:
-        """2枚目の最悪値（5TB級の3値、ck=C、co=1、cl=0.9999、ls=20000、hn=999999）。"""
+        """Page 2 worst case (three 5 TB values, ck=C, co=1, cl=0.9999, ls=20000, hn=999999)."""
         data = check(build_detail_page(summary(detail=WORST_DETAIL), 2))
         assert data["cn"] == data["ca"] == data["cx"] == 5_000_000
         assert data["ck"] == "C"
@@ -184,7 +184,7 @@ class TestDetailPages:
         assert data["hn"] == 999999
 
     def test_worst_case_page3(self) -> None:
-        """3枚目の最悪値（4値とも999.9、db8桁、hd16桁）。"""
+        """Page 3 worst case (all 4 values 999.9, 8-digit db, 16-digit hd)."""
         data = check(build_detail_page(summary(detail=WORST_DETAIL), 3))
         assert data["sr"] == data["sw"] == data["tr"] == data["tw"] == 999.9
         assert data["sb"] == "c"
@@ -193,7 +193,7 @@ class TestDetailPages:
         assert data["hd"] == "f" * 16
 
     def test_old_format_all_null(self) -> None:
-        """旧形式（detail全None）でも3枚とも生成され、値はnullでキーは省かない。"""
+        """Old format (detail all None) still builds 3 pages; values are null and keys are kept."""
         pages = build_detail_pages(summary())
         one, two, three = (check(text) for text in pages)
         assert "k" not in one
@@ -215,14 +215,14 @@ class TestDetailPages:
         assert data["k"] == 1
 
     def test_digest_matches_normal_qr(self) -> None:
-        """各枚のdは通常QRのdの先頭12桁と一致する。"""
+        """Each page's d matches the first 12 chars of the normal QR's d."""
         s = summary(detail=TYPICAL_DETAIL)
         normal = json.loads(build_payload(s))
         for text in build_detail_pages(s):
             assert json.loads(text)["d"] == normal["d"][:12]
 
     def test_unknown_codes(self) -> None:
-        """表に無いkind／device_class／basis／severityは?／null／-になる。"""
+        """kind/device_class/basis/severity not in the table become ?/null/-."""
         detail = ResultDetail(
             capacity_kind="weird",
             device_class="floppy",
@@ -241,7 +241,7 @@ class TestDetailPages:
         assert three["db"] is None
 
     def test_db_date_without_time(self) -> None:
-        """日付だけのdb_dateも8桁になる。"""
+        """A date-only db_date also becomes 8 digits."""
         data = check(
             build_detail_page(summary(detail=ResultDetail(clamav_db_date="2025-06-01")), 3)
         )
@@ -259,7 +259,7 @@ class TestDetailPages:
             assert data["ck"] == code
 
     def test_mb_floor(self) -> None:
-        """MB換算は切り捨て。"""
+        """MB conversion truncates."""
         detail = ResultDetail(nominal_bytes=1_999_999, advertised_bytes=0, actual_bytes=10**6)
         data = check(build_detail_page(summary(detail=detail), 2))
         assert data["cn"] == 1

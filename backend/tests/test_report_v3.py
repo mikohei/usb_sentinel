@@ -1,4 +1,4 @@
-"""ファイル用QR v:3（設計書第6節）のペイロード。材料はtest_report.pyから借りる。"""
+"""Payload of the file QR v:3 (design doc section 6). Fixtures are borrowed from test_report.py."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def _unmount_step() -> StepResult:
 
 
 def _full_result(*, serial: str = "ABC123456789") -> InspectionResult:
-    """5ステップ・理由1件の典型ケース（設計書第6.2節）。"""
+    """Typical case with 5 steps and 1 reason (design doc section 6.2)."""
     result = _result(
         _malware_with_date(), _hash_step(), _capacity_step(), _speed_step(), _unmount_step()
     )
@@ -120,7 +120,8 @@ def _full_result(*, serial: str = "ABC123456789") -> InspectionResult:
 
 
 def _error_capacity_step() -> StepResult:
-    """ERROR経路の容量ステップ。run()冒頭のキーしか持たない（設計書第6.1節）。"""
+    """Capacity step on the ERROR path. Has only the keys set at the start of run() (design doc
+    section 6.1)."""
     return StepResult(
         name="capacity",
         status=StepStatus.ERROR,
@@ -143,7 +144,7 @@ def _skipped_speed_step() -> StepResult:
 
 class TestQrPayloadV3:
     def test_all_v3_keys_present(self) -> None:
-        """設計書第6.1節の表の全キーが出る。"""
+        """Every key in the table in design doc section 6.1 appears."""
         payload = json.loads(build_payload(_full_result()))
 
         assert set(payload) == V3_KEYS
@@ -163,7 +164,7 @@ class TestQrPayloadV3:
         assert payload["reasons"] == ["全ステップ Pass"]
 
     def test_clamav_db_date_is_first_ten_chars(self) -> None:
-        """db_dateのISO文字列からYYYY-MM-DDだけを切り出す。"""
+        """Extract only YYYY-MM-DD from the db_date ISO string."""
         payload = json.loads(build_payload(_full_result()))
 
         assert payload["clamav_db_date"] == "2024-02-12"
@@ -182,7 +183,7 @@ class TestQrPayloadV3:
         assert payload["advertised_over"] is True
 
     def test_advertised_over_defaults_to_false(self) -> None:
-        """advertised_checkが既定の{}でもFalseになる（nominal_bytes未設定の運用）。"""
+        """False even when advertised_check is the default {} (operation without nominal_bytes)."""
         payload = json.loads(build_payload(_result(_clean_malware_step())))
 
         assert payload["advertised_over"] is False
@@ -208,7 +209,7 @@ class TestQrPayloadV3:
         }
 
     def test_error_capacity_step_gives_null_without_keyerror(self) -> None:
-        """ERROR状態の容量ステップは新キーを持たない。KeyErrorを出さずnullにする。"""
+        """A capacity step in ERROR state lacks the new keys. Use null without raising KeyError."""
         result = _result(_clean_malware_step(), _error_capacity_step(), _skipped_speed_step())
 
         payload = json.loads(build_payload(result))
@@ -219,7 +220,8 @@ class TestQrPayloadV3:
         assert payload["steps"] == {"malware": "pass", "capacity": "error", "speed": "skipped"}
 
     def test_fail_capacity_without_new_keys_uses_null_values(self) -> None:
-        """FAILでもdetailsに新キーが無ければ値はnullで、辞書自体は組む。"""
+        """Even on FAIL, if details lacks the new keys the values are null, but the dict is still
+        built."""
         capacity = StepResult(
             name="capacity",
             status=StepStatus.FAIL,
@@ -247,7 +249,7 @@ class TestQrPayloadV3:
         }
 
     def test_speed_error_without_read_is_null(self) -> None:
-        """fioがERRORで終わりreadが無いときはspeedをnullにする（device_classは残る）。"""
+        """When fio ends in ERROR with no read, speed becomes null (device_class remains)."""
         speed = StepResult(
             name="speed",
             status=StepStatus.ERROR,
@@ -267,7 +269,8 @@ class TestQrPayloadV3:
         assert payload["hash_inventory_lines"] == 3
 
     def test_hash_inventory_missing_is_none(self) -> None:
-        """台帳がSKIPPEDや台帳ファイルを開けなかったERRORではdetailsにdigestが無い。"""
+        """When the inventory is SKIPPED, or ERROR because the inventory file could not be
+        opened, details has no digest."""
         skipped = StepResult(name="hash_inventory", status=StepStatus.SKIPPED, summary="無効")
 
         payload = json.loads(build_payload(_result(_clean_malware_step(), skipped)))

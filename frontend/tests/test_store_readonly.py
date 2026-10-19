@@ -1,4 +1,4 @@
-"""SqliteIndexが読み取り専用である証明（バイト列不変、mode=ro、query_only）。材料はtest_storeから借りる。"""
+"""Prove SqliteIndex is read-only (bytes unchanged, mode=ro, query_only). Uses test_store data."""
 
 import sqlite3
 from pathlib import Path
@@ -19,7 +19,7 @@ from usb_sentinel_display.libs.store import SqliteIndex
 
 class TestReadOnly:
     def test_file_bytes_unchanged(self, tmp_path: Path) -> None:
-        """query()の前後でDBファイルのバイト列が同一（書かない証明）。"""
+        """The DB file bytes are identical before and after query() (proof of no writes)."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1), db_row(NAME_2, started_at=STARTED_2, state="started")])
         before = db.read_bytes()
@@ -29,7 +29,7 @@ class TestReadOnly:
         assert sorted(p.name for p in tmp_path.iterdir()) == ["db.sqlite"]
 
     def test_uri_requests_read_only_mode(self, tmp_path: Path) -> None:
-        """接続はfile: URIで、mode=roを含む。"""
+        """The connection uses a file: URI that includes mode=ro."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1)])
         seen: list[tuple[str, dict[str, object]]] = []
@@ -45,7 +45,7 @@ class TestReadOnly:
         assert kwargs == {"uri": True, "timeout": 1.0}
 
     def test_query_only_blocks_insert(self, tmp_path: Path) -> None:
-        """mode=roを外して開いてもPRAGMA query_only=ONがINSERTを拒む。"""
+        """Even when opened without mode=ro, PRAGMA query_only=ON rejects INSERT."""
         db = tmp_path / "db.sqlite"
         make_db(db, [db_row(NAME_1)])
         opened: list[KeepOpenConnection] = []

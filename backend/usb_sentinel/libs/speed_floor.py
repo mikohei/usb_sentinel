@@ -1,7 +1,7 @@
-"""デバイス種別ごとの業界最低速度（SOP準拠）。
+"""Industry minimum speeds per device class (per the SOP).
 
-`config.py`が`device_class`の検証に参照するため、このモジュールは`dataclasses`以外を
-importしない（`steps/`配下をimportすると`config`→`steps`→`config`の循環になる）。
+`config.py` uses this module to validate `device_class`, so this module imports nothing but
+`dataclasses` (importing from `steps/` would create a `config` -> `steps` -> `config` cycle).
 """
 
 from dataclasses import dataclass
@@ -9,13 +9,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Floor:
-    """種別1つ分の最低速度。
+    """Minimum speeds for one device class.
 
     Attributes:
-        read_mb_s: 読み取りの最低値（MB/s、10^6バイト/秒）。
-        write_mb_s: 書き込みの最低値（MB/s）。
-        label: summary用の日本語名。
-        code: QR・SQLite用の2文字コード。
+        read_mb_s: Minimum read speed (MB/s, 10^6 bytes/s).
+        write_mb_s: Minimum write speed (MB/s).
+        label: Japanese name used in the summary.
+        code: Two-character code for the QR code and SQLite.
     """
 
     read_mb_s: float
@@ -26,12 +26,13 @@ class Floor:
 
 @dataclass(frozen=True)
 class Reference:
-    """速度判定で比較する基準値1つ分（読みまたは書き）。
+    """One reference value compared in the speed judgment (read or write).
 
     Attributes:
-        value: 比較する基準値（MB/s）。無ければNone。
-        basis: 基準の根拠。"nominal"（公称値）/ "class"（種別の最低値）/ "none"。
-        device_class: 決定した種別キー。不明ならNone。
+        value: Reference value to compare against (MB/s). None if absent.
+        basis: Basis of the reference: "nominal" (nominal value) / "class" (class minimum) /
+            "none".
+        device_class: Resolved device class key. None if unknown.
     """
 
     value: float | None
@@ -39,15 +40,15 @@ class Reference:
     device_class: str | None
 
 
-# USB2.0 High Speedのリンク速度（Mbps）。この値のときだけusb2_flashと推定する。
+# USB 2.0 High Speed link speed (Mbps). Only this exact value is inferred as usb2_flash.
 USB2_HIGH_SPEED_MBPS = 480
-# USB3.x SuperSpeed以上のリンク速度（Mbps）の下限。これ以上はusb3_flashと推定する。
+# Lower bound of USB 3.x SuperSpeed link speeds (Mbps). At or above this, infer usb3_flash.
 USB3_SUPER_SPEED_MBPS = 5000
-# USB3.2 Gen2以上は128b/132b符号化、未満（Gen1以下）は8b/10b符号化。
+# USB 3.2 Gen2 and above use 128b/132b encoding; below that (Gen1 and lower) use 8b/10b.
 GEN2_MBPS = 10000
 
 
-# microSDはSDと同じ値なので別キーは作らず、sd_c10・sd_u3を使う。
+# microSD has the same values as SD, so it has no separate key; use sd_c10 and sd_u3.
 DEVICE_FLOORS: dict[str, Floor] = {
     "hdd_5400": Floor(80.0, 80.0, "HDD 5400rpm", "h5"),
     "hdd_7200": Floor(120.0, 120.0, "HDD 7200rpm", "h7"),
@@ -63,18 +64,19 @@ DEVICE_FLOORS: dict[str, Floor] = {
 def resolve_device_class(
     configured: str | None, link_speed_mbps: int | None
 ) -> tuple[str | None, str]:
-    """(種別キー, 根拠)を返す。根拠は"config" / "link_speed" / "unknown"。
+    """Return (class key, basis). The basis is "config" / "link_speed" / "unknown".
 
-    設定があればそれを優先する。無ければUSBリンク速度から推定する。480Mbps（USB2.0 High
-    Speed）はusb2_flash、5000Mbps以上（USB3.x）はusb3_flash。USB1.1（0 < s < 480）と
-    規格に無い値（480 < s < 5000）、不明（None）は推定しない。
+    A configured value takes precedence. Otherwise the class is inferred from the USB link
+    speed: 480 Mbps (USB 2.0 High Speed) is usb2_flash, and 5000 Mbps or more (USB 3.x) is
+    usb3_flash. USB 1.1 (0 < s < 480), non-standard values (480 < s < 5000), and unknown (None)
+    are not inferred.
 
     Args:
-        configured: `[speed] device_class`の設定値。未設定ならNone。
-        link_speed_mbps: sysfsから読んだリンク速度（Mbps）。読めなければNone。
+        configured: Value of `[speed] device_class`. None if not set.
+        link_speed_mbps: Link speed read from sysfs (Mbps). None if unreadable.
 
     Returns:
-        種別キー（DEVICE_FLOORSのキーまたはNone）と根拠の組。
+        Pair of the class key (a DEVICE_FLOORS key or None) and the basis.
     """
     if configured is not None:
         return configured, "config"
@@ -88,16 +90,16 @@ def resolve_device_class(
 
 
 def effective_mb_s(link_speed_mbps: int) -> float:
-    """リンク速度（Mbps）から符号化損失を除いた実効上限（MB/s）を求める。
+    """Compute the effective ceiling (MB/s) from the link speed (Mbps), minus encoding loss.
 
-    Gen1以下（10000Mbps未満）は8b/10b符号化なので/10、Gen2以上は128b/132b符号化なので
-    ×128/132/8。
+    Gen1 and below (under 10000 Mbps) use 8b/10b encoding, so divide by 10. Gen2 and above use
+    128b/132b encoding, so multiply by 128/132/8.
 
     Args:
-        link_speed_mbps: リンク速度（Mbps）。
+        link_speed_mbps: Link speed (Mbps).
 
     Returns:
-        実効上限（MB/s、10^6バイト/秒）。
+        Effective ceiling (MB/s, 10^6 bytes/s).
     """
     if link_speed_mbps < GEN2_MBPS:
         return link_speed_mbps / 10

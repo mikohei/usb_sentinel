@@ -112,7 +112,7 @@ class TestNotices:
         assert snap.tick_count == 1
 
     def test_db_notice_from_collect(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """store.collect()が返すdb_missingがnoticeになり、records（走査結果）はそのまま使う。"""
+        """db_missing from store.collect() becomes the notice; scan records are used as-is."""
         root = tmp_path / "results"
         make_result(root, "20250601T120000Z-ABC123", sample_result(port_path="1-1.3"), 1100.0)
         disks = [AttachedDisk("sda", "1-1.3", "ABC123", 1000.0)]
@@ -130,7 +130,7 @@ class TestNotices:
         assert snap.slots[0].state is SlotState.DONE
 
     def test_results_missing_wins_over_db_notice(self, tmp_path: Path) -> None:
-        """結果ディレクトリ不在ならDBが無くてもresults_missingが勝つ。"""
+        """If the results directory is missing, results_missing wins even without a DB."""
         db = tmp_path / "none.sqlite"
         store = ResultStore(tmp_path / "results", index=SqliteIndex(db))
         monitor = build(tmp_path, list_disks=static([]))
@@ -139,7 +139,7 @@ class TestNotices:
 
     @pytest.mark.parametrize("kind", ["missing", "garbage", "schema2"])
     def test_broken_index_falls_back_without_exception(self, tmp_path: Path, kind: str) -> None:
-        """DB不在・壊れ・スキーマ版2のいずれでもtick()は例外を出さず走査結果とnoticeを返す。"""
+        """Missing, corrupt, or schema-v2 DB: tick() never raises; returns records and a notice."""
         root = tmp_path / "results"
         make_result(root, "20250601T120000Z-ABC123", sample_result(port_path="1-1.3"), 1100.0)
         db = tmp_path / "inspections.sqlite"
@@ -163,7 +163,7 @@ class TestNotices:
         assert snap.slots[0].state is SlotState.DONE
 
     def test_index_used_when_healthy(self, tmp_path: Path) -> None:
-        """DBがあればnoticeなしで、started行がINSPECTINGの材料になる。"""
+        """With a DB there is no notice, and a started row feeds the INSPECTING state."""
         root = tmp_path / "results"
         root.mkdir()
         db = tmp_path / "inspections.sqlite"
@@ -200,7 +200,7 @@ class TestErrors:
     def test_mapper_exception_contained(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """mapperの例外はtick()の外に出ず、例外クラス名をerrorに入れて前回のスロットを保持する。"""
+        """Mapper errors stay in tick(): the class name goes to error and prior slots are kept."""
         (tmp_path / "results").mkdir()
         monitor = build(tmp_path, list_disks=static([]))
         first = monitor.tick()

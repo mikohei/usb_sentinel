@@ -1,11 +1,11 @@
 [project]
 name = "usb-sentinel-display"
 version = "0.1.0"
-description = "USB Sentinelの検査結果を3.5インチタッチディスプレイに表示するフロントエンド（tkinter）"
+description = "Frontend that shows USB Sentinel inspection results on a 3.5-inch touch display (tkinter)"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    # 画面用QRコードの行列生成。get_matrix()だけを使うのでPillow（[pil]）は入れない。
+    # QR matrix generation for the on-screen codes. Only get_matrix() is used, so Pillow ([pil]) is not installed.
     "qrcode>=8.0",
 ]
 
@@ -24,7 +24,7 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-# src/レイアウトではなくfrontend/直下にusb_sentinel_display/を置いている。
+# usb_sentinel_display/ sits directly under frontend/ instead of using a src/ layout.
 module-root = ""
 
 [tool.ruff]
@@ -43,32 +43,32 @@ select = [
     "RET",  # flake8-return
     "S",    # flake8-bandit
     "DTZ",  # flake8-datetimez
-    "ANN",  # flake8-annotations（mypy strictのdisallow_untyped_defsの代替）
+    "ANN",  # flake8-annotations (replaces mypy strict's disallow_untyped_defs)
 ]
 ignore = [
-    # subprocessの呼び出しはunits.pyに集約し、argvをリストで固定している。
+    # subprocess calls are centralised in units.py and argv is always a fixed list.
     "S603",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# テストと開発用スクリプトではassertと固定値の利用を許容する。
+# Tests and development scripts may use assert and hard-coded values.
 "tests/*" = ["S101", "S105", "S106", "DTZ001"]
 "scripts/*" = ["S101"]
 
 [tool.ty.rules]
-# mypy strict相当の検査へ近づけるため、既定で無効なルールを有効にする。
-# デコレータが関数の型を失う場合を検出する（mypyのdisallow_untyped_decorators相当）。
+# Enable rules that are off by default to get close to mypy strict.
+# Detect decorators that lose the function type (like mypy's disallow_untyped_decorators).
 dynamic-function-decorator-return = "error"
-# 型引数のないジェネリクスを検出する（mypyのdisallow_any_generics相当）。
+# Detect generics without type arguments (like mypy's disallow_any_generics).
 missing-type-argument = "error"
-# 条件分岐によって未定義になりうる変数の参照を警告する。
+# Warn about references to variables that may be undefined on some branches.
 possibly-unresolved-reference = "warn"
-# 宣言した戻り値型の部分型でない値を返すreturnを検出する。
+# Detect a return of a value that is not a subtype of the declared return type.
 unsound-return-statement = "error"
-# 不要になった`# ty: ignore`を警告する（mypyのwarn_unused_ignores相当）。
+# Warn about `# ty: ignore` comments that are no longer needed (like mypy's warn_unused_ignores).
 unused-ignore-comment = "warn"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["gui: tk.Tk()を必要とする煙テスト"]
+markers = ["gui: smoke tests that need tk.Tk()"]

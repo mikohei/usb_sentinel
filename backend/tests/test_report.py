@@ -1,7 +1,7 @@
-"""結果出力（JSON / テキスト / QR）。
+"""Result output (JSON / text / QR).
 
-QR はバイトモードで最大 2953 バイトしか入らないため、ペイロードが上限内に収まる
-ことを必ず検証する。ここを外すと実機で QR 生成が落ちる。
+A QR code in byte mode holds at most 2953 bytes, so always verify the payload fits within the
+limit. Skipping this makes QR generation fail on the real device.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _clean_malware_step() -> StepResult:
 
 class TestJson:
     def test_keys_are_sorted_and_stable(self) -> None:
-        """キー順を固定して result.json の差分を追えるようにする。"""
+        """Fix the key order so diffs of result.json can be tracked."""
         text = to_json(_result(_clean_malware_step()))
         payload = json.loads(text)
 
@@ -76,7 +76,7 @@ class TestJson:
         assert digest(a) != digest(b)
 
     def test_device_has_port_path_key(self) -> None:
-        """表示フロントエンドが参照するport_pathキーがdeviceに出る。"""
+        """The port_path key used by the display frontend appears under device."""
         payload = json.loads(to_json(_result(_clean_malware_step())))
 
         assert "port_path" in payload["device"]
@@ -135,11 +135,12 @@ class TestQrPayload:
         assert payload["serial"] == "ABC123456789"
         assert payload["steps"] == {"malware": "pass"}
         assert payload["clamav_db"] == "27200"
-        # フル JSON との対応を取るためのダイジェスト。
+        # Digest for matching against the full JSON.
         assert payload["digest"] == digest(result)
 
     def test_many_detections_are_truncated_within_limit(self) -> None:
-        """検知が大量でもペイロードは上限内に収め、削ったことを明示する。"""
+        """Even with many detections, keep the payload within the limit and state that it was
+        truncated."""
         detections = [
             {
                 "path": f"/mnt/sda1/very/long/path/to/sample/number/{i}.bin",
@@ -216,7 +217,7 @@ class TestDefectiveVerdict:
         return _result(_clean_malware_step(), capacity, speed, verdict=Verdict.DEFECTIVE)
 
     def test_qr_payload_within_limit_and_structure_unchanged(self) -> None:
-        """detailsが増えてもQRペイロードの構造と上限は変わらない。"""
+        """More details do not change the QR payload structure or limit."""
         text = build_payload(self._defective())
         payload = json.loads(text)
 

@@ -1,7 +1,7 @@
-"""検査シーケンスの駆動と判定分類。
+"""Driving the inspection sequence and verdict classification.
 
-とくに「マルウェア検知時に破壊的検査へ進まない」ことは、感染ドライブの証跡保全に
-直結するため確実に検証する。
+In particular, "never proceed to destructive checks when malware is detected" is verified
+rigorously, because it directly preserves evidence on infected drives.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from usb_sentinel.libs import (
 )
 from usb_sentinel.libs import device as device_mod
 
-# 破壊的ステップで呼ばれてはいけないコマンド（ゲート不通過時の検証に使う）。
+# Commands that must not be called by destructive steps (used to verify a closed gate).
 DESTRUCTIVE_COMMANDS = {"f3probe", "f3write", "f3read", "fio"}
 
 CLAMSCAN_VERSION = "ClamAV 1.0.3/27200/Mon Feb 12 09:23:12 2024"
@@ -36,7 +36,7 @@ CLAMSCAN_VERSION = "ClamAV 1.0.3/27200/Mon Feb 12 09:23:12 2024"
 
 @pytest.fixture
 def full_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
-    """検査シーケンス全体を通すのに必要なコマンドを登録したFakeRunner。"""
+    """FakeRunner with the commands needed to run the full inspection sequence registered."""
     sys_block = tmp_path / "sys_block"
     (sys_block / "sda").mkdir(parents=True)
     (sys_block / "sda" / "removable").write_text("1\n")
@@ -97,7 +97,7 @@ class TestInspect:
     def test_malware_detection_still_builds_hash_inventory(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """感染検知時も台帳は作るが破壊的検査には進まない。"""
+        """On infection, the inventory is still built but destructive checks do not run."""
         full_runner.register(
             ["clamscan", "--recursive"],
             returncode=1,
@@ -117,7 +117,8 @@ class TestInspect:
     def test_malware_timeout_still_builds_hash_inventory(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """clamscanがタイムアウト（部分スキャン）でもスキャンは実行済みなので台帳を作る。"""
+        """Even if clamscan times out (partial scan), the scan did run, so build the
+        inventory."""
         full_runner.register(["clamscan", "--recursive"], returncode=0, timed_out=True)
 
         result = inspect(full_runner, config, "/dev/sda")
@@ -133,7 +134,7 @@ class TestInspect:
     def test_missing_clamscan_skips_hash_inventory(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """clamscanが1ファイルも開いていない経路では台帳のためにファイルを開かない。"""
+        """On paths where clamscan opened no files, do not open files for the inventory."""
         full_runner.register(["clamscan", "--version"], returncode=127, stderr="not found")
 
         result = inspect(full_runner, config, "/dev/sda")
@@ -165,9 +166,10 @@ class TestInspect:
     def test_stale_database_as_error_skips_hash_inventory(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """stale_db_is_error=trueで鮮度超過がERRORになる経路では、clamscan未実行なので台帳も作らない。
+        """When stale_db_is_error=true turns a stale DB into ERROR, clamscan did not run, so no
+        inventory is built either.
 
-        CLAMSCAN_VERSIONのDB日付（2024-02-12）は実時刻に対して必ず鮮度超過になる。
+        The CLAMSCAN_VERSION DB date (2024-02-12) is always stale relative to real time.
         """
         strict = replace(config, malware=replace(config.malware, stale_db_is_error=True))
 
@@ -196,7 +198,7 @@ class TestInspect:
     def test_malware_detection_writes_nothing_to_device(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        """感染時はf3/fioを一切呼ばない（証跡保全）。"""
+        """On infection, never call f3/fio (evidence preservation)."""
         full_runner.register(
             ["clamscan", "--recursive"],
             returncode=1,

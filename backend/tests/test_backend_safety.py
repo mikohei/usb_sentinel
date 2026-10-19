@@ -80,7 +80,7 @@ def test_rw_mount_always_uses_noexec_nosuid_nodev(ctx: StepContext, runner: Fake
     CapacityStep(statvfs=lambda _p: make_statvfs(), monotonic=lambda: 0.0).run(ctx)
 
     mounts = [c for c in runner.calls if c[0] == "mount"]
-    assert mounts, "mountが呼ばれていない"
+    assert mounts, "mount was not called"
     for argv in mounts:
         assert argv[1:4] == ("-w", "-o", "noexec,nosuid,nodev")
 

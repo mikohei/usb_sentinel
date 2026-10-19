@@ -76,7 +76,7 @@ class TestParseF3Read:
         ],
     )
     def test_missing_required_lines_raise(self, text: str) -> None:
-        with pytest.raises(ValueError, match="f3readの出力を解析できない"):
+        with pytest.raises(ValueError, match="Could not parse f3read output"):
             parse_f3read(text)
 
     @pytest.mark.parametrize(
@@ -123,7 +123,7 @@ class TestUsage:
         def failing(_path: str) -> os.statvfs_result:
             raise OSError(5, "Input/output error")
 
-        with pytest.raises(MountpointError, match="マウントポイントを調べられない"):
+        with pytest.raises(MountpointError, match="Could not stat the mount point"):
             usage(failing, tmp_path)
 
 
@@ -147,9 +147,9 @@ class TestRemoveH2w:
         monkeypatch.setattr(Path, "unlink", failing_unlink)
         warnings: list[str] = []
         assert remove_h2w(tmp_path, warnings) == 0
-        assert warnings == ["1.h2wを削除できない: Permission denied"]
+        assert warnings == ["Could not delete 1.h2w: Permission denied"]
         # The "previous run" warning is the caller's responsibility, so it is not emitted here.
-        assert not any("前回" in w for w in warnings)
+        assert not any("previous run" in w for w in warnings)
 
 
 class TestRwMounted:
@@ -181,7 +181,7 @@ class TestRwMounted:
             pytest.raises(MountError, match="read-only"),
             rw_mounted(ctx, "/dev/sda1", 0, lambda _p: make_statvfs(), [], []),
         ):
-            pytest.fail("mount失敗後に本体へ入ってはいけない")
+            pytest.fail("body must not run after mount failure")
         assert not any(c[0] == "umount" for c in runner.calls)
 
     def test_readonly_flag_raises_and_unmounts(self, ctx: StepContext, runner: FakeRunner) -> None:
@@ -189,10 +189,10 @@ class TestRwMounted:
         runner.register(["umount"])
         stat = make_statvfs(f_flag=os.ST_RDONLY)
         with (
-            pytest.raises(NotWritableError, match="書き込み可能でマウントできない"),
+            pytest.raises(NotWritableError, match="Could not mount read-write"),
             rw_mounted(ctx, "/dev/sda1", 0, lambda _p: stat, [], []),
         ):
-            pytest.fail("ST_RDONLYなら本体へ入ってはいけない")
+            pytest.fail("body must not run when ST_RDONLY is set")
         assert any(c[0] == "umount" for c in runner.calls)
 
     def test_statvfs_oserror_raises_and_unmounts(
@@ -205,10 +205,10 @@ class TestRwMounted:
             raise OSError(5, "Input/output error")
 
         with (
-            pytest.raises(MountpointError, match="マウントポイントを調べられない"),
+            pytest.raises(MountpointError, match="Could not stat the mount point"),
             rw_mounted(ctx, "/dev/sda1", 0, failing, [], []),
         ):
-            pytest.fail("statvfs失敗なら本体へ入ってはいけない")
+            pytest.fail("body must not run when statvfs fails")
         assert any(c[0] == "umount" for c in runner.calls)
 
     def test_mkdir_failure_does_not_mount(self, ctx: StepContext, runner: FakeRunner) -> None:
@@ -218,10 +218,10 @@ class TestRwMounted:
         ctx.config = replace(ctx.config, mount_root=blocker)
         runner.register(["mount"])
         with (
-            pytest.raises(MountpointError, match="^マウントポイントを作れない"),
+            pytest.raises(MountpointError, match="^Could not create the mount point"),
             rw_mounted(ctx, "/dev/sda1", 0, lambda _p: make_statvfs(), [], []),
         ):
-            pytest.fail("mkdir失敗なら本体へ入ってはいけない")
+            pytest.fail("body must not run when mkdir fails")
         assert not any(c[0] == "mount" for c in runner.calls)
 
     def test_body_exception_still_unmounts(self, ctx: StepContext, runner: FakeRunner) -> None:

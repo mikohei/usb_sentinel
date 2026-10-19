@@ -96,7 +96,7 @@ def resolve_font_family(root: tk.Misc, preferred: str) -> str:
     if preferred in tkfont.families(root):
         return preferred
     fallback = str(tkfont.nametofont("TkDefaultFont", root).actual("family"))
-    print(f"フォント{preferred}が無いため{fallback}を使う", file=sys.stderr)
+    print(f"Font {preferred} not found; using {fallback}", file=sys.stderr)
     return fallback
 
 

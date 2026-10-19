@@ -1,8 +1,8 @@
 """Parts shared by the capacity and speed steps.
 
 Time budget, permission checks, lsblk queries, command execution, and failure wording.
-summary wording appears in result.json, so changing the strings of constants and functions here
-affects external compatibility.
+summary is English text that appears in result.json. Changing a prefix here affects tests and
+documentation.
 """
 
 from collections.abc import Callable, Iterable
@@ -19,9 +19,9 @@ PERMISSION_ERRNOS: frozenset[int] = frozenset({1, 13, 30})
 _PERMISSION_PHRASES = ("Permission denied", "Read-only file system", "Operation not permitted")
 
 # summary when an external command times out or the time budget is used up.
-TIMEOUT_SUMMARY = "タイムアウト"
+TIMEOUT_SUMMARY = "Timed out"
 # summary when a write is denied for lack of permission or write protection.
-WRITE_DENIED_SUMMARY = "権限不足: 書き込みが拒否された"
+WRITE_DENIED_SUMMARY = "Permission denied: write refused"
 # Number of leading stderr characters included in summary.
 STDERR_HEAD_CHARS = 200
 # Number of leading stdout characters kept in details["raw_stdout_head"].
@@ -82,11 +82,11 @@ def query_block_info(runner: CommandRunner, path: str) -> dict[str, Any]:
     try:
         return block_info(runner, path)
     except (RuntimeError, ValueError, KeyError) as exc:
-        raise DeviceQueryError(f"デバイス情報を取得できない: {exc}") from exc
+        raise DeviceQueryError(f"Could not get device information: {exc}") from exc
 
 
 def not_found_summary(command: str) -> str:
-    """The "<command> not found" summary (in Japanese).
+    """The "<command> not found" summary.
 
     Used both when which() finds nothing and for CommandNotFoundError.
 
@@ -96,7 +96,7 @@ def not_found_summary(command: str) -> str:
     Returns:
         Wording for summary.
     """
-    return f"{command}が見つからない"
+    return f"{command} not found"
 
 
 def missing_command(runner: CommandRunner, commands: Iterable[str]) -> str | None:
@@ -156,8 +156,7 @@ def failure_summary(run: CommandResult, what: str) -> str:
 
     Args:
         run: Result of the failed command.
-        what: Failure heading (e.g. the Japanese for "f3write failed" or "cannot parse fio
-            output").
+        what: Failure heading (e.g. "f3write failed" or "Could not parse fio output").
 
     Returns:
         Wording for summary.

@@ -68,7 +68,7 @@ class TestParseF3Probe:
         assert parse_f3probe(text).block_size == 4096
 
     def test_missing_usable_line_raises(self) -> None:
-        with pytest.raises(ValueError, match="f3probeの出力を解析できない"):
+        with pytest.raises(ValueError, match="Could not parse f3probe output"):
             parse_f3probe("Announced size: 29.80 GB (62500000 blocks)\n")
 
 
@@ -121,7 +121,7 @@ class TestProbeMode:
         assert result.details["kind"] == "counterfeit"
         assert result.details["counterfeit"] is True
         assert result.details["counterfeit_reasons"] == ["probe_bad_news"]
-        assert result.summary.startswith("偽装疑い:")
+        assert result.summary.startswith("Suspected counterfeit:")
         assert result.details["probe"]["returncode"] == 1
 
     def test_probe_verdict_line_copied_to_top_level(
@@ -149,7 +149,7 @@ class TestProbeMode:
         result = _step().run(probe_ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "権限不足: 書き込みが拒否された"
+        assert result.summary == "Permission denied: write refused"
 
     def test_unparseable(self, probe_ctx: StepContext, runner: FakeRunner) -> None:
         runner.register(["f3probe"], returncode=1, stdout="garbage", stderr="boom")
@@ -157,7 +157,7 @@ class TestProbeMode:
         result = _step().run(probe_ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "f3probeの出力を解析できない: boom"
+        assert result.summary == "Could not parse f3probe output: boom"
         assert result.details["raw_stdout_head"] == "garbage"
 
     def test_timeout(self, probe_ctx: StepContext, runner: FakeRunner) -> None:
@@ -165,7 +165,7 @@ class TestProbeMode:
 
         result = _step().run(probe_ctx)
 
-        assert result.summary == "タイムアウト"
+        assert result.summary == "Timed out"
         assert result.details["timed_out"] is True
 
     def test_budget_exhausted_does_not_run(
@@ -176,7 +176,7 @@ class TestProbeMode:
 
         result = CapacityStep(monotonic=lambda: next(clock)).run(probe_ctx)
 
-        assert result.summary == "タイムアウト"
+        assert result.summary == "Timed out"
         assert runner.calls == []
 
     def test_missing_f3probe(self, probe_ctx: StepContext) -> None:
@@ -185,4 +185,4 @@ class TestProbeMode:
         result = _step().run(probe_ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "f3probeが見つからない"
+        assert result.summary == "f3probe not found"

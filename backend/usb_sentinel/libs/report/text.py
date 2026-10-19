@@ -1,8 +1,9 @@
 """result.txt / console output.
 
-The format of the first three lines (verdict, device, nominal capacity) and of the step lines
-(`[ OK ] step: summary`) must not change. Items added in phase 2 are read with `details.get()`,
-and the whole line is omitted when the value is absent (design doc section 6.1).
+The order and number of the first three lines (verdict, device, advertised capacity) and the
+format of the step lines (`[ OK ] step: summary`) must not change. Headings are in English.
+Items added in phase 2 are read with `details.get()`, and the whole line is omitted when the
+value is absent (design doc section 6.1).
 """
 
 from typing import Any
@@ -24,20 +25,20 @@ def _gb(size: int) -> str:
 
 
 def _header_lines(result: InspectionResult) -> list[str]:
-    """The verdict, device, and nominal capacity lines, plus extra lines only when values exist."""
+    """The verdict, device, and advertised capacity lines, plus extra lines when values exist."""
     size = result.device.advertised_bytes
     lines = [
-        f"判定: {result.verdict}",
-        f"デバイス: {result.device.path} ({result.device.serial})",
-        f"公称容量   : {_gb(size) if size else '不明'}",
+        f"Verdict: {result.verdict}",
+        f"Device: {result.device.path} ({result.device.serial})",
+        f"Advertised capacity: {_gb(size) if size else 'unknown'}",
     ]
     if result.device.link_speed_mbps is not None:
-        lines.append(f"リンク速度: {result.device.link_speed_mbps}Mbps")
+        lines.append(f"Link speed: {result.device.link_speed_mbps}Mbps")
     if result.elapsed_s is not None:
-        lines.append(f"所要時間: {result.elapsed_s}秒")
+        lines.append(f"Elapsed: {result.elapsed_s}s")
     if result.advertised_check.get("exceeded") is True:
-        lines.append(f"申告容量超過: {result.advertised_check.get('summary', '')}")
-    lines.extend(f"警告: {warning}" for warning in result.warnings)
+        lines.append(f"Advertised capacity exceeded: {result.advertised_check.get('summary', '')}")
+    lines.extend(f"Warning: {warning}" for warning in result.warnings)
     return lines
 
 
@@ -48,14 +49,14 @@ def _step_detail_lines(step: StepResult) -> list[str]:
     if step.name == "capacity":
         nominal = details.get("nominal_bytes")
         if isinstance(nominal, int):
-            lines.append(f"  公称（商品）: {_gb(nominal)}")
+            lines.append(f"  Nominal (product): {_gb(nominal)}")
         kind = details.get("kind")
         if kind is not None:
-            lines.append(f"  区別: {kind}")
+            lines.append(f"  Kind: {kind}")
     if step.name == "speed":
         severity = details.get("severity")
         if severity is not None:
-            lines.append(f"  重大度: {severity}")
+            lines.append(f"  Severity: {severity}")
     return lines
 
 

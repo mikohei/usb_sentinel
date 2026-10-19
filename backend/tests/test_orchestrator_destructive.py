@@ -56,7 +56,7 @@ class TestInspectDestructive:
         capacity = result.step("capacity")
         assert capacity is not None
         assert capacity.status is StepStatus.SKIPPED
-        assert "マウント" in capacity.summary
+        assert "Still mounted" in capacity.summary
         assert _statuses(result)["speed"] is StepStatus.SKIPPED
         _assert_nothing_destructive(full_runner)
 
@@ -151,9 +151,9 @@ class TestInspectDestructive:
         speed = result.step("speed")
         assert capacity is not None and speed is not None
         assert capacity.status is StepStatus.ERROR
-        assert capacity.summary.startswith("umount失敗")
+        assert capacity.summary.startswith("umount failed")
         assert speed.status is StepStatus.ERROR
-        assert "マウントが残っている" in speed.summary
+        assert "Still mounted" in speed.summary
         assert not any(c[0] == "fio" for c in full_runner.calls)
         assert result.verdict is Verdict.INCONCLUSIVE
 
@@ -219,7 +219,7 @@ class TestAdvertisedCheck:
         assert "over_advertised" in capacity.details["counterfeit_reasons"]
         # It appears twice in reasons, recording that both the non-destructive check and the
         # step confirmed it.
-        assert sum("申告容量" in r for r in result.reasons) == 2
+        assert sum("advertised capacity" in r for r in result.reasons) == 2
         assert result.reason_codes.count("c:over") == 1
         first_ro_mount = next(
             i for i, c in enumerate(full_runner.calls) if c[0] == "mount" and c[1] != "-w"

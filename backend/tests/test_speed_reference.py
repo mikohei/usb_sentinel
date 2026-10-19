@@ -35,7 +35,7 @@ class TestReference:
         assert result.details["threshold_read_mb_s"] == 72.0
         assert result.details["device_class"] == "usb3_flash"
         assert result.details["device_class_basis"] == "config"
-        assert result.summary == "読み取り85.3MB/s、書き込み20.1MB/s（閾値72.0 / 16.0MB/s）"
+        assert result.summary == "read 85.3MB/s, write 20.1MB/s (threshold 72.0 / 16.0MB/s)"
 
     def test_configured_class_sets_thresholds(
         self, ctx: StepContext, fio_runner: FakeRunner
@@ -49,7 +49,7 @@ class TestReference:
         assert result.details["reference_read_mb_s"] == 50.0
         assert result.details["reference_write_mb_s"] == 15.0
         assert result.warnings == []
-        assert result.summary == "読み取り85.3MB/s、書き込み20.1MB/s（閾値40.0 / 12.0MB/s）"
+        assert result.summary == "read 85.3MB/s, write 20.1MB/s (threshold 40.0 / 12.0MB/s)"
 
     def test_configured_class_fail_names_floor(
         self, ctx: StepContext, fio_runner: FakeRunner
@@ -60,8 +60,8 @@ class TestReference:
 
         assert result.status is StepStatus.FAIL
         assert result.summary == (
-            "速度不足（著しく下回る）: 書き込み3.0MB/s < 閾値12.0MB/s"
-            "（USB3.0フラッシュ既定15.0×0.80）"
+            "Speed shortfall (severe): write 3.0MB/s < threshold 12.0MB/s"
+            " (USB3.0 flash default 15.0 x 0.80)"
         )
         assert result.warnings == []
 
@@ -76,10 +76,10 @@ class TestReference:
         assert result.details["device_class"] == "usb3_flash"
         assert result.details["device_class_basis"] == "link_speed"
         assert result.summary == (
-            "速度不足（著しく下回る）: 書き込み3.0MB/s < 閾値12.0MB/s"
-            "（USB3.0フラッシュ既定15.0×0.80・種別推定）"
+            "Speed shortfall (severe): write 3.0MB/s < threshold 12.0MB/s"
+            " (USB3.0 flash default 15.0 x 0.80, class inferred)"
         )
-        assert any("種別未設定" in w for w in result.warnings)
+        assert any("Device class not set" in w for w in result.warnings)
         assert len(result.warnings) == 1
 
     def test_link_speed_480_infers_usb2_flash(
@@ -92,7 +92,7 @@ class TestReference:
         assert result.details["device_class_basis"] == "link_speed"
         assert result.details["threshold_read_mb_s"] == 12.0
         assert result.details["threshold_write_mb_s"] == 4.0
-        assert any("種別未設定" in w for w in result.warnings)
+        assert any("Device class not set" in w for w in result.warnings)
 
     def test_usb11_link_is_skipped_with_warning(
         self, ctx: StepContext, fio_runner: FakeRunner
@@ -100,12 +100,12 @@ class TestReference:
         result = _step().run(_with_link(ctx, 12))
 
         assert result.status is StepStatus.SKIPPED
-        assert result.summary == "公称速度が未設定（読み取り85.3MB/s、書き込み20.1MB/s）"
+        assert result.summary == "Nominal speed not set (read 85.3MB/s, write 20.1MB/s)"
         assert result.details["device_class"] is None
         assert result.details["device_class_basis"] == "unknown"
         assert result.details["link_speed_mbps"] == 12
         assert len(result.warnings) == 1
-        assert "判定基準なし" in result.warnings[0]
+        assert "no verdict criterion" in result.warnings[0]
         assert "12Mbps" in result.warnings[0]
 
     def test_usb11_link_with_nominal_has_no_basis_warning(
@@ -118,7 +118,7 @@ class TestReference:
         assert result.status is StepStatus.PASS
         assert result.details["basis_read"] == "nominal"
         assert result.details["link_speed_mbps"] == 12
-        assert not any("判定基準なし" in w for w in result.warnings)
+        assert not any("no verdict criterion" in w for w in result.warnings)
 
     def test_nonstandard_link_speed_is_skipped(
         self, ctx: StepContext, fio_runner: FakeRunner
@@ -144,7 +144,7 @@ class TestLinkCeiling:
         assert without_link.warnings == []
         assert len(with_link.warnings) == 1
         warning = with_link.warnings[0]
-        assert "実効上限" in warning
+        assert "effective upper limit" in warning
         assert "500.0MB/s" in warning and "5000Mbps" in warning
 
     def test_usb3_flash_on_gen1_does_not_warn(
@@ -220,8 +220,8 @@ class TestSeverity:
         assert result.details["ratio_read"] == 0.4
         assert result.details["ratio_write"] == 0.75
         assert result.summary == (
-            "速度不足（著しく下回る）: 読み取り40.0MB/s < 閾値80.0MB/s（公称100.0×0.80）、"
-            "書き込み15.0MB/s < 閾値16.0MB/s（公称20.0×0.80）"
+            "Speed shortfall (severe): read 40.0MB/s < threshold 80.0MB/s (nominal 100.0 x 0.80); "
+            "write 15.0MB/s < threshold 16.0MB/s (nominal 20.0 x 0.80)"
         )
 
     def test_skipped_has_no_severity(self, ctx: StepContext, fio_runner: FakeRunner) -> None:

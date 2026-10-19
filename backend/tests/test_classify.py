@@ -33,7 +33,7 @@ class TestClassify:
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.NO_DEFECT
-        assert reasons == ["全ステップ Pass"]
+        assert reasons == ["All steps passed"]
 
     def test_malware_detection_is_usn(self) -> None:
         result = self._result(
@@ -49,18 +49,18 @@ class TestClassify:
 
         # Malware takes priority over other failures.
         assert verdict is Verdict.MALWARE_DETECTED
-        assert reasons == ["マルウェアを 1 件検知"]
+        assert reasons == ["Malware detections: 1"]
 
     def test_capacity_failure_is_spec_mismatch(self) -> None:
         result = self._result(
             StepResult(name="malware", status=StepStatus.PASS),
-            StepResult(name="capacity", status=StepStatus.FAIL, summary="実容量が不足"),
+            StepResult(name="capacity", status=StepStatus.FAIL, summary="Capacity shortfall"),
         )
 
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.SPEC_MISMATCH
-        assert "capacity: 実容量が不足" in reasons
+        assert "capacity: Capacity shortfall" in reasons
 
     def test_defect_failure_is_defective(self) -> None:
         result = self._result(
@@ -68,7 +68,7 @@ class TestClassify:
             StepResult(
                 name="capacity",
                 status=StepStatus.FAIL,
-                summary="データ破損: 12セクタ",
+                summary="Data corruption: 12 sectors",
                 details={"defect": True},
             ),
         )
@@ -76,7 +76,7 @@ class TestClassify:
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.DEFECTIVE
-        assert reasons == ["capacity: データ破損: 12セクタ"]
+        assert reasons == ["capacity: Data corruption: 12 sectors"]
 
     def test_defect_and_spec_failure_is_defective(self) -> None:
         result = self._result(
@@ -84,16 +84,16 @@ class TestClassify:
             StepResult(
                 name="capacity",
                 status=StepStatus.FAIL,
-                summary="データ破損",
+                summary="Data corruption",
                 details={"defect": True},
             ),
-            StepResult(name="speed", status=StepStatus.FAIL, summary="速度不足"),
+            StepResult(name="speed", status=StepStatus.FAIL, summary="Speed shortfall"),
         )
 
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.DEFECTIVE
-        assert reasons == ["capacity: データ破損", "speed: 速度不足"]
+        assert reasons == ["capacity: Data corruption", "speed: Speed shortfall"]
 
     def test_defect_false_is_spec_mismatch(self) -> None:
         result = self._result(
@@ -101,7 +101,7 @@ class TestClassify:
             StepResult(
                 name="capacity",
                 status=StepStatus.FAIL,
-                summary="容量不足",
+                summary="Capacity shortfall",
                 details={"defect": False},
             ),
         )
@@ -118,7 +118,7 @@ class TestClassify:
 
     def test_error_is_inconclusive(self) -> None:
         result = self._result(
-            StepResult(name="malware", status=StepStatus.ERROR, summary="スキャン失敗"),
+            StepResult(name="malware", status=StepStatus.ERROR, summary="Scan failed"),
         )
 
         assert classify(result)[0] is Verdict.INCONCLUSIVE
@@ -127,13 +127,15 @@ class TestClassify:
         """Never judge No Defect while unimplemented steps remain."""
         result = self._result(
             StepResult(name="malware", status=StepStatus.PASS),
-            StepResult(name="capacity", status=StepStatus.NOT_IMPLEMENTED, summary="未実装"),
+            StepResult(
+                name="capacity", status=StepStatus.NOT_IMPLEMENTED, summary="Not implemented"
+            ),
         )
 
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.INCONCLUSIVE
-        assert "capacity: 未実装" in reasons
+        assert "capacity: Not implemented" in reasons
 
 
 def _result(*steps: StepResult, advertised_check: dict[str, Any] | None = None) -> InspectionResult:
@@ -146,7 +148,7 @@ def _result(*steps: StepResult, advertised_check: dict[str, Any] | None = None) 
     return result
 
 
-def _counterfeit(*reasons: str, summary: str = "偽装疑い: x") -> StepResult:
+def _counterfeit(*reasons: str, summary: str = "Suspected counterfeit: x") -> StepResult:
     return StepResult(
         name="capacity",
         status=StepStatus.FAIL,
@@ -171,13 +173,13 @@ class TestClassifyCounterfeit:
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.COUNTERFEIT_SUSPECTED
-        assert reasons[0] == "capacity: 偽装疑い: x"
+        assert reasons[0] == "capacity: Suspected counterfeit: x"
 
     def test_malware_beats_counterfeit(self) -> None:
         result = _result(
             StepResult(name="malware", status=StepStatus.FAIL, details={"detections": []}),
             _counterfeit("probe_bad_news"),
-            advertised_check={"exceeded": True, "summary": "申告容量…"},
+            advertised_check={"exceeded": True, "summary": "advertised capacity…"},
         )
 
         assert classify(result)[0] is Verdict.MALWARE_DETECTED
@@ -188,13 +190,16 @@ class TestClassifyCounterfeit:
         result = _result(
             StepResult(name="malware", status=StepStatus.PASS),
             StepResult(name="capacity", status=StepStatus.SKIPPED, summary="allow_destructive"),
-            advertised_check={"exceeded": True, "summary": "申告容量32.00GB > 上限31.03GB"},
+            advertised_check={
+                "exceeded": True,
+                "summary": "advertised capacity 32.00GB > limit 31.03GB",
+            },
         )
 
         verdict, reasons = classify(result)
 
         assert verdict is Verdict.COUNTERFEIT_SUSPECTED
-        assert reasons[0] == "申告容量32.00GB > 上限31.03GB"
+        assert reasons[0] == "advertised capacity 32.00GB > limit 31.03GB"
         assert len(reasons) == 1
 
     def test_advertised_check_not_exceeded_keeps_current_verdict(self) -> None:

@@ -47,7 +47,7 @@ class TestRowFromResult:
         """Fill with None when a step is missing or details lacks a key (ERROR path)."""
         result = _started(tmp_path)
         result.advertised_check = {}
-        result.steps = [StepResult("malware", StepStatus.ERROR, "マウント失敗: x")]
+        result.steps = [StepResult("malware", StepStatus.ERROR, "Mount failed: x")]
 
         row = row_from_result(result, None)
 

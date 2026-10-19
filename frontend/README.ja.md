@@ -166,7 +166,7 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手
 | `sqlite_path` | 文字列 | `/var/lib/usb-sentinel/db/inspections.sqlite` | backendのSQLite索引。読み取り専用で開く。空文字`""`で無効化し、結果ディレクトリの走査だけにする。無い・開けないときは自動で走査にフォールバックする（「SQLite索引の読み取り」節） |
 | `[[ports]]` | `label`文字列、`paths`文字列配列 | 空 | 出現順にタイル1〜4。`label`は1〜4文字の印字可能ASCII。`label`重複、`paths`重複、5件以上は起動エラー |
 
-型違いや未知のキーは起動時に「設定エラー: ...」を標準エラーに出して終了コード1で止まる。
+型違いや未知のキーは起動時に`Configuration error: ...`を標準エラーに出して終了コード1で止まる。
 
 コマンドラインの値は設定ファイルを上書きする。`--config`は共通オプションなのでサブコマンドの前に置く。
 
@@ -298,7 +298,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 
 **`started`行の扱い。** `state='started'`の行が接続中のディスク（ポートパス、無ければカーネル名で突き合わせる）に結び付くと、`systemctl`がユニットの状態を答えない間は「検査中」にする。ユニットが`inactive`／`failed`なら接続直後でも起動待ちを飛ばして「結果なし」にする。`result.json`があれば`started`のままでも完了として扱う（完了記録の失敗）。
 
-**索引に行が無い結果。** 索引が読めるときは索引の行だけを候補にし、走査結果は混ぜない。backendが開始記録に失敗した検査（`result.json`の`warnings`とbackendの標準出力（journal）に「SQLite記録失敗（開始）」が残る）は、`result.json`があっても索引に行が無いため表示されず、ディスクは起動待ちの後に「結果なし」になる。この場合はbackendのjournalを確認し、必要なら`sqlite_path = ""`で索引を切って走査に戻す。
+**索引に行が無い結果。** 索引が読めるときは索引の行だけを候補にし、走査結果は混ぜない。backendが開始記録に失敗した検査（`result.json`の`warnings`とbackendの標準出力（journal）に`SQLite record failed (start)`が残る）は、`result.json`があっても索引に行が無いため表示されず、ディスクは起動待ちの後に「結果なし」になる。この場合はbackendのjournalを確認し、必要なら`sqlite_path = ""`で索引を切って走査に戻す。
 
 ## backendとの同時配備
 
@@ -335,7 +335,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 | 症状 | 原因 | 対処 |
 |---|---|---|
 | ポート名が`P?`でカーネル名が添えられる | ポートパスが対応表に無い | 「ポートのキャリブレーション」節。対応表が空なら全部`P?`になる |
-| 日本語が豆腐（□）になる、または起動時に「フォントNoto Sans CJK JPが無いため...」が出る | フォント未導入 | 手順3 |
+| 日本語が豆腐（□）になる、または起動時に`Font Noto Sans CJK JP not found; using ...`が出る | フォント未導入 | 手順3 |
 | 全画面にならない、起動しない | `.desktop`のパスが違う、`uv sync`未実行 | `~/.config/autostart/usb-sentinel-display.desktop`の`Exec`を端末で直接実行して標準エラーを見る |
 
 ## 開発

@@ -48,7 +48,7 @@ def _hash_step() -> StepResult:
     return StepResult(
         name="hash_inventory",
         status=StepStatus.PASS,
-        summary="3件",
+        summary="3 files",
         details={"lines": 3, "bytes_hashed": 1024, "digest": HASH_DIGEST},
     )
 
@@ -57,7 +57,7 @@ def _capacity_step() -> StepResult:
     return StepResult(
         name="capacity",
         status=StepStatus.PASS,
-        summary="実容量31.20GB / 公称32.00GB（97.5%）、閾値29.76GB",
+        summary="actual 31.20GB / nominal 32.00GB (97.5%), threshold 29.76GB",
         details={
             "mode": "f3write",
             "nominal_bytes": 32_000_000_000,
@@ -76,7 +76,7 @@ def _speed_step() -> StepResult:
     return StepResult(
         name="speed",
         status=StepStatus.PASS,
-        summary="読み取り85.3MB/s、書き込み20.1MB/s（閾値72.0 / 16.0MB/s）",
+        summary="read 85.3MB/s, write 20.1MB/s (threshold 72.0 / 16.0MB/s)",
         details={
             "device_class": "usb3_flash",
             "device_class_basis": "config",
@@ -93,7 +93,7 @@ def _speed_step() -> StepResult:
 
 
 def _unmount_step() -> StepResult:
-    return StepResult(name="unmount", status=StepStatus.PASS, summary="アンマウント済み")
+    return StepResult(name="unmount", status=StepStatus.PASS, summary="Unmounted")
 
 
 def _full_result(*, serial: str = "ABC123456789") -> InspectionResult:
@@ -125,7 +125,7 @@ def _error_capacity_step() -> StepResult:
     return StepResult(
         name="capacity",
         status=StepStatus.ERROR,
-        summary="f3writeが見つからない",
+        summary="f3write not found",
         details={
             "mode": "f3write",
             "nominal_bytes": None,
@@ -139,7 +139,9 @@ def _error_capacity_step() -> StepResult:
 
 
 def _skipped_speed_step() -> StepResult:
-    return StepResult(name="speed", status=StepStatus.SKIPPED, summary="破壊的検査は無効")
+    return StepResult(
+        name="speed", status=StepStatus.SKIPPED, summary="Destructive checks disabled"
+    )
 
 
 class TestQrPayloadV3:
@@ -161,7 +163,7 @@ class TestQrPayloadV3:
         assert payload["elapsed_s"] == 1800.25
         assert payload["link_speed_mbps"] == 5000
         assert payload["reason_codes"] == []
-        assert payload["reasons"] == ["全ステップ Pass"]
+        assert payload["reasons"] == ["All steps passed"]
 
     def test_clamav_db_date_is_first_ten_chars(self) -> None:
         """Extract only YYYY-MM-DD from the db_date ISO string."""
@@ -253,7 +255,7 @@ class TestQrPayloadV3:
         speed = StepResult(
             name="speed",
             status=StepStatus.ERROR,
-            summary="fioが見つからない",
+            summary="fio not found",
             details={"device_class": "usb2_flash", "device_class_basis": "link_speed"},
         )
 
@@ -271,7 +273,7 @@ class TestQrPayloadV3:
     def test_hash_inventory_missing_is_none(self) -> None:
         """When the inventory is SKIPPED, or ERROR because the inventory file could not be
         opened, details has no digest."""
-        skipped = StepResult(name="hash_inventory", status=StepStatus.SKIPPED, summary="無効")
+        skipped = StepResult(name="hash_inventory", status=StepStatus.SKIPPED, summary="Disabled")
 
         payload = json.loads(build_payload(_result(_clean_malware_step(), skipped)))
 

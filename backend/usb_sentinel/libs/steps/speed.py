@@ -43,7 +43,7 @@ __all__ = ["DEFAULT_MONOTONIC", "FioJob", "SpeedStep", "parse_fio"]
 # Module variable that integration tests replace with monkeypatch.
 DEFAULT_MONOTONIC: Callable[[], float] = time.monotonic
 
-_LABELS: dict[Mode, str] = {"read": "読み取り", "write": "書き込み"}
+_LABELS: dict[Mode, str] = {"read": "read", "write": "write"}
 
 
 class SpeedStep:
@@ -70,7 +70,7 @@ class SpeedStep:
             # Self-defense check: do not start fio if the preceding capacity step failed to
             # umount.
             if is_mounted(query_block_info(ctx.runner, ctx.device.path)):
-                result.summary = "マウントが残っているためfioを実行しない"
+                result.summary = "Still mounted; fio not run"
                 return result
             if ctx.runner.which("fio") is None:
                 result.summary = not_found_summary("fio")
@@ -137,7 +137,7 @@ class SpeedStep:
             job = parse_fio(run.stdout, mode)
         except ValueError:
             record_raw_stdout(entry, run)
-            result.summary = failure_summary(run, "fioの出力を解析できない")
+            result.summary = failure_summary(run, "Could not parse fio output")
             return None
         entry.update(
             bw_bytes=job.bw_bytes,
@@ -149,9 +149,9 @@ class SpeedStep:
         )
         if job.error != 0:
             if job.error in PERMISSION_ERRNOS:
-                result.summary = f"権限不足: {_LABELS[mode]}が拒否された（error={job.error}）"
+                result.summary = f"Permission denied: {_LABELS[mode]} refused (error={job.error})"
             else:
-                result.summary = f"fioがI/Oエラーを報告（error={job.error}）"
+                result.summary = f"fio reported an I/O error (error={job.error})"
             return None
         return job
 
@@ -191,10 +191,10 @@ class SpeedStep:
         ceiling = link_ceiling_warning(refs.values(), ctx.device.link_speed_mbps)
         if ceiling is not None:
             result.warnings.append(ceiling)
-        values = f"読み取り{measured['read']:.1f}MB/s、書き込み{measured['write']:.1f}MB/s"
+        values = f"read {measured['read']:.1f}MB/s, write {measured['write']:.1f}MB/s"
         if thresholds["read"] is None and thresholds["write"] is None:
             result.status = StepStatus.SKIPPED
-            result.summary = f"公称速度が未設定（{values}）"
+            result.summary = f"Nominal speed not set ({values})"
             return result
         failing: list[tuple[Mode, float, float]] = [
             (mode, threshold, value)
@@ -205,25 +205,29 @@ class SpeedStep:
         ]
         if failing:
             shortfalls = [
-                f"{_LABELS[mode]}{measured[mode]:.1f}MB/s < 閾値{threshold:.1f}MB/s"
+                f"{_LABELS[mode]} {measured[mode]:.1f}MB/s < threshold {threshold:.1f}MB/s"
                 + basis_text(refs[mode], pass_ratio, class_basis)
                 for mode, threshold, _value in failing
             ]
             severity = severity_for(measured[mode] / value for mode, _threshold, value in failing)
             result.details["severity"] = severity
             result.status = StepStatus.FAIL
-            result.summary = FAIL_PREFIX[severity] + "、".join(shortfalls)
+            result.summary = FAIL_PREFIX[severity] + "; ".join(shortfalls)
             return result
         result.status = StepStatus.PASS
         if thresholds["read"] is not None and thresholds["write"] is not None:
             result.summary = (
-                f"{values}（閾値{thresholds['read']:.1f} / {thresholds['write']:.1f}MB/s）"
+                f"{values} (threshold {thresholds['read']:.1f} / {thresholds['write']:.1f}MB/s)"
             )
         else:
             parts = [
-                f"{_LABELS[mode]}{measured[mode]:.1f}MB/s"
-                + (f"（閾値{threshold:.1f}MB/s）" if threshold is not None else "（判定対象外）")
+                f"{_LABELS[mode]} {measured[mode]:.1f}MB/s"
+                + (
+                    f" (threshold {threshold:.1f}MB/s)"
+                    if threshold is not None
+                    else " (not judged)"
+                )
                 for mode, threshold in thresholds.items()
             ]
-            result.summary = "、".join(parts)
+            result.summary = "; ".join(parts)
         return result

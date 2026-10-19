@@ -39,7 +39,7 @@ class TestInventory:
         result = inventory(hctx)
 
         assert result.status is StepStatus.PASS
-        assert result.summary == "0件"
+        assert result.summary == "0 files"
         assert _ledger(hctx).read_text() == ""
         assert result.details["lines"] == 0
         assert result.details["bytes_hashed"] == 0
@@ -57,7 +57,7 @@ class TestInventory:
         result = inventory(hctx)
 
         assert result.status is StepStatus.PASS
-        assert result.summary == "2件"
+        assert result.summary == "2 files"
         lines = _ledger(hctx).read_text(encoding="utf-8").splitlines()
         assert lines == [
             f'{hashlib.sha256(b"bravo").hexdigest()}\t"0/b.txt"',
@@ -94,7 +94,7 @@ class TestInventory:
         result = inventory(hctx, monotonic=lambda: next(clock))
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "タイムアウト: 1件まで作成"
+        assert result.summary == "Timed out: 1 files written"
         assert result.details["timed_out"] is True
         assert result.details["lines"] == 1
         text = _ledger(hctx).read_text()
@@ -116,7 +116,7 @@ class TestInventory:
         result = inventory(hctx, monotonic=lambda: next(clock))
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "タイムアウト: 0件まで作成"
+        assert result.summary == "Timed out: 0 files written"
         assert result.details["timed_out"] is True
         assert result.details["lines"] == 0
         assert _ledger(hctx).read_text() == ""
@@ -141,7 +141,7 @@ class TestInventory:
         result = inventory(hctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "読み取り不能ファイル1件"
+        assert result.summary == "1 unreadable files"
         assert result.details["read_error_count"] == 1
         assert result.details["read_errors"] == [{"path": "0/locked.txt", "errno": 13}]
         assert result.details["lines"] == 1

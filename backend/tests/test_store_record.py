@@ -94,9 +94,9 @@ class TestRecord:
         assert row["hash_inventory_digest"] == "ab" * 32
         assert row["hash_inventory_lines"] == 1234
         assert json.loads(row["warnings"]) == [
-            "ClamAV 定義 DB が 31 日前のもの",
-            "種別未設定のためUSBフラッシュ既定値で判定",
-            "全体の警告",
+            "ClamAV definition DB is 31 days old",
+            "Device class not set; judged with USB flash defaults",
+            "inspection-wide warning",
         ]
         assert row["created_at"] <= row["updated_at"]
 
@@ -166,8 +166,8 @@ class TestFileMode:
         reason = store.record_started(_started(tmp_path))
 
         assert reason is not None
-        assert "記録は完了" in reason
-        assert "権限設定" in reason
+        assert "row recorded" in reason
+        assert "Permission setting" in reason
         rows = _rows(db_path)
         assert len(rows) == 1
         assert rows[0]["state"] == "started"

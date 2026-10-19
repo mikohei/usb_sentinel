@@ -20,7 +20,7 @@ def main() -> int:
         inspection (UnsafeDeviceError) returns 2, and an execution error returns 3. selftest
         returns 0 when all required commands and the ClamAV definition DB are present, else 3.
     """
-    parser = argparse.ArgumentParser(description="USB 検査バックエンド")
+    parser = argparse.ArgumentParser(description="USB inspection backend")
     parser.add_argument("--config", type=Path, default=Path("/etc/usb-sentinel/config.toml"))
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("selftest")
@@ -63,12 +63,12 @@ def main() -> int:
             if (output / "result.json").exists():
                 failure = store.record_completed(result, digest(result))
                 if failure:
-                    print(f"SQLite記録失敗（完了）: {failure}", file=sys.stderr)
+                    print(f"SQLite record failed (completion): {failure}", file=sys.stderr)
         print(render_text(result))
         return 0 if result.verdict == Verdict.NO_DEFECT else 1
     except UnsafeDeviceError as exc:
-        print(f"検査拒否: {exc}", file=sys.stderr)
+        print(f"Inspection refused: {exc}", file=sys.stderr)
         return 2
     except (OSError, RuntimeError, ValueError, TypeError) as exc:
-        print(f"実行エラー: {exc}", file=sys.stderr)
+        print(f"Runtime error: {exc}", file=sys.stderr)
         return 3

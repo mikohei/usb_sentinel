@@ -63,11 +63,11 @@ class TestStoreWiring:
     def test_started_failure_becomes_warning_and_inspection_continues(
         self, full_runner: FakeRunner, config: Config
     ) -> None:
-        store = RecordingStore(started_failure="SQLiteエラー: database is locked")
+        store = RecordingStore(started_failure="SQLite error: database is locked")
 
         result = inspect(full_runner, config, "/dev/sda", store)
 
-        assert result.warnings == ["SQLite記録失敗（開始）: SQLiteエラー: database is locked"]
+        assert result.warnings == ["SQLite record failed (start): SQLite error: database is locked"]
         assert _statuses(result)["malware"] is StepStatus.PASS
         assert result.verdict is Verdict.INCONCLUSIVE
 

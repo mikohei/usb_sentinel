@@ -144,7 +144,7 @@ class TestInspect:
         assert statuses["malware"] is StepStatus.ERROR
         assert hash_step is not None
         assert hash_step.status is StepStatus.SKIPPED
-        assert hash_step.summary == "スキャン未実行のため作成しない"
+        assert hash_step.summary == "Not created because no scan ran"
         assert not (Path(result.output_dir) / "hash-inventory.tsv").exists()
         assert not any("--recursive" in c for c in full_runner.calls)
         _assert_nothing_destructive(full_runner)
@@ -160,7 +160,7 @@ class TestInspect:
         assert _statuses(result)["malware"] is StepStatus.ERROR
         assert hash_step is not None
         assert hash_step.status is StepStatus.SKIPPED
-        assert hash_step.summary == "スキャン未実行のため作成しない"
+        assert hash_step.summary == "Not created because no scan ran"
         assert not (Path(result.output_dir) / "hash-inventory.tsv").exists()
 
     def test_stale_database_as_error_skips_hash_inventory(
@@ -179,7 +179,7 @@ class TestInspect:
         assert _statuses(result)["malware"] is StepStatus.ERROR
         assert hash_step is not None
         assert hash_step.status is StepStatus.SKIPPED
-        assert hash_step.summary == "スキャン未実行のため作成しない"
+        assert hash_step.summary == "Not created because no scan ran"
         assert not (Path(result.output_dir) / "hash-inventory.tsv").exists()
         assert not any("--recursive" in c for c in full_runner.calls)
         _assert_nothing_destructive(full_runner)
@@ -192,7 +192,7 @@ class TestInspect:
 
         assert hash_step is not None
         assert hash_step.status is StepStatus.SKIPPED
-        assert hash_step.summary == "無効（hash_inventory = false）"
+        assert hash_step.summary == "Disabled (hash_inventory = false)"
         assert not (Path(result.output_dir) / "hash-inventory.tsv").exists()
 
     def test_malware_detection_writes_nothing_to_device(
@@ -230,7 +230,7 @@ class TestInspect:
         malware = result.step("malware")
         assert malware is not None
         assert malware.status is StepStatus.ERROR
-        assert "マウント" in malware.summary
+        assert "Mount failed" in malware.summary
 
     def test_records_output_dir_and_creates_it(
         self, full_runner: FakeRunner, config: Config

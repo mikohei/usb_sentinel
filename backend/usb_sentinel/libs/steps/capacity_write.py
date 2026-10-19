@@ -75,7 +75,7 @@ def run_f3write(
         return None
     targets = filesystems(query_block_info(ctx.runner, ctx.device.path))
     if not targets:
-        result.summary = "ファイルシステムがない（use_probe = trueを検討）"
+        result.summary = "No filesystem (consider use_probe = true)"
         return None
     totals = Totals()
     for index, device_path in enumerate(targets):
@@ -113,7 +113,7 @@ def _inspect_filesystem(
     stale = remove_h2w(target, result.warnings)
     entry["stale_h2w_removed"] = stale
     if stale:
-        result.warnings.append(f"前回のf3ファイルを{stale}件削除")
+        result.warnings.append(f"Deleted {stale} f3 files left from a previous run")
     entry["used_bytes"], entry["free_bytes"] = usage(statvfs, target)
 
     write = run_within_budget(ctx, budget, ["f3write", str(target)], commands)
@@ -129,13 +129,13 @@ def _inspect_filesystem(
     except ValueError as exc:
         record_raw_stdout(result.details, write)
         raise ValueError(
-            f"f3writeの出力を解析できない: {write.stderr[:STDERR_HEAD_CHARS]}"
+            f"Could not parse f3write output: {write.stderr[:STDERR_HEAD_CHARS]}"
         ) from exc
     if write.returncode != 0:
         if entry["write_mb_s"] is None:
-            result.summary = failure_summary(write, "f3write失敗")
+            result.summary = failure_summary(write, "f3write failed")
             return None
-        result.warnings.append(f"f3writeが終了コード{write.returncode}を返した")
+        result.warnings.append(f"f3write returned exit code {write.returncode}")
 
     read = run_within_budget(ctx, budget, ["f3read", str(target)], commands)
     if read is None:
@@ -149,7 +149,9 @@ def _inspect_filesystem(
         read_summary = parse_f3read(read.stdout)
     except ValueError as exc:
         record_raw_stdout(result.details, read)
-        raise ValueError(f"f3readの出力を解析できない: {read.stderr[:STDERR_HEAD_CHARS]}") from exc
+        raise ValueError(
+            f"Could not parse f3read output: {read.stderr[:STDERR_HEAD_CHARS]}"
+        ) from exc
     entry.update(
         ok_sectors=read_summary.ok_sectors,
         lost_sectors=read_summary.lost_sectors,

@@ -111,13 +111,13 @@ def inventory(ctx: StepContext, monotonic: Callable[[], float] = time.monotonic)
     lines = details["lines"]
     if details["timed_out"]:
         return StepResult(
-            "hash_inventory", StepStatus.ERROR, f"タイムアウト: {lines}件まで作成", details
+            "hash_inventory", StepStatus.ERROR, f"Timed out: {lines} files written", details
         )
     if details["read_error_count"]:
         return StepResult(
             "hash_inventory",
             StepStatus.ERROR,
-            f"読み取り不能ファイル{details['read_error_count']}件",
+            f"{details['read_error_count']} unreadable files",
             details,
         )
-    return StepResult("hash_inventory", StepStatus.PASS, f"{lines}件", details)
+    return StepResult("hash_inventory", StepStatus.PASS, f"{lines} files", details)

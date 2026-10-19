@@ -44,7 +44,7 @@ def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
     malware = result.step("malware")
     if malware and malware.status == StepStatus.FAIL:
         return Verdict.MALWARE_DETECTED, [
-            f"マルウェアを {len(malware.details.get('detections', []))} 件検知"
+            f"Malware detections: {len(malware.details.get('detections', []))}"
         ]
     failures = [step for step in result.steps if step.status == StepStatus.FAIL]
     reasons = [f"{step.name}: {step.summary}" for step in failures]
@@ -61,7 +61,7 @@ def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
     if failures:
         return Verdict.SPEC_MISMATCH, reasons
     if result.steps and all(step.status == StepStatus.PASS for step in result.steps):
-        return Verdict.NO_DEFECT, ["全ステップ Pass"]
+        return Verdict.NO_DEFECT, ["All steps passed"]
     return Verdict.INCONCLUSIVE, [
         f"{step.name}: {step.summary}" for step in result.steps if step.status != StepStatus.PASS
     ]
@@ -179,7 +179,7 @@ def inspect(
     # reason string).
     failure = store.record_started(result)
     if failure:
-        result.warnings.append(f"SQLite記録失敗（開始）: {failure}")
+        result.warnings.append(f"SQLite record failed (start): {failure}")
     ctx = StepContext(runner, config, device, output)
     try:
         with mounted(ctx):
@@ -191,34 +191,34 @@ def inspect(
             if not config.hash_inventory:
                 result.steps.append(
                     StepResult(
-                        "hash_inventory", StepStatus.SKIPPED, "無効（hash_inventory = false）"
+                        "hash_inventory", StepStatus.SKIPPED, "Disabled (hash_inventory = false)"
                     )
                 )
             elif not scan_executed(malware):
                 result.steps.append(
                     StepResult(
-                        "hash_inventory", StepStatus.SKIPPED, "スキャン未実行のため作成しない"
+                        "hash_inventory", StepStatus.SKIPPED, "Not created because no scan ran"
                     )
                 )
             else:
                 result.steps.append(_timed(inventory, ctx))
     except RuntimeError as exc:
         if not result.steps:
-            result.steps.append(StepResult("malware", StepStatus.ERROR, f"マウント失敗: {exc}"))
+            result.steps.append(StepResult("malware", StepStatus.ERROR, f"Mount failed: {exc}"))
         else:
             result.steps.append(StepResult("unmount", StepStatus.ERROR, str(exc)))
         if result.step("hash_inventory") is None:
-            result.steps.append(StepResult("hash_inventory", StepStatus.SKIPPED, "マウント失敗"))
+            result.steps.append(StepResult("hash_inventory", StepStatus.SKIPPED, "Mount failed"))
     permitted = all(
         step.status == StepStatus.PASS
         or (step.name == "hash_inventory" and not config.hash_inventory)
         for step in result.steps
     )
-    reason = "スキャン・ハッシュ処理未完了"
+    reason = "Scan and hashing not completed"
     if not config.allow_destructive:
         permitted, reason = False, "allow_destructive = false"
     elif is_mounted(block_info(runner, path)):
-        permitted, reason = False, "マウントが残っている"
+        permitted, reason = False, "Still mounted"
     for name, step in (("capacity", CapacityStep()), ("speed", SpeedStep())):
         result.steps.append(
             _timed(step.run, ctx) if permitted else StepResult(name, StepStatus.SKIPPED, reason)

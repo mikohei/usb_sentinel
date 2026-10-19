@@ -37,7 +37,7 @@ class TestErrorPaths:
 
         assert result.status is StepStatus.ERROR
         assert "use_probe" in result.summary
-        assert result.summary.startswith("検証済み領域")
+        assert result.summary.startswith("Verified area")
 
     def test_f3read_nonzero_exit_still_judges(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -55,7 +55,7 @@ class TestErrorPaths:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary.startswith("f3readの出力を解析できない")
+        assert result.summary.startswith("Could not parse f3read output")
         assert "cannot open" in result.summary
         assert result.details["raw_stdout_head"] == "garbage"
         assert f3_runner.calls[-1][0] == "umount"
@@ -71,7 +71,7 @@ class TestErrorPaths:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary.startswith("f3writeの出力を解析できない")
+        assert result.summary.startswith("Could not parse f3write output")
         assert "odd output" in result.summary
         assert result.details["raw_stdout_head"] == "Average writing speed: 1.2.3 MB/s\n"
         assert not any(c[0] == "f3read" for c in f3_runner.calls)
@@ -94,7 +94,7 @@ class TestErrorPaths:
 
         result = capacity_step().run(ctx)
 
-        assert result.summary == "権限不足: 書き込みが拒否された"
+        assert result.summary == "Permission denied: write refused"
 
     def test_f3write_nonzero_with_speed_continues(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -104,7 +104,7 @@ class TestErrorPaths:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.PASS
-        assert "f3writeが終了コード1を返した" in result.warnings
+        assert "f3write returned exit code 1" in result.warnings
 
     def test_f3write_zero_without_speed_continues(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -127,7 +127,7 @@ class TestErrorPaths:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "権限不足: 書き込み可能でマウントできない"
+        assert result.summary == "Permission denied: could not mount read-write"
         assert not any(c[0] == "umount" for c in f3_runner.calls)
 
     def test_mount_other_failure(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
@@ -135,7 +135,7 @@ class TestErrorPaths:
 
         result = capacity_step().run(ctx)
 
-        assert result.summary.startswith("mount失敗:")
+        assert result.summary.startswith("mount failed:")
         assert "wrong fs type" in result.summary
 
     def test_st_rdonly_is_permission_error_and_unmounts(
@@ -144,7 +144,7 @@ class TestErrorPaths:
         result = capacity_step(make_statvfs(f_flag=os.ST_RDONLY)).run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "権限不足: 書き込み可能でマウントできない"
+        assert result.summary == "Permission denied: could not mount read-write"
         assert any(c[0] == "umount" for c in f3_runner.calls)
         assert not any(c[0] == "f3write" for c in f3_runner.calls)
 
@@ -155,8 +155,8 @@ class TestErrorPaths:
 
         result = capacity_step().run(ctx)
 
-        assert result.summary.startswith("マウントポイントを作れない")
-        assert "権限不足" not in result.summary
+        assert result.summary.startswith("Could not create the mount point")
+        assert "Permission denied" not in result.summary
         assert not any(c[0] == "mount" for c in f3_runner.calls)
 
     def test_statvfs_oserror(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
@@ -165,7 +165,7 @@ class TestErrorPaths:
 
         result = CapacityStep(statvfs=failing, monotonic=lambda: 0.0).run(ctx)
 
-        assert result.summary == "マウントポイントを調べられない"
+        assert result.summary == "Could not stat the mount point"
         assert any(c[0] == "umount" for c in f3_runner.calls)
 
     def test_f3write_timeout_unmounts(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
@@ -174,7 +174,7 @@ class TestErrorPaths:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "タイムアウト"
+        assert result.summary == "Timed out"
         assert result.details["timed_out"] is True
         assert f3_runner.calls[-1][0] == "umount"
 
@@ -184,7 +184,7 @@ class TestErrorPaths:
 
         result = step.run(ctx)
 
-        assert result.summary == "タイムアウト"
+        assert result.summary == "Timed out"
         assert not any(c[0] == "f3write" for c in f3_runner.calls)
         assert f3_runner.calls[-1][0] == "umount"
 
@@ -206,7 +206,7 @@ class TestErrorPaths:
 
         result = capacity_step().run(ctx)
 
-        assert result.summary.startswith("デバイス情報を取得できない")
+        assert result.summary.startswith("Could not get device information")
 
     def test_missing_f3write_does_not_mount(self, ctx: StepContext) -> None:
         runner = FakeRunner(missing={"f3write"})
@@ -216,7 +216,7 @@ class TestErrorPaths:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "f3writeが見つからない"
+        assert result.summary == "f3write not found"
         assert runner.calls == []
 
 
@@ -229,7 +229,7 @@ class TestUnmountFailure:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary.startswith("umount失敗:")
+        assert result.summary.startswith("umount failed:")
         assert "target is busy" in result.summary
         assert result.details["filesystems"][0]["ok_sectors"] == F3READ_OK_SECTORS
         assert "suppressed_error" not in result.details
@@ -241,8 +241,8 @@ class TestUnmountFailure:
 
         result = capacity_step(make_statvfs(f_flag=os.ST_RDONLY)).run(ctx)
 
-        assert result.summary.startswith("umount失敗")
-        assert result.details["suppressed_error"] == "書き込み可能でマウントできない"
+        assert result.summary.startswith("umount failed")
+        assert result.details["suppressed_error"] == "Could not mount read-write"
 
     def test_timeout_then_umount_failure_keeps_summary(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -252,8 +252,8 @@ class TestUnmountFailure:
 
         result = capacity_step().run(ctx)
 
-        assert result.summary.startswith("umount失敗")
-        assert result.details["suppressed_error"] == "タイムアウト"
+        assert result.summary.startswith("umount failed")
+        assert result.details["suppressed_error"] == "Timed out"
         assert result.details["timed_out"] is True
 
     def test_parse_error_then_umount_failure_keeps_cause(
@@ -264,5 +264,5 @@ class TestUnmountFailure:
 
         result = capacity_step().run(ctx)
 
-        assert result.summary.startswith("umount失敗")
-        assert result.details["suppressed_error"].startswith("f3readの出力を解析できない")
+        assert result.summary.startswith("umount failed")
+        assert result.details["suppressed_error"].startswith("Could not parse f3read output")

@@ -37,7 +37,7 @@ def _result(*steps: StepResult, verdict: Verdict = Verdict.NO_DEFECT) -> Inspect
         finished_at="2024-03-15T04:35:06+00:00",
         verdict=verdict,
         steps=list(steps),
-        reasons=["全ステップ Pass"],
+        reasons=["All steps passed"],
     )
 
 
@@ -45,7 +45,7 @@ def _clean_malware_step() -> StepResult:
     return StepResult(
         name="malware",
         status=StepStatus.PASS,
-        summary="マルウェアなし",
+        summary="No malware",
         details={
             "database": {"engine_version": "1.0.3", "db_version": "27200"},
             "detections": [],
@@ -64,10 +64,14 @@ class TestJson:
         assert payload["device"]["serial"] == "ABC123456789"
         assert payload["steps"][0]["name"] == "malware"
 
-    def test_japanese_is_not_escaped(self) -> None:
-        text = to_json(_result(_clean_malware_step()))
+    def test_non_ascii_is_not_escaped(self) -> None:
+        """Non-ASCII text (e.g. a file name) is written as UTF-8, not escaped."""
+        step = _clean_malware_step()
+        step.details["detections"] = [{"path": "/mnt/sda1/café.exe", "signature": "x"}]
+        text = to_json(_result(step))
 
-        assert "マルウェアなし" in text
+        assert "No malware" in text
+        assert "café" in text
 
     def test_digest_changes_with_content(self) -> None:
         a = _result(_clean_malware_step())
@@ -95,19 +99,21 @@ class TestText:
         infected = StepResult(
             name="malware",
             status=StepStatus.FAIL,
-            summary="マルウェア 1 件検知",
+            summary="Malware detected: Eicar",
             details={"detections": [{"path": "/mnt/sda1/eicar.com", "signature": "Eicar"}]},
-            warnings=["ClamAV 定義 DB が 100 日前のもの"],
+            warnings=["ClamAV definition DB is 100 days old"],
         )
 
         text = render_text(_result(infected, verdict=Verdict.MALWARE_DETECTED))
 
         assert "[FAIL] malware" in text
         assert "Eicar: /mnt/sda1/eicar.com" in text
-        assert "100 日前" in text
+        assert "100 days old" in text
 
     def test_marks_not_implemented_steps(self) -> None:
-        step = StepResult(name="capacity", status=StepStatus.NOT_IMPLEMENTED, summary="未実装")
+        step = StepResult(
+            name="capacity", status=StepStatus.NOT_IMPLEMENTED, summary="Not implemented"
+        )
 
         text = render_text(_result(step))
 
@@ -117,7 +123,7 @@ class TestText:
         device = DeviceInfo(path="/dev/sda", kernel_name="sda", advertised_bytes=0)
         result = InspectionResult(device=device, started_at="2024-01-01T00:00:00+00:00")
 
-        assert "公称容量   : 不明" in render_text(result)
+        assert "Advertised capacity: unknown" in render_text(result)
 
 
 class TestQrPayload:
@@ -168,7 +174,10 @@ class TestDefectiveVerdict:
         capacity = StepResult(
             name="capacity",
             status=StepStatus.FAIL,
-            summary="データ破損: 12セクタ（消失10 / 破損2 / 変化0 / 上書き0）",
+            summary=(
+                "Data corruption: 12 sectors"
+                " (lost 10 / corrupted 2 / slightly changed 0 / overwritten 0)"
+            ),
             details={
                 "mode": "f3write",
                 "commands": [
@@ -211,7 +220,7 @@ class TestDefectiveVerdict:
         speed = StepResult(
             name="speed",
             status=StepStatus.PASS,
-            summary="読み取り85.3MB/s、書き込み20.1MB/s（閾値72.0 / 16.0MB/s）",
+            summary="read 85.3MB/s, write 20.1MB/s (threshold 72.0 / 16.0MB/s)",
             details={"read": {"mb_s": 85.3}, "write": {"mb_s": 20.1}},
         )
         return _result(_clean_malware_step(), capacity, speed, verdict=Verdict.DEFECTIVE)
@@ -229,5 +238,5 @@ class TestDefectiveVerdict:
     def test_text_shows_capacity_failure(self) -> None:
         text = render_text(self._defective())
 
-        assert "判定: Defective" in text
-        assert "[FAIL] capacity: データ破損:" in text
+        assert "Verdict: Defective" in text
+        assert "[FAIL] capacity: Data corruption:" in text

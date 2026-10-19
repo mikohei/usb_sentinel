@@ -165,7 +165,7 @@ updated to `state = 'completed'` after `result.json` is written). `install-docke
 `root:usb-sentinel` with `2770` (setgid), so the DB itself and the WAL files `-wal` and `-shm` can be read
 by the `usb-sentinel` group. `result.json` is the source of truth; the DB is an index for listing and searching.
 If recording fails, the inspection continues and the exit code does not change (a failure at the start is left in `warnings` of `result.json`,
-and a failure at completion is left in the journal's stderr as "SQLite record failed").
+and a failure at completion is left in the journal's stderr as `SQLite record failed (completion)`).
 The meaning of the columns is in Section 8 of [doc/qr-payload.md](doc/qr-payload.md).
 
 If the DB is corrupted, confirm that no inspection is running, and then move `inspections.sqlite` and `-wal` and `-shm`
@@ -378,7 +378,7 @@ When `[capacity] nominal_bytes` is set to the nominal capacity from the product 
 
 #### Speed
 
-Speed is compared with `nominal_read_mb_s` and `nominal_write_mb_s` (MB/s) in `[speed]`. When no nominal value is set, the verdict uses the industry minimum for the device class (`[speed] device_class`). If a nominal value is set, it takes priority. If only one side is set, only that side is judged and the unset side is only recorded as a measured value (the summary says the side is excluded from the verdict).
+Speed is compared with `nominal_read_mb_s` and `nominal_write_mb_s` (MB/s) in `[speed]`. When no nominal value is set, the verdict uses the industry minimum for the device class (`[speed] device_class`). If a nominal value is set, it takes priority. If only one side is set, only that side is judged and the unset side is only recorded as a measured value (the summary shows `(not judged)` for that side).
 
 | `device_class` | Class | Read (MB/s) | Write (MB/s) |
 |---|---|---|---|
@@ -391,11 +391,11 @@ Speed is compared with `nominal_read_mb_s` and `nominal_write_mb_s` (MB/s) in `[
 | `usb2_flash` | USB2.0 flash | 15 | 5 |
 | `usb3_flash` | USB3.0 flash | 50 | 15 |
 
-- If `device_class` is not set, the tool infers `usb2_flash` (480Mbps) or `usb3_flash` (5000Mbps or more) from the sysfs USB link speed. When it infers, it always leaves a "class not set" message in `warnings`. HDD, SSD, and SD cannot be told apart from the link speed, so set `device_class` in operations that handle them.
-- Use `nvme_ssd` when the host has USB3.2 Gen2 (10Gbps) or faster. The USB3 ports of the Raspberry Pi 4 are Gen1 (5Gbps) and top out at about 400 to 450MB/s in practice, so a 500MB/s minimum cannot be judged. In this case, set `nominal_*`. When the reference value is close to the effective upper limit of the link speed, `warnings` gets an "effective upper limit" warning.
-- Samples on a USB1.1 link (12Mbps or 1.5Mbps) have no verdict criterion. If neither `device_class` nor a nominal value is set, the speed step is `SKIPPED`, and a "no verdict criterion" message is left in `warnings`.
+- If `device_class` is not set, the tool infers `usb2_flash` (480Mbps) or `usb3_flash` (5000Mbps or more) from the sysfs USB link speed. When it infers, it always leaves `Device class not set; judged with USB flash defaults ...` in `warnings`. HDD, SSD, and SD cannot be told apart from the link speed, so set `device_class` in operations that handle them.
+- Use `nvme_ssd` when the host has USB3.2 Gen2 (10Gbps) or faster. The USB3 ports of the Raspberry Pi 4 are Gen1 (5Gbps) and top out at about 400 to 450MB/s in practice, so a 500MB/s minimum cannot be judged. In this case, set `nominal_*`. When the reference value is close to the effective upper limit of the link speed, `warnings` gets a `Reference ... exceeds the effective upper limit of a ...Mbps link ...` warning.
+- Samples on a USB1.1 link (12Mbps or 1.5Mbps) have no verdict criterion. If neither `device_class` nor a nominal value is set, the speed step is `SKIPPED`, and `USB1.1 link (...Mbps) has no verdict criterion; ...` is left in `warnings`.
 - If neither is set and the link speed cannot be read, the speed step is `SKIPPED` and the overall verdict is `Inconclusive`.
-- Severity of insufficient speed. A measured value below 50% of the reference is `severe` (the summary says the speed is far below), 50 to 79% is `minor` (the summary says it is slightly below), and 80% or more (`pass_ratio`) is PASS. It appears in `details.severity` and in `s:severe` / `s:minor` of `reason_codes`.
+- Severity of insufficient speed. A measured value below 50% of the reference is `severe` (the summary starts with `Speed shortfall (severe)`), 50 to 79% is `minor` (`Speed shortfall (minor)`), and 80% or more (`pass_ratio`) is PASS. It appears in `details.severity` and in `s:severe` / `s:minor` of `reason_codes`.
 
 ### Nominal speed
 
@@ -413,7 +413,7 @@ Measured values are recorded in `steps.speed.details.read.mb_s` and `write.mb_s`
 
 ### `result.txt`
 
-`result.txt` is `result.json` in a human-readable form. After the three lines of verdict, device, and nominal capacity, it shows the link speed, elapsed time, excess over the advertised capacity, and warnings, and after the line of each step it shows the nominal (product) capacity, classification, and severity. Items added in phase 2 are omitted together with their line when there is no value (a step that ended in ERROR has none), so you can judge missing data by the presence of the line.
+`result.txt` is `result.json` in a human-readable form. It starts with three lines, `Verdict:`, `Device:`, and `Advertised capacity:` (the capacity lsblk reports). Then it shows `Link speed:`, `Elapsed:`, `Advertised capacity exceeded:`, and `Warning:` lines, and after the line of each step it shows `Nominal (product):`, `Kind:`, and `Severity:`. Items added in phase 2 are omitted together with their line when there is no value (a step that ended in ERROR has none), so you can judge missing data by the presence of the line.
 
 ### Limits of the f3write mode
 
@@ -421,7 +421,7 @@ The default (`use_probe = false`) verifies free space with f3write + f3read and 
 
 - (a) A nearly full sample. The verified area does not reach the threshold, so the result is `ERROR` (the used amount alone never makes a sample pass).
 - (b) An NTFS sample. It cannot be mounted rw in the Docker setup (`ntfs-3g` uses FUSE, but `run-docker.sh` does not pass `/dev/fuse`).
-- (c) A counterfeit product usually becomes `Spec Mismatch`, but if the rewinding writes break the FAT area, the output of f3read cannot be parsed and the result is `ERROR` (`Inconclusive`). A sample that over-reports its used amount also becomes `Inconclusive`. Re-inspect a sample whose summary says that the f3read output cannot be parsed, or that the verified area does not reach the threshold, with `use_probe = true`.
+- (c) A counterfeit product usually becomes `Spec Mismatch`, but if the rewinding writes break the FAT area, the output of f3read cannot be parsed and the result is `ERROR` (`Inconclusive`). A sample that over-reports its used amount also becomes `Inconclusive`. Re-inspect a sample whose summary starts with `Could not parse f3read output` or `Verified area ... is below threshold ...` with `use_probe = true`.
 
 f3probe writes to the device directly without going through the filesystem, so it is not affected by the above. In either mode the contents of the sample are erased.
 

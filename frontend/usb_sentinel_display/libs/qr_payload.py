@@ -158,7 +158,7 @@ def build_detail_page(summary: ResultSummary, page: int) -> str:
 
     Args:
         summary: Result summary (its detail holds the inputs).
-        page: 1〜3。
+        page: 1 to 3.
 
     Returns:
         ASCII JSON string of 150 bytes or less. Missing values are written as null and keys are

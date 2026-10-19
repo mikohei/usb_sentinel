@@ -14,7 +14,7 @@ class Floor:
     Attributes:
         read_mb_s: Minimum read speed (MB/s, 10^6 bytes/s).
         write_mb_s: Minimum write speed (MB/s).
-        label: Japanese name used in the summary.
+        label: Name used in the summary.
         code: Two-character code for the QR code and SQLite.
     """
 
@@ -56,8 +56,8 @@ DEVICE_FLOORS: dict[str, Floor] = {
     "nvme_ssd": Floor(500.0, 500.0, "NVMe/USB3.2 SSD", "ns"),
     "sd_c10": Floor(25.0, 10.0, "SD Class10/U1", "s1"),
     "sd_u3": Floor(90.0, 30.0, "SD U3/V30", "s3"),
-    "usb2_flash": Floor(15.0, 5.0, "USB2.0フラッシュ", "u2"),
-    "usb3_flash": Floor(50.0, 15.0, "USB3.0フラッシュ", "u3"),
+    "usb2_flash": Floor(15.0, 5.0, "USB2.0 flash", "u2"),
+    "usb3_flash": Floor(50.0, 15.0, "USB3.0 flash", "u3"),
 }
 
 

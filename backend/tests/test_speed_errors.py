@@ -37,7 +37,7 @@ class TestErrorPaths:
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=90.0))
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == f"権限不足: 書き込みが拒否された（error={errno}）"
+        assert result.summary == f"Permission denied: write refused (error={errno})"
         assert result.details["read"]["mb_s"] == 85.3
         assert result.details["write"]["error"] == errno
 
@@ -51,7 +51,7 @@ class TestErrorPaths:
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=90.0))
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "権限不足: 読み取りが拒否された（error=13）"
+        assert result.summary == "Permission denied: read refused (error=13)"
         assert result.details["read"]["error"] == 13
         assert len(_fio_calls(fio_runner)) == 1
 
@@ -60,7 +60,7 @@ class TestErrorPaths:
 
         result = _step().run(ctx)
 
-        assert result.summary == "fioがI/Oエラーを報告（error=5）"
+        assert result.summary == "fio reported an I/O error (error=5)"
 
     def test_unparseable_with_permission_text(
         self, ctx: StepContext, fio_runner: FakeRunner
@@ -71,14 +71,14 @@ class TestErrorPaths:
 
         result = _step().run(ctx)
 
-        assert result.summary == "権限不足: 書き込みが拒否された"
+        assert result.summary == "Permission denied: write refused"
 
     def test_unparseable_other(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
         fio_runner.register(WRITE_ARGV, returncode=1, stdout="garbage", stderr="boom")
 
         result = _step().run(ctx)
 
-        assert result.summary == "fioの出力を解析できない: boom"
+        assert result.summary == "Could not parse fio output: boom"
         assert result.details["write"]["raw_stdout_head"] == "garbage"
 
     def test_nonzero_exit_with_valid_json_is_accepted(
@@ -99,7 +99,7 @@ class TestErrorPaths:
         result = _step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "タイムアウト"
+        assert result.summary == "Timed out"
         assert result.details["read"]["timed_out"] is True
         assert len(_fio_calls(fio_runner)) == 1
 
@@ -123,7 +123,7 @@ class TestErrorPaths:
 
         result = SpeedStep(monotonic=lambda: next(clock)).run(ctx)
 
-        assert result.summary == "タイムアウト"
+        assert result.summary == "Timed out"
         assert len(_fio_calls(fio_runner)) == 1
         assert result.details["read"]["mb_s"] == 85.3
 
@@ -135,7 +135,7 @@ class TestErrorPaths:
         result = _step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "fioが見つからない"
+        assert result.summary == "fio not found"
         assert _fio_calls(runner) == []
 
     def test_mounted_device_blocks_fio(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
@@ -146,7 +146,7 @@ class TestErrorPaths:
         result = _step().run(ctx)
 
         assert result.status is StepStatus.ERROR
-        assert result.summary == "マウントが残っているためfioを実行しない"
+        assert result.summary == "Still mounted; fio not run"
         assert _fio_calls(fio_runner) == []
 
     def test_lsblk_without_blockdevices(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
@@ -154,5 +154,5 @@ class TestErrorPaths:
 
         result = _step().run(ctx)
 
-        assert result.summary.startswith("デバイス情報を取得できない")
+        assert result.summary.startswith("Could not get device information")
         assert _fio_calls(fio_runner) == []

@@ -40,7 +40,7 @@ class TestPass:
         result = capacity_step().run(ctx)
 
         assert result.status is StepStatus.PASS
-        assert result.summary.startswith("実容量")
+        assert result.summary.startswith("actual ")
         assert "GB" in result.summary and "%" in result.summary
         d = result.details
         assert d["mode"] == "f3write"
@@ -107,7 +107,7 @@ class TestPass:
         result = capacity_step(stat).run(ctx)
 
         assert result.status is StepStatus.FAIL
-        assert result.summary.startswith("容量不足:")
+        assert result.summary.startswith("Capacity shortfall:")
 
     def test_multiple_filesystems_are_summed(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
         two = json.loads(json.dumps(LSBLK_DISK))
@@ -143,9 +143,9 @@ class TestFail:
         assert result.details["counterfeit"] is True
         assert result.details["counterfeit_reasons"] == ["lost_ratio"]
         assert abs(result.details["lost_ratio"] - 0.738) < 0.001
-        assert result.summary.startswith("偽装疑い:")
-        assert "消失73.8%" in result.summary
-        assert "閾値29.76GB" in result.summary
+        assert result.summary.startswith("Suspected counterfeit:")
+        assert "lost 73.8%" in result.summary
+        assert "threshold 29.76GB" in result.summary
 
     def test_enough_capacity_with_data_lost_is_defective(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -160,8 +160,8 @@ class TestFail:
         assert result.status is StepStatus.FAIL
         assert result.details["defect"] is True
         assert result.details["bad_sectors"] == 12
-        assert result.summary.startswith("データ破損: 12セクタ")
-        assert "消失10 / 破損2" in result.summary
+        assert result.summary.startswith("Data corruption: 12 sectors")
+        assert "lost 10 / corrupted 2" in result.summary
 
 
 def _with_nominal(ctx: StepContext, nominal: int) -> StepContext:
@@ -207,7 +207,7 @@ class TestNominal:
         assert d["advertised_ratio"] == round(32_000_000_000 / nominal, 4)
         # ratio is actual / advertised, as before.
         assert d["ratio"] == round(d["actual_bytes"] / 32_000_000_000, 4)
-        assert "公称31.00GB" in result.summary
+        assert "nominal 31.00GB" in result.summary
 
     def test_advertised_over_nominal_is_counterfeit(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -218,7 +218,9 @@ class TestNominal:
         assert result.status is StepStatus.FAIL
         assert result.details["kind"] == "counterfeit"
         assert "over_advertised" in result.details["counterfeit_reasons"]
-        assert result.summary.startswith("偽装疑い: 申告容量32.00GB > 上限31.03GB")
+        assert result.summary.startswith(
+            "Suspected counterfeit: advertised capacity 32.00GB > limit 31.03GB"
+        )
 
     def test_short_against_nominal(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
         # Advertised 32 GB but nominal 64 GB, so an actual 31.2 GB is short.
@@ -226,8 +228,8 @@ class TestNominal:
 
         assert result.status is StepStatus.FAIL
         assert result.details["kind"] == "short"
-        assert result.summary.startswith("容量不足:")
-        assert "公称64.00GB" in result.summary
+        assert result.summary.startswith("Capacity shortfall:")
+        assert "nominal 64.00GB" in result.summary
         assert result.details["threshold_bytes"] == math.ceil(64_000_000_000 * 0.93)
 
 
@@ -242,7 +244,7 @@ class TestStaleH2w:
         result = capacity_step().run(ctx)
 
         assert result.details["filesystems"][0]["stale_h2w_removed"] == 1
-        assert result.warnings.count("前回のf3ファイルを1件削除") == 1
+        assert result.warnings.count("Deleted 1 f3 files left from a previous run") == 1
         assert not (target / "1.h2w").exists()
 
 

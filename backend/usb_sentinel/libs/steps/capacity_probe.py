@@ -45,7 +45,7 @@ def parse_f3probe(text: str) -> ProbeSummary:
     """
     usable = _USABLE.search(text)
     if usable is None:
-        raise ValueError("f3probeの出力を解析できない")
+        raise ValueError("Could not parse f3probe output")
     announced = _ANNOUNCED.search(text)
     block_size = _BLOCK_SIZE.search(text)
     verdict = _VERDICT.search(text)
@@ -89,7 +89,7 @@ def run_probe(
         probe_summary = parse_f3probe(probe.stdout)
     except ValueError:
         record_raw_stdout(result.details, probe)
-        result.summary = failure_summary(probe, "f3probeの出力を解析できない")
+        result.summary = failure_summary(probe, "Could not parse f3probe output")
         return None
     result.details["probe"] = {
         "usable_blocks": probe_summary.usable_blocks,

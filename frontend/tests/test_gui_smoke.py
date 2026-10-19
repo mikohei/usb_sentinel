@@ -151,7 +151,7 @@ def make_app(monitor: FakeMonitor, language: str = "en") -> App:
             monitor=monitor,
         )
     except tk.TclError as exc:
-        pytest.skip(f"tk.Tk()が作れない: {exc}")
+        pytest.skip(f"cannot create tk.Tk(): {exc}")
 
 
 @pytest.fixture
@@ -160,7 +160,7 @@ def root() -> Iterator[tk.Tk]:
     try:
         window = tk.Tk()
     except tk.TclError as exc:
-        pytest.skip(f"tk.Tk()が作れない: {exc}")
+        pytest.skip(f"cannot create tk.Tk(): {exc}")
     yield window
     with contextlib.suppress(tk.TclError):
         window.destroy()

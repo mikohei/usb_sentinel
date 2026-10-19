@@ -35,7 +35,7 @@ DEFAULT_MONOTONIC: Callable[[], float] = time.monotonic
 # f3read non-OK sector kinds (keys of filesystems[].{key}_sectors).
 _BAD_SECTOR_KEYS = ("lost", "corrupted", "slightly_changed", "overwritten")
 # summary when an rw mount fails for lack of permission or write protection.
-_MOUNT_NOT_WRITABLE_SUMMARY = "権限不足: 書き込み可能でマウントできない"
+_MOUNT_NOT_WRITABLE_SUMMARY = "Permission denied: could not mount read-write"
 
 
 class CapacityStep:
@@ -100,7 +100,7 @@ class CapacityStep:
             if is_permission_error(str(exc)):
                 result.summary = _MOUNT_NOT_WRITABLE_SUMMARY
             else:
-                result.summary = f"mount失敗: {str(exc)[:STDERR_HEAD_CHARS]}"
+                result.summary = f"mount failed: {str(exc)[:STDERR_HEAD_CHARS]}"
         except NotWritableError:
             result.summary = _MOUNT_NOT_WRITABLE_SUMMARY
         except ValueError as exc:
@@ -113,7 +113,7 @@ class CapacityStep:
             if suppressed:
                 result.details["suppressed_error"] = suppressed
             result.status = StepStatus.ERROR
-            result.summary = f"umount失敗: {str(exc)[:STDERR_HEAD_CHARS]}"
+            result.summary = f"umount failed: {str(exc)[:STDERR_HEAD_CHARS]}"
         return result
 
     def _judge_f3write(self, result: StepResult, totals: Totals) -> StepResult:
@@ -136,8 +136,9 @@ class CapacityStep:
         )
         if verdict.kind == "defect":
             result.summary += (
-                f"（消失{bad['lost']} / 破損{bad['corrupted']}"
-                f" / 変化{bad['slightly_changed']} / 上書き{bad['overwritten']}）"
+                f" (lost {bad['lost']} / corrupted {bad['corrupted']}"
+                f" / slightly changed {bad['slightly_changed']}"
+                f" / overwritten {bad['overwritten']})"
             )
         return result
 

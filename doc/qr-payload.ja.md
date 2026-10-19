@@ -25,7 +25,7 @@ usb_sentinelが出すQRコードの中身と、`result.json`・Pi側SQLiteとの
 ## 2. 共通規則
 
 - 形式はJSONオブジェクト1つ。`json.dumps(..., separators=(",", ":"))`で区切り文字の後の空白を詰める。
-- 画面用（通常QR・詳細QR）はASCIIだけ（`ensure_ascii=True`）。非ASCIIのシリアルは`?`に置き換える。ファイル用QRはUTF-8（`ensure_ascii=False`）で、理由文の日本語はそのまま入る。1文字が3バイトになる。
+- 画面用（通常QR・詳細QR）はASCIIだけ（`ensure_ascii=True`）。非ASCIIのシリアルは`?`に置き換える。ファイル用QRはUTF-8（`ensure_ascii=False`）で、理由文は英語なのでほぼASCIIである。シリアルや外部コマンドの出力に由来する非ASCIIの文字は、UTF-8のまま入る。
 - 値が無い項目は`null`で出し、キーは省かない。読み取りアプリは「値が無い」と「読み落とし」を区別できる。例外は通常QR・詳細QRの`k`だけで、`s`がカーネル名のとき`1`、シリアルのときはキー自体を省く。
 - 時刻はすべてUTC。ファイル用QRと`result.json`はISO 8601（`2025-06-01T12:00:00.123456+00:00`）、画面用は`YYYYmmddTHHMMSSZ`の16文字（`20250601T120000Z`）。
 - 容量はバイト（10進）。詳細QRだけMB（10^6バイト、切り捨て）にする。150バイトに収めるためで、精度は1MB（32GBに対して0.003%）である。正確なバイト値は`result.json`とSQLiteにある。
@@ -60,7 +60,7 @@ usb_sentinelが出すQRコードの中身と、`result.json`・Pi側SQLiteとの
 | `device_class` | str \| null | `steps[speed].details.device_class`（第6.4節のキー） | 追加 |
 | `speed` | dict \| null | `read_mb_s`、`write_mb_s`、`threshold_read_mb_s`、`threshold_write_mb_s`、`basis_read`、`basis_write`、`severity`。fioの測定値が無ければ`null` | 追加 |
 | `reason_codes` | list[str] | 同名（第6.8節） | 追加 |
-| `reasons` | list[str] | 同名（日本語の理由文） | 追加 |
+| `reasons` | list[str] | 同名（英語の理由文。第11節を参照） | 追加 |
 | `hash_inventory_digest` | str \| null | `steps[hash_inventory].details.digest`（`hash-inventory.tsv`のSHA-256、64桁） | 追加 |
 | `hash_inventory_lines` | int \| null | `…details.lines`（台帳の行数） | 追加 |
 | `truncated` | bool | 省略が起きたとき`true`。省略が無ければ`false`（常にキーを出す） | — |
@@ -301,8 +301,8 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 
 | `sv` | `severity` | 意味 |
 |---|---|---|
-| `s` | `severe` | 測定値が基準値の50%未満（「速度不足（著しく下回る）」） |
-| `m` | `minor` | 50%以上80%未満（「速度不足（わずかに下回る）」） |
+| `s` | `severe` | 測定値が基準値の50%未満（summaryは`Speed shortfall (severe)`で始まる） |
+| `m` | `minor` | 50%以上80%未満（`Speed shortfall (minor)`） |
 | `-` | `null` | FAILではない |
 
 | `counterfeit_reasons`の値 | 意味 |
@@ -409,7 +409,7 @@ backendは検査1件につき`/var/lib/usb-sentinel/db/inspections.sqlite`の`in
 | `threshold_read_mb_s`、`threshold_write_mb_s` | REAL | 閾値 |
 | `speed_basis_read`、`speed_basis_write` | TEXT | 判定根拠 |
 | `speed_severity` | TEXT | `severe` / `minor` |
-| `reason_codes`、`reasons` | TEXT | JSON配列（`reasons`は日本語をエスケープしない） |
+| `reason_codes`、`reasons` | TEXT | JSON配列（`reasons`は非ASCIIの文字をエスケープしない） |
 | `hash_inventory_digest` | TEXT | 台帳のSHA-256（64桁） |
 | `hash_inventory_lines` | INTEGER | 台帳の行数 |
 | `output_dir` | TEXT | 結果ディレクトリの絶対パス |
@@ -444,7 +444,7 @@ SELECT inspection_id, verdict, serial, started_at, output_dir
 FROM inspections WHERE result_digest LIKE ? || '%';
 ```
 
-`state = 'started'`の行は検査中か、`result.json`を書けずに終わった（USB切断など）ことを示す。`result.json`が存在するのに`started`のままなら完了記録に失敗しており、journalに「SQLite記録失敗（完了）」が残っている。
+`state = 'started'`の行は検査中か、`result.json`を書けずに終わった（USB切断など）ことを示す。`result.json`が存在するのに`started`のままなら完了記録に失敗しており、journalに`SQLite record failed (completion)`が残っている。
 
 ## 9. 読み取りアプリ（Flutter）側のスキーマ推奨
 
@@ -481,3 +481,4 @@ Pi側の列（第8.1節）をそのまま持ち、ケース情報を列として
 - ファイル用QR v:3は、将来キーを足すときも既存キーの意味を変えない。読み取りアプリは未知のキーを無視し、既知のキーが無ければ`null`扱いにする。
 - 判定名の文字列（`Counterfeit Suspected`など）はbackendの`Verdict`の値で、変更時は`backend/AGENTS.md`に従って報告される。読み取りアプリは第6.1節の表に無い値を「不明」として扱い、生の値を残す。
 - SQLiteは以降の版で列の追加だけを行う。読み取り側は列名で参照し、列の位置に依存しない。
+- backendは`summary`、`reasons`、`warnings`、`result.txt`の見出しを英語で書くようになった。キー、コード、判定名は変わらず、QRの版も変えない。この変更より前の結果（SQLiteの過去の行や、持ち出し済みの`result.json`）は日本語のまま残る。読み取りアプリは表示に`reason_codes`を主に使い、文は補足として扱う。

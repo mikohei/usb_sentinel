@@ -92,7 +92,8 @@ def shoot(app: App, out: Path) -> None:
         app.left_canvas.postscript(file=str(left), colormode="color")
         app.right_canvas.postscript(file=str(right), colormode="color")
         print(
-            f"screencapture失敗（終了コード{code}、{size}バイト）。{left}と{right}に落とした",
+            f"screencapture failed (exit code {code}, {size} bytes);"
+            f" saved {left} and {right} instead",
             file=sys.stderr,
         )
     else:

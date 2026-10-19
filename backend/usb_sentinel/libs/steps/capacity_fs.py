@@ -98,7 +98,7 @@ def parse_f3read(text: str) -> F3ReadSummary:
     ok = _DATA_OK.search(text)
     lost = _DATA_LOST.search(text)
     if ok is None or lost is None:
-        raise ValueError("f3readの出力を解析できない")
+        raise ValueError("Could not parse f3read output")
     return F3ReadSummary(
         ok_sectors=int(ok.group(1)),
         lost_sectors=int(lost.group(1)),
@@ -118,7 +118,7 @@ def usage(statvfs: Callable[[str], os.statvfs_result], target: Path) -> tuple[in
     try:
         stat = statvfs(str(target))
     except OSError as exc:
-        raise MountpointError("マウントポイントを調べられない") from exc
+        raise MountpointError("Could not stat the mount point") from exc
     return (stat.f_blocks - stat.f_bfree) * stat.f_frsize, stat.f_bavail * stat.f_frsize
 
 
@@ -132,7 +132,7 @@ def remove_h2w(target: Path, warnings: list[str]) -> int:
     try:
         entries = sorted(target.iterdir())
     except OSError as exc:
-        warnings.append(f"{target}を走査できない: {exc.strerror}")
+        warnings.append(f"Could not list {target}: {exc.strerror}")
         return 0
     for path in entries:
         if not H2W_PATTERN.match(path.name):
@@ -140,7 +140,7 @@ def remove_h2w(target: Path, warnings: list[str]) -> int:
         try:
             path.unlink()
         except OSError as exc:
-            warnings.append(f"{path.name}を削除できない: {exc.strerror}")
+            warnings.append(f"Could not delete {path.name}: {exc.strerror}")
             continue
         removed += 1
     return removed
@@ -167,20 +167,20 @@ def rw_mounted(
     try:
         target.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise MountpointError(f"マウントポイントを作れない: {exc.strerror}") from exc
+        raise MountpointError(f"Could not create the mount point: {exc.strerror}") from exc
     mount_argv = ["mount", "-w", "-o", "noexec,nosuid,nodev", device_path, str(target)]
     commands.append(mount_argv)
     mount = ctx.runner.run(mount_argv)
     if not mount.ok:
-        raise MountError(mount.stderr or f"終了コード{mount.returncode}")
+        raise MountError(mount.stderr or f"exit code {mount.returncode}")
     pending: BaseException | None = None
     try:
         try:
             flags = statvfs(str(target)).f_flag
         except OSError as exc:
-            raise MountpointError("マウントポイントを調べられない") from exc
+            raise MountpointError("Could not stat the mount point") from exc
         if flags & os.ST_RDONLY:
-            raise NotWritableError("書き込み可能でマウントできない")
+            raise NotWritableError("Could not mount read-write")
         yield target
     except BaseException as exc:
         # contextmanager throws the with-body's exception in at the yield. Keep it for chaining
@@ -193,4 +193,4 @@ def rw_mounted(
         commands.append(umount_argv)
         umount = ctx.runner.run(umount_argv)
         if not umount.ok:
-            raise UnmountError(umount.stderr or f"終了コード{umount.returncode}") from pending
+            raise UnmountError(umount.stderr or f"exit code {umount.returncode}") from pending

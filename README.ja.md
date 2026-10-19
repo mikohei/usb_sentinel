@@ -165,7 +165,7 @@ backendは検査1件につき`inspections.sqlite`へ1行を書く（開始時に
 `root:usb-sentinel`の`2770`（setgid）で作るので、DB本体とWALの`-wal`・`-shm`は
 `usb-sentinel`グループで読める。`result.json`が正本で、DBは一覧と検索のための索引である。
 記録に失敗しても検査は続き、終了コードも変わらない（開始時の失敗は`result.json`の`warnings`、
-完了時の失敗はjournalのstderrに「SQLite記録失敗」として残る）。
+完了時の失敗はjournalのstderrに`SQLite record failed (completion)`として残る）。
 列の意味は[doc/qr-payload.ja.md](doc/qr-payload.ja.md)の第8節にある。
 
 DBが壊れたときは、検査が走っていないことを確認してから`inspections.sqlite`と`-wal`・`-shm`を
@@ -378,7 +378,7 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 
 #### 速度
 
-速度は`[speed]`の`nominal_read_mb_s`・`nominal_write_mb_s`（MB/s）と比較する。公称値が未設定のとき、デバイス種別（`[speed] device_class`）の業界最低値で判定する。公称値が設定されていればそれが優先される。片方だけ設定した場合は設定側だけを判定し、未設定側は測定値の記録のみ（summaryに`（判定対象外）`）。
+速度は`[speed]`の`nominal_read_mb_s`・`nominal_write_mb_s`（MB/s）と比較する。公称値が未設定のとき、デバイス種別（`[speed] device_class`）の業界最低値で判定する。公称値が設定されていればそれが優先される。片方だけ設定した場合は設定側だけを判定し、未設定側は測定値の記録のみ（summaryに`(not judged)`が付く）。
 
 | `device_class` | 種別 | 読み取り（MB/s） | 書き込み（MB/s） |
 |---|---|---|---|
@@ -391,11 +391,11 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 | `usb2_flash` | USB2.0フラッシュ | 15 | 5 |
 | `usb3_flash` | USB3.0フラッシュ | 50 | 15 |
 
-- `device_class`が未設定なら、sysfsのUSBリンク速度から`usb2_flash`（480Mbps）または`usb3_flash`（5000Mbps以上）を推定する。推定したときは`warnings`に「種別未設定」を必ず残す。HDD・SSD・SDはリンク速度から判別できないので、扱う運用では`device_class`を設定する。
-- `nvme_ssd`はホストがUSB3.2 Gen2（10Gbps）以上のときに使う。Raspberry Pi 4のUSB3ポートはGen1（5Gbps）で実効約400〜450MB/sが上限のため、500MB/sの最低値では判定できない。この場合は`nominal_*`を設定する。基準値がリンク速度の実効上限に近いときは`warnings`に「実効上限」の警告が出る。
-- USB1.1リンク（12Mbps・1.5Mbps）の検体は判定基準を持たない。`device_class`も公称値も無ければ速度ステップは`SKIPPED`になり、`warnings`に「判定基準なし」を残す。
+- `device_class`が未設定なら、sysfsのUSBリンク速度から`usb2_flash`（480Mbps）または`usb3_flash`（5000Mbps以上）を推定する。推定したときは`warnings`に`Device class not set; judged with USB flash defaults ...`を必ず残す。HDD・SSD・SDはリンク速度から判別できないので、扱う運用では`device_class`を設定する。
+- `nvme_ssd`はホストがUSB3.2 Gen2（10Gbps）以上のときに使う。Raspberry Pi 4のUSB3ポートはGen1（5Gbps）で実効約400〜450MB/sが上限のため、500MB/sの最低値では判定できない。この場合は`nominal_*`を設定する。基準値がリンク速度の実効上限に近いときは`warnings`に`Reference ... exceeds the effective upper limit of a ...Mbps link ...`の警告が出る。
+- USB1.1リンク（12Mbps・1.5Mbps）の検体は判定基準を持たない。`device_class`も公称値も無ければ速度ステップは`SKIPPED`になり、`warnings`に`USB1.1 link (...Mbps) has no verdict criterion; ...`を残す。
 - 両方未設定でリンク速度も読めなければ速度ステップは`SKIPPED`になり総合判定は`Inconclusive`。
-- 速度不足の重大度。測定値が基準値の50%未満なら`severe`（summaryは「速度不足（著しく下回る）」）、50〜79%なら`minor`（「速度不足（わずかに下回る）」）、80%以上（`pass_ratio`）でPASS。`details.severity`と`reason_codes`の`s:severe`／`s:minor`に出る。
+- 速度不足の重大度。測定値が基準値の50%未満なら`severe`（summaryは`Speed shortfall (severe)`で始まる）、50〜79%なら`minor`（`Speed shortfall (minor)`）、80%以上（`pass_ratio`）でPASS。`details.severity`と`reason_codes`の`s:severe`／`s:minor`に出る。
 
 ### 速度の公称値
 
@@ -413,7 +413,7 @@ pass_ratio = 0.80           # 公称値×pass_ratio以上でPASS
 
 ### `result.txt`
 
-`result.txt`は`result.json`を人が読む形にしたもので、判定・デバイス・公称容量の3行の後にリンク速度・所要時間・申告容量超過・警告を、各ステップの行の後に公称（商品）容量・区別・重大度を出す。第2期で足した項目は値が無ければ行ごと省く（ERRORで終わったステップには無い）ので、行の有無で欠損を判断できる。
+`result.txt`は`result.json`を人が読む形にしたもので、先頭に`Verdict:`、`Device:`、`Advertised capacity:`（lsblkの申告容量）の3行を出す。続いて`Link speed:`、`Elapsed:`、`Advertised capacity exceeded:`、`Warning:`の行を、各ステップの行の後に`Nominal (product):`、`Kind:`、`Severity:`を出す。第2期で足した項目は値が無ければ行ごと省く（ERRORで終わったステップには無い）ので、行の有無で欠損を判断できる。
 
 ### f3writeモードの制限
 
@@ -421,7 +421,7 @@ pass_ratio = 0.80           # 公称値×pass_ratio以上でPASS
 
 - (a) ほぼ満杯の検体。検証済み領域が閾値に届かないため`ERROR`になる（既使用量だけでは合格させない）。
 - (b) NTFSの検体。Docker構成ではrwマウントできない（`ntfs-3g`はFUSEを使うが`run-docker.sh`は`/dev/fuse`を渡していない）。
-- (c) 容量偽装品は多くの場合`Spec Mismatch`になるが、巻き戻し書き込みでFAT領域が壊れるとf3readの出力を解析できず`ERROR`（`Inconclusive`）になる。既使用量を過大に申告する検体も同様に`Inconclusive`になる。summaryが「f3readの出力を解析できない」または「検証済み領域…が閾値…に届かない」の検体は`use_probe = true`で再検査する。
+- (c) 容量偽装品は多くの場合`Spec Mismatch`になるが、巻き戻し書き込みでFAT領域が壊れるとf3readの出力を解析できず`ERROR`（`Inconclusive`）になる。既使用量を過大に申告する検体も同様に`Inconclusive`になる。summaryが`Could not parse f3read output`または`Verified area ... is below threshold ...`で始まる検体は`use_probe = true`で再検査する。
 
 f3probeはファイルシステムを介さずデバイスに直接書くため、上記の影響を受けない。いずれのモードでも検体の内容は消去される。
 

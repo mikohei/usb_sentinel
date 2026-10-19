@@ -98,7 +98,7 @@ class TestMain:
 
         def failing_payload(result: InspectionResult) -> str:
             digests.append(digest(result))
-            raise ValueError("QRペイロードが上限を超える")
+            raise ValueError("QR payload exceeds the limit")
 
         monkeypatch.setattr(report_mod, "build_payload", failing_payload)
 

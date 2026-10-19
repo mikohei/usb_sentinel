@@ -31,8 +31,8 @@ class TestFloors:
             ("nvme_ssd", Floor(500.0, 500.0, "NVMe/USB3.2 SSD", "ns")),
             ("sd_c10", Floor(25.0, 10.0, "SD Class10/U1", "s1")),
             ("sd_u3", Floor(90.0, 30.0, "SD U3/V30", "s3")),
-            ("usb2_flash", Floor(15.0, 5.0, "USB2.0フラッシュ", "u2")),
-            ("usb3_flash", Floor(50.0, 15.0, "USB3.0フラッシュ", "u3")),
+            ("usb2_flash", Floor(15.0, 5.0, "USB2.0 flash", "u2")),
+            ("usb3_flash", Floor(50.0, 15.0, "USB3.0 flash", "u3")),
         ],
     )
     def test_table_matches_sop(self, key: str, expected: Floor) -> None:
@@ -102,8 +102,8 @@ def test_module_imports_only_dataclasses() -> None:
         if isinstance(node, ast.Import):
             imported.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            assert node.level == 0, "相対importは禁止"
+            assert node.level == 0, "relative imports are not allowed"
             imported.append(node.module or "")
     assert imported
     for name in imported:
-        assert name == "dataclasses", f"許可されないimport: {name}"
+        assert name == "dataclasses", f"disallowed import: {name}"

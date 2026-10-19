@@ -85,24 +85,24 @@ class TestQueryBlockInfo:
     def test_nonzero_exit_is_device_query_error(self) -> None:
         runner = FakeRunner()
         runner.register(["lsblk"], returncode=32, stderr="not a block device")
-        with pytest.raises(DeviceQueryError, match="^デバイス情報を取得できない: "):
+        with pytest.raises(DeviceQueryError, match="^Could not get device information: "):
             query_block_info(runner, "/dev/sda")
 
     def test_invalid_json_is_device_query_error(self) -> None:
         runner = FakeRunner()
         runner.register(["lsblk"], stdout="not json")
-        with pytest.raises(DeviceQueryError, match="^デバイス情報を取得できない: "):
+        with pytest.raises(DeviceQueryError, match="^Could not get device information: "):
             query_block_info(runner, "/dev/sda")
 
     def test_missing_blockdevices_key_is_device_query_error(self) -> None:
         runner = FakeRunner()
         runner.register(["lsblk"], stdout=json.dumps({"devices": []}))
-        with pytest.raises(DeviceQueryError, match="^デバイス情報を取得できない: "):
+        with pytest.raises(DeviceQueryError, match="^Could not get device information: "):
             query_block_info(runner, "/dev/sda")
 
     def test_empty_blockdevices_is_device_query_error(self) -> None:
         # UnsafeDeviceError derives from RuntimeError, so it is wrapped the same way.
         runner = FakeRunner()
         runner.register(["lsblk"], stdout=json.dumps({"blockdevices": []}))
-        with pytest.raises(DeviceQueryError, match="^デバイス情報を取得できない: "):
+        with pytest.raises(DeviceQueryError, match="^Could not get device information: "):
             query_block_info(runner, "/dev/sda")

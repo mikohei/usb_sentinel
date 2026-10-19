@@ -25,7 +25,7 @@ def evaluate(actual_bytes: int, advertised_bytes: int, pass_ratio: float = 0.93)
 
 
 def _gb(size: int | float) -> str:
-    """Format bytes as GB in units of 10^9 (matching the nominal capacity in report/text.py)."""
+    """Format bytes as GB in units of 10^9 (matching the advertised capacity in report/text.py)."""
     return f"{size / 1e9:.2f}GB"
 
 
@@ -52,8 +52,8 @@ def _over_text(label: str, value: int, nominal: int, over_ratio: float) -> str:
     """Reason wording for excess capacity (shared by reported and actual capacity)."""
     threshold = over_threshold(nominal, over_ratio)
     return (
-        f"{label}{_gb(value)} > 上限{_gb(threshold or 0)}"
-        f"（公称{_gb(nominal)}の{value / nominal * 100:.1f}%）"
+        f"{label} {_gb(value)} > limit {_gb(threshold or 0)}"
+        f" ({value / nominal * 100:.1f}% of nominal {_gb(nominal)})"
     )
 
 
@@ -63,7 +63,7 @@ def precheck_advertised(advertised: int, nominal: int | None, over_ratio: float)
     exceeded = exceeds(advertised, nominal, over_ratio)
     summary = ""
     if exceeded and nominal is not None:
-        summary = _over_text("申告容量", advertised, nominal, over_ratio)
+        summary = _over_text("advertised capacity", advertised, nominal, over_ratio)
     return {
         "nominal_bytes": nominal,
         "advertised_bytes": advertised,
@@ -105,18 +105,18 @@ def _counterfeit_reasons(
     texts: list[str] = []
     if nominal is not None and exceeds(advertised, nominal, over_ratio):
         codes.append("over_advertised")
-        texts.append(_over_text("申告容量", advertised, nominal, over_ratio))
+        texts.append(_over_text("advertised capacity", advertised, nominal, over_ratio))
     if nominal is not None and exceeds(actual, nominal, over_ratio):
         codes.append("over_actual")
-        texts.append(_over_text("実容量", actual, nominal, over_ratio))
+        texts.append(_over_text("actual capacity", actual, nominal, over_ratio))
     if probe_verdict_line is not None and probe_verdict_line.startswith(_BAD_NEWS):
         codes.append("probe_bad_news")
         texts.append(f"f3probe: {probe_verdict_line}")
     if lost_ratio is not None and lost_ratio >= LOST_RATIO_COUNTERFEIT:
         codes.append("lost_ratio")
         texts.append(
-            f"消失{lost_ratio * 100:.1f}%"
-            f"（実容量{_gb(actual)} / 公称{_gb(base)}、閾値{_gb(threshold)}）"
+            f"lost {lost_ratio * 100:.1f}%"
+            f" (actual {_gb(actual)} / nominal {_gb(base)}, threshold {_gb(threshold)})"
         )
     return codes, texts
 
@@ -165,25 +165,29 @@ def judge(
     )
     if codes:
         return CapacityVerdict(
-            StepStatus.FAIL, "counterfeit", True, tuple(codes), "偽装疑い: " + "、".join(texts)
+            StepStatus.FAIL,
+            "counterfeit",
+            True,
+            tuple(codes),
+            "Suspected counterfeit: " + "; ".join(texts),
         )
     ratio = actual / base if base else 0.0
     if not evaluate(actual, base, pass_ratio):
         summary = (
-            f"容量不足: 実容量{_gb(actual)} / 公称{_gb(base)}"
-            f"（{ratio * 100:.1f}%）、閾値{_gb(threshold)}"
+            f"Capacity shortfall: actual {_gb(actual)} / nominal {_gb(base)}"
+            f" ({ratio * 100:.1f}%), threshold {_gb(threshold)}"
         )
         return CapacityVerdict(StepStatus.FAIL, "short", False, (), summary)
     if bad_sectors is not None and bad_sectors > 0:
         return CapacityVerdict(
-            StepStatus.FAIL, "defect", False, (), f"データ破損: {bad_sectors}セクタ"
+            StepStatus.FAIL, "defect", False, (), f"Data corruption: {bad_sectors} sectors"
         )
     if verified_bytes is not None and verified_bytes < threshold:
         used = actual - verified_bytes
         summary = (
-            f"検証済み領域{_gb(verified_bytes)}が閾値{_gb(threshold)}に届かない"
-            f"（既使用{_gb(used)}、use_probe = trueを検討）"
+            f"Verified area {_gb(verified_bytes)} is below threshold {_gb(threshold)}"
+            f" (already used {_gb(used)}; consider use_probe = true)"
         )
         return CapacityVerdict(StepStatus.ERROR, "unverified", False, (), summary)
-    summary = f"実容量{_gb(actual)} / 公称{_gb(base)}（{ratio * 100:.1f}%）"
+    summary = f"actual {_gb(actual)} / nominal {_gb(base)} ({ratio * 100:.1f}%)"
     return CapacityVerdict(StepStatus.PASS, "ok", False, (), summary)

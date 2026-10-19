@@ -38,7 +38,7 @@ def parse_fio(text: str, mode: Mode) -> FioJob:
     """
     start = text.find("{")
     if start < 0:
-        raise ValueError("fioの出力を解析できない")
+        raise ValueError("Could not parse fio output")
     try:
         job = json.loads(text[start:])["jobs"][0]
         io = job[mode]
@@ -51,7 +51,7 @@ def parse_fio(text: str, mode: Mode) -> FioJob:
             runtime_ms=int(io.get("runtime", 0)),
         )
     except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as exc:
-        raise ValueError("fioの出力を解析できない") from exc
+        raise ValueError("Could not parse fio output") from exc
 
 
 def fio_argv(ctx: StepContext, mode: Mode) -> list[str]:

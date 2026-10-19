@@ -91,7 +91,7 @@ class SqliteStore:
         try:
             self.path.chmod(DB_MODE)
         except OSError as exc:
-            return f"権限設定エラー: {exc}"
+            return f"Permission setting error: {exc}"
         return None
 
     def _open(self) -> sqlite3.Connection:
@@ -106,7 +106,7 @@ class SqliteStore:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             if version > SCHEMA_VERSION:
                 raise SchemaTooNewError(
-                    f"DBのスキーマ版{version}が本バージョン{SCHEMA_VERSION}より新しい"
+                    f"DB schema version {version} is newer than supported version {SCHEMA_VERSION}"
                 )
             if version < SCHEMA_VERSION:
                 with conn:
@@ -138,16 +138,16 @@ class SqliteStore:
         except SchemaTooNewError as exc:
             return str(exc)
         except sqlite3.Error as exc:
-            return f"SQLiteエラー: {exc}"
+            return f"SQLite error: {exc}"
         except OSError as exc:
-            return f"ファイル操作エラー: {exc}"
+            return f"File operation error: {exc}"
         except ValueError as exc:
-            return f"値の変換エラー: {exc}"
+            return f"Value conversion error: {exc}"
         chmod_error = self._chmod_db()
         if chmod_error is not None:
             # The row is already written, so return wording that is distinguishable from a
             # recording failure.
-            return f"権限設定に失敗（記録は完了）: {chmod_error}"
+            return f"Permission setting failed (row recorded): {chmod_error}"
         return None
 
     def record_started(self, result: InspectionResult) -> str | None:

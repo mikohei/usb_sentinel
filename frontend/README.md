@@ -166,7 +166,7 @@ Place it at `~/.config/usb-sentinel/display.toml`. Without it, the app runs with
 | `sqlite_path` | string | `/var/lib/usb-sentinel/db/inspections.sqlite` | The backend's SQLite index. Opened read-only. The empty string `""` disables it and uses only the results directory scan. If the file is missing or cannot be opened, the app falls back to the scan automatically (the "Reading the SQLite index" section) |
 | `[[ports]]` | `label` string, `paths` string array | empty | Tiles 1 to 4 in order of appearance. `label` is 1 to 4 printable ASCII characters. A duplicate `label`, a duplicate `paths` entry, or 5 or more entries is a startup error |
 
-A wrong type or an unknown key makes the app print "Configuration error: ..." to standard error at startup and stop with exit code 1.
+A wrong type or an unknown key makes the app print `Configuration error: ...` to standard error at startup and stop with exit code 1.
 
 Command-line values override the configuration file. `--config` is a common option, so place it before the subcommand.
 
@@ -298,7 +298,7 @@ When a message about the results directory or sysfs is present (such as "Results
 
 **Handling of `started` rows.** When a row with `state='started'` is linked to a connected disk (matched by port path, or by kernel name if there is none), the app shows "Scanning" while `systemctl` does not report the unit's state. If the unit is `inactive` or `failed`, it skips the waiting state even right after connection and shows "No result". If `result.json` exists, the inspection is treated as completed even when the row is still `started` (a failure to record completion).
 
-**Results with no row in the index.** While the index is readable, only the rows of the index are candidates, and scan results are not mixed in. An inspection for which the backend failed to record the start (the `warnings` in `result.json` and the backend's standard output (journal) keep the message "SQLite record failed (start)") has no row in the index even if `result.json` exists, so it is not displayed, and the disk goes from the waiting state to "No result". In this case, check the backend's journal and, if necessary, turn off the index with `sqlite_path = ""` to go back to the scan.
+**Results with no row in the index.** While the index is readable, only the rows of the index are candidates, and scan results are not mixed in. An inspection for which the backend failed to record the start (the `warnings` in `result.json` and the backend's standard output (journal) keep the message `SQLite record failed (start)`) has no row in the index even if `result.json` exists, so it is not displayed, and the disk goes from the waiting state to "No result". In this case, check the backend's journal and, if necessary, turn off the index with `sqlite_path = ""` to go back to the scan.
 
 ## Deploying together with the backend
 
@@ -335,7 +335,7 @@ Problems with the tile display.
 | Symptom | Cause | Remedy |
 |---|---|---|
 | The port name is `P?` with the kernel name appended | The port path is not in the mapping | The "Port calibration" section. If the mapping is empty, every disk is `P?` |
-| Japanese text appears as tofu (□), or the startup message "Font Noto Sans CJK JP not found ..." appears | The font is not installed | Step 3 |
+| Japanese text appears as tofu (□), or the startup message `Font Noto Sans CJK JP not found; using ...` appears | The font is not installed | Step 3 |
 | The app does not go full screen or does not start | The path in the `.desktop` file is wrong, or `uv sync` has not been run | Run `Exec` from `~/.config/autostart/usb-sentinel-display.desktop` directly in a terminal and look at standard error |
 
 ## Development

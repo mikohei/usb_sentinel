@@ -25,7 +25,7 @@ QR codes that point to the same inspection are matched by three values: the star
 ## 2. Common rules
 
 - The format is a single JSON object. `json.dumps(..., separators=(",", ":"))` removes the spaces after separators.
-- Screen QR codes (normal and detail) are ASCII only (`ensure_ascii=True`). A non-ASCII serial is replaced with `?`. The file QR is UTF-8 (`ensure_ascii=False`), and the Japanese in the reason sentences goes in as it is. One character takes 3 bytes.
+- Screen QR codes (normal and detail) are ASCII only (`ensure_ascii=True`). A non-ASCII serial is replaced with `?`. The file QR is UTF-8 (`ensure_ascii=False`), and the reason sentences are in English, so they are almost all ASCII. Non-ASCII characters that come from a serial or from the output of an external command go in as UTF-8 as they are.
 - An item with no value is written as `null`, and the key is not omitted. The reader app can tell "no value" from "missed reading". The only exception is `k` in the normal and detail QR: it is `1` when `s` is a kernel name, and the key itself is omitted when `s` is a serial.
 - All times are UTC. The file QR and `result.json` use ISO 8601 (`2025-06-01T12:00:00.123456+00:00`), and the screen QR uses the 16 characters `YYYYmmddTHHMMSSZ` (`20250601T120000Z`).
 - Capacity is in bytes (decimal). Only the detail QR uses MB (10^6 bytes, rounded down), to fit in 150 bytes; the precision is 1MB (0.003% for 32GB). The exact byte values are in `result.json` and SQLite.
@@ -60,7 +60,7 @@ It goes in `result-qr.png` in the results directory (`<timestamp>-<serial>/`). A
 | `device_class` | str \| null | `steps[speed].details.device_class` (the key from Section 6.4) | Added |
 | `speed` | dict \| null | `read_mb_s`, `write_mb_s`, `threshold_read_mb_s`, `threshold_write_mb_s`, `basis_read`, `basis_write`, `severity`. `null` if there is no fio measurement | Added |
 | `reason_codes` | list[str] | Same name (Section 6.8) | Added |
-| `reasons` | list[str] | Same name (reason sentences in Japanese) | Added |
+| `reasons` | list[str] | Same name (reason sentences in English; see Section 11) | Added |
 | `hash_inventory_digest` | str \| null | `steps[hash_inventory].details.digest` (SHA-256 of `hash-inventory.tsv`, 64 digits) | Added |
 | `hash_inventory_lines` | int \| null | `…details.lines` (the number of rows in the inventory) | Added |
 | `truncated` | bool | `true` when something was cut. `false` when nothing was cut (the key is always present) | — |
@@ -301,8 +301,8 @@ This check is made right at the start of the inspection, before any mounting or 
 
 | `sv` | `severity` | Meaning |
 |---|---|---|
-| `s` | `severe` | The measured value is below 50% of the reference (the summary says the speed is far below) |
-| `m` | `minor` | 50% or more and below 80% (the summary says the speed is slightly below) |
+| `s` | `severe` | The measured value is below 50% of the reference (the summary starts with `Speed shortfall (severe)`) |
+| `m` | `minor` | 50% or more and below 80% (`Speed shortfall (minor)`) |
 | `-` | `null` | Not FAIL |
 
 | Value of `counterfeit_reasons` | Meaning |
@@ -409,7 +409,7 @@ For each inspection, the backend writes one row to the `inspections` table of `/
 | `threshold_read_mb_s`, `threshold_write_mb_s` | REAL | Thresholds |
 | `speed_basis_read`, `speed_basis_write` | TEXT | Basis of the verdict |
 | `speed_severity` | TEXT | `severe` / `minor` |
-| `reason_codes`, `reasons` | TEXT | JSON arrays (`reasons` does not escape Japanese) |
+| `reason_codes`, `reasons` | TEXT | JSON arrays (`reasons` does not escape non-ASCII characters) |
 | `hash_inventory_digest` | TEXT | SHA-256 of the inventory (64 digits) |
 | `hash_inventory_lines` | INTEGER | Number of inventory rows |
 | `output_dir` | TEXT | Absolute path of the results directory |
@@ -444,7 +444,7 @@ SELECT inspection_id, verdict, serial, started_at, output_dir
 FROM inspections WHERE result_digest LIKE ? || '%';
 ```
 
-A row with `state = 'started'` means the inspection is running, or that it ended without writing `result.json` (for example the USB drive was disconnected). If `result.json` exists but the row is still `started`, recording the completion failed, and "SQLite record failed (completion)" remains in the journal.
+A row with `state = 'started'` means the inspection is running, or that it ended without writing `result.json` (for example the USB drive was disconnected). If `result.json` exists but the row is still `started`, recording the completion failed, and `SQLite record failed (completion)` remains in the journal.
 
 ## 9. Recommended schema on the reader app (Flutter) side
 
@@ -481,3 +481,4 @@ Confirm that the carried-out result has not been tampered with.
 - When keys are added to file QR v:3 in the future, the meaning of existing keys will not change. The reader app ignores unknown keys and treats a missing known key as `null`.
 - Verdict name strings (such as `Counterfeit Suspected`) are values of the backend's `Verdict`, and a change is reported in accordance with `backend/AGENTS.md`. The reader app treats a value not in the table in Section 6.1 as "unknown" and keeps the raw value.
 - SQLite only adds columns in later versions. Readers refer to columns by name and do not depend on column position.
+- The backend now writes `summary`, `reasons`, `warnings`, and the `result.txt` headings in English. The keys, codes, and verdict names do not change, and the QR versions stay the same. Results written before this change (old rows in SQLite and `result.json` files already taken out) keep their Japanese text. The reader app uses `reason_codes` as the main source for display and treats the sentences only as supplementary information.

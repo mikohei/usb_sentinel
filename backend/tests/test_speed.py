@@ -68,7 +68,7 @@ class TestParseFio:
         ],
     )
     def test_invalid_output_raises(self, text: str) -> None:
-        with pytest.raises(ValueError, match="fioの出力を解析できない"):
+        with pytest.raises(ValueError, match="Could not parse fio output"):
             parse_fio(text, "read")
 
 
@@ -104,7 +104,7 @@ class TestJudgement:
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=90.0, nominal_write_mb_s=20.0))
 
         assert result.status is StepStatus.PASS
-        assert result.summary == "読み取り85.3MB/s、書き込み20.1MB/s（閾値72.0 / 16.0MB/s）"
+        assert result.summary == "read 85.3MB/s, write 20.1MB/s (threshold 72.0 / 16.0MB/s)"
         assert result.details["threshold_read_mb_s"] == 72.0
         assert result.details["threshold_write_mb_s"] == 16.0
         assert result.details["read"]["mb_s"] == 85.3
@@ -119,7 +119,7 @@ class TestJudgement:
         assert result.status is StepStatus.FAIL
         assert (
             result.summary
-            == "速度不足（著しく下回る）: 読み取り40.1MB/s < 閾値72.0MB/s（公称90.0×0.80）"
+            == "Speed shortfall (severe): read 40.1MB/s < threshold 72.0MB/s (nominal 90.0 x 0.80)"
         )
         assert result.details["severity"] == "severe"
         assert "defect" not in result.details
@@ -136,7 +136,7 @@ class TestJudgement:
         result = _step().run(_with_speed(ctx, nominal_read_mb_s=90.0))
 
         assert result.status is StepStatus.PASS
-        assert result.summary == "読み取り85.3MB/s（閾値72.0MB/s）、書き込み20.1MB/s（判定対象外）"
+        assert result.summary == "read 85.3MB/s (threshold 72.0MB/s); write 20.1MB/s (not judged)"
         assert result.details["threshold_write_mb_s"] is None
 
     def test_read_only_nominal_fail(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
@@ -144,7 +144,7 @@ class TestJudgement:
 
         assert result.status is StepStatus.FAIL
         assert result.summary.startswith(
-            "速度不足（わずかに下回る）: 読み取り85.3MB/s < 閾値96.0MB/s"
+            "Speed shortfall (minor): read 85.3MB/s < threshold 96.0MB/s"
         )
         assert result.details["severity"] == "minor"
 
@@ -152,14 +152,14 @@ class TestJudgement:
         result = _step().run(_with_speed(ctx, nominal_write_mb_s=20.0))
 
         assert result.status is StepStatus.PASS
-        assert result.summary == "読み取り85.3MB/s（判定対象外）、書き込み20.1MB/s（閾値16.0MB/s）"
+        assert result.summary == "read 85.3MB/s (not judged); write 20.1MB/s (threshold 16.0MB/s)"
         assert result.details["threshold_read_mb_s"] is None
 
     def test_no_nominal_is_skipped(self, ctx: StepContext, fio_runner: FakeRunner) -> None:
         result = _step().run(ctx)
 
         assert result.status is StepStatus.SKIPPED
-        assert result.summary == "公称速度が未設定（読み取り85.3MB/s、書き込み20.1MB/s）"
+        assert result.summary == "Nominal speed not set (read 85.3MB/s, write 20.1MB/s)"
         assert result.details["read"]["mb_s"] == 85.3
         assert result.details["threshold_read_mb_s"] is None
 

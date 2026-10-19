@@ -19,7 +19,7 @@ from usb_sentinel.libs import Config, DeviceInfo, InspectionResult, StepResult, 
 from usb_sentinel.libs.store import NullStore, SqliteStore, store_for
 from usb_sentinel.libs.store.schema import SCHEMA_VERSION
 
-POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="ファイルモードはPOSIX限定")
+POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="file modes are POSIX only")
 
 STARTED_AT = "2024-03-15T04:05:06+00:00"
 INSPECTION_ID = "20240315T040506Z-ABC123456789"
@@ -50,7 +50,7 @@ def _started(tmp_path: Path, inspection_id: str = INSPECTION_ID) -> InspectionRe
         "over_threshold_bytes": 31_030_000_000,
         "advertised_ratio": 1.1034,
         "exceeded": True,
-        "summary": "申告容量32.0GB > 上限31.0GB（公称29.0GBの110.3%）",
+        "summary": "advertised capacity 32.0GB > limit 31.0GB (110.3% of nominal 29.0GB)",
     }
     return result
 
@@ -62,7 +62,7 @@ def _completed(tmp_path: Path) -> InspectionResult:
         StepResult(
             "malware",
             StepStatus.PASS,
-            "マルウェアなし",
+            "No malware",
             details={
                 "database": {
                     "engine_version": "1.0.3",
@@ -73,20 +73,20 @@ def _completed(tmp_path: Path) -> InspectionResult:
                 "detections": [],
                 "scan_summary": {"scanned_files": 1234, "time_s": 42.5, "infected_files": 0},
             },
-            warnings=["ClamAV 定義 DB が 31 日前のもの"],
+            warnings=["ClamAV definition DB is 31 days old"],
             elapsed_s=42.51,
         ),
         StepResult(
             "hash_inventory",
             StepStatus.PASS,
-            "1234件",
+            "1234 files",
             details={"lines": 1234, "digest": "ab" * 32},
             elapsed_s=3.0,
         ),
         StepResult(
             "capacity",
             StepStatus.FAIL,
-            "偽装疑い: ...",
+            "Suspected counterfeit: ...",
             details={
                 "actual_bytes": 30_200_000_000,
                 "kind": "counterfeit",
@@ -99,7 +99,7 @@ def _completed(tmp_path: Path) -> InspectionResult:
         StepResult(
             "speed",
             StepStatus.FAIL,
-            "速度不足（わずかに下回る）: ...",
+            "Speed shortfall (minor): ...",
             details={
                 "device_class": "usb3_flash",
                 "device_class_basis": "link_speed",
@@ -111,14 +111,17 @@ def _completed(tmp_path: Path) -> InspectionResult:
                 "basis_write": "class",
                 "severity": "minor",
             },
-            warnings=["種別未設定のためUSBフラッシュ既定値で判定"],
+            warnings=["Device class not set; judged with USB flash defaults"],
             elapsed_s=60.0,
         ),
     ]
     result.verdict = Verdict.COUNTERFEIT_SUSPECTED
-    result.reasons = ["申告容量32.0GB > 上限31.0GB（公称29.0GBの110.3%）", "capacity: 偽装疑い"]
+    result.reasons = [
+        "advertised capacity 32.0GB > limit 31.0GB (110.3% of nominal 29.0GB)",
+        "capacity: Suspected counterfeit",
+    ]
     result.reason_codes = ["c:over", "c:lost", "s:minor"]
-    result.warnings = ["全体の警告"]
+    result.warnings = ["inspection-wide warning"]
     result.finished_at = "2024-03-15T04:35:06+00:00"
     result.elapsed_s = 1800.0
     return result
@@ -201,7 +204,7 @@ class TestSchema:
         failure = store.record_started(_started(tmp_path))
 
         assert failure is not None
-        assert "スキーマ版2" in failure
+        assert "schema version 2" in failure
         conn = sqlite3.connect(str(db_path))
         try:
             assert conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] == 0

@@ -80,7 +80,7 @@ class TestPrecheckAdvertised:
         assert check["over_threshold_bytes"] == 31_030_000_000
         assert check["advertised_ratio"] == round(GB32 / 29_000_000_000, 4)
         assert len(str(check["advertised_ratio"]).split(".")[1]) <= 4
-        for word in ("申告容量", "上限", "公称"):
+        for word in ("advertised capacity", "limit", "nominal"):
             assert word in check["summary"]
 
     def test_within_band(self) -> None:
@@ -120,27 +120,27 @@ class TestJudgeWithoutNominal:
         assert verdict.kind == "ok"
         assert verdict.counterfeit is False
         assert verdict.counterfeit_reasons == ()
-        assert verdict.summary.startswith("実容量31.20GB / 公称32.00GB")
+        assert verdict.summary.startswith("actual 31.20GB / nominal 32.00GB")
 
     def test_short(self) -> None:
         verdict = _judge(actual=THRESHOLD32 - 1, verified_bytes=THRESHOLD32 - 1)
         assert verdict.status is StepStatus.FAIL
         assert verdict.kind == "short"
-        assert verdict.summary.startswith("容量不足:")
-        assert "閾値29.76GB" in verdict.summary
+        assert verdict.summary.startswith("Capacity shortfall:")
+        assert "threshold 29.76GB" in verdict.summary
 
     def test_defect(self) -> None:
         verdict = _judge(bad_sectors=12)
         assert verdict.status is StepStatus.FAIL
         assert verdict.kind == "defect"
-        assert verdict.summary == "データ破損: 12セクタ"
+        assert verdict.summary == "Data corruption: 12 sectors"
 
     def test_unverified(self) -> None:
         verdict = _judge(verified_bytes=1_000_000_000)
         assert verdict.status is StepStatus.ERROR
         assert verdict.kind == "unverified"
-        assert "検証済み領域1.00GB" in verdict.summary
-        assert "既使用30.20GB" in verdict.summary
+        assert "Verified area 1.00GB" in verdict.summary
+        assert "already used 30.20GB" in verdict.summary
 
     def test_probe_mode_has_no_unverified(self) -> None:
         # f3probe mode is called with verified_bytes=None and bad_sectors=None.
@@ -161,14 +161,14 @@ class TestJudgeCounterfeit:
         assert verdict.kind == "counterfeit"
         assert verdict.counterfeit is True
         assert verdict.counterfeit_reasons == ("lost_ratio",)
-        assert verdict.summary.startswith("偽装疑い: 消失50.0%")
-        assert "閾値29.76GB" in verdict.summary
+        assert verdict.summary.startswith("Suspected counterfeit: lost 50.0%")
+        assert "threshold 29.76GB" in verdict.summary
 
     def test_bad_news_is_counterfeit(self) -> None:
         line = "Bad news: The device `/dev/sda' is a counterfeit of type limbo"
         verdict = _judge(probe_verdict_line=line, verified_bytes=None, bad_sectors=None)
         assert verdict.counterfeit_reasons == ("probe_bad_news",)
-        assert verdict.summary == f"偽装疑い: f3probe: {line}"
+        assert verdict.summary == f"Suspected counterfeit: f3probe: {line}"
 
     def test_good_news_is_not_counterfeit(self) -> None:
         verdict = _judge(
@@ -182,7 +182,9 @@ class TestJudgeCounterfeit:
     def test_over_advertised_only(self) -> None:
         verdict = _judge(nominal=29_000_000_000, actual=29_500_000_000, threshold=26_970_000_000)
         assert verdict.counterfeit_reasons == ("over_advertised",)
-        assert verdict.summary.startswith("偽装疑い: 申告容量32.00GB > 上限31.03GB（公称29.00GBの")
+        assert verdict.summary.startswith(
+            "Suspected counterfeit: advertised capacity 32.00GB > limit 31.03GB ("
+        )
 
     def test_over_actual_only(self) -> None:
         verdict = _judge(
@@ -192,7 +194,9 @@ class TestJudgeCounterfeit:
             threshold=26_970_000_000,
         )
         assert verdict.counterfeit_reasons == ("over_actual",)
-        assert verdict.summary.startswith("偽装疑い: 実容量31.50GB > 上限31.03GB（公称29.00GBの")
+        assert verdict.summary.startswith(
+            "Suspected counterfeit: actual capacity 31.50GB > limit 31.03GB ("
+        )
 
     def test_all_reasons_in_fixed_order_joined(self) -> None:
         line = "Bad news: counterfeit"
@@ -210,9 +214,9 @@ class TestJudgeCounterfeit:
             "probe_bad_news",
             "lost_ratio",
         )
-        assert verdict.summary.count("、") >= 3
-        assert verdict.summary.startswith("偽装疑い: 申告容量")
-        assert f"、f3probe: {line}、消失75.0%" in verdict.summary
+        assert verdict.summary.count("; ") >= 3
+        assert verdict.summary.startswith("Suspected counterfeit: advertised capacity")
+        assert f"; f3probe: {line}; lost 75.0%" in verdict.summary
 
 
 class TestJudgePriority:
@@ -235,7 +239,7 @@ class TestJudgePriority:
         # the denominator).
         verdict = _judge(nominal=40_000_000_000, threshold=37_200_000_000)
         assert verdict.kind == "short"
-        assert "公称40.00GB" in verdict.summary
+        assert "nominal 40.00GB" in verdict.summary
 
     def test_kinds_are_five_values(self) -> None:
         kinds = {

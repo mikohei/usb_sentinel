@@ -78,7 +78,7 @@ class TestConfigErrors:
     ) -> None:
         """Passing a directory to --config returns 1, treating the OSError as a config error."""
         assert main(["--config", str(tmp_path), "calibrate"]) == 1
-        assert "設定エラー" in capsys.readouterr().err
+        assert "Configuration error" in capsys.readouterr().err
 
 
 class TestCalibrate:

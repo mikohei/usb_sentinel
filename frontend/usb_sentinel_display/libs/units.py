@@ -39,7 +39,7 @@ class SubprocessRunner:
 
         Returns:
             Exit code and stdout. Missing is `CommandOutput(127, "", False)`; a timeout is
-            `CommandOutput(-1, "", True)`。
+            `CommandOutput(-1, "", True)`.
         """
         try:
             process = subprocess.run(

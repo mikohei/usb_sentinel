@@ -19,8 +19,8 @@ SEVERE_RATIO = 0.50
 LINK_CEILING_RATIO = 0.9
 
 FAIL_PREFIX: dict[str, str] = {
-    "severe": "速度不足（著しく下回る）: ",
-    "minor": "速度不足（わずかに下回る）: ",
+    "severe": "Speed shortfall (severe): ",
+    "minor": "Speed shortfall (minor): ",
 }
 
 
@@ -67,8 +67,8 @@ def class_warnings(
     warnings: list[str] = []
     if class_basis == "link_speed":
         warnings.append(
-            "種別未設定のためUSBフラッシュ既定値で判定"
-            "（HDD・SSD・SDは`[speed] device_class`を設定）"
+            "Device class not set; judged with USB flash defaults"
+            " (set `[speed] device_class` for HDD, SSD, or SD)"
         )
     if (
         configured is None
@@ -76,7 +76,9 @@ def class_warnings(
         and link_speed_mbps is not None
         and 0 < link_speed_mbps < USB2_HIGH_SPEED_MBPS
     ):
-        warnings.append(f"USB1.1リンク（{link_speed_mbps}Mbps）は判定基準なし。`nominal_*`を設定")
+        warnings.append(
+            f"USB1.1 link ({link_speed_mbps}Mbps) has no verdict criterion; set `nominal_*`"
+        )
     return warnings
 
 
@@ -104,18 +106,18 @@ def link_ceiling_warning(
             and ref.value >= effective * LINK_CEILING_RATIO
         ):
             return (
-                f"基準値{ref.value:.1f}MB/sはリンク速度{link_speed_mbps}Mbpsの実効上限"
-                f"（約{effective:.1f}MB/s）を超える。ホストの上限で頭打ちの可能性。"
-                "`nominal_*`の設定を推奨"
+                f"Reference {ref.value:.1f}MB/s exceeds the effective upper limit of a"
+                f" {link_speed_mbps}Mbps link (about {effective:.1f}MB/s);"
+                " the host may cap the speed. Setting `nominal_*` is recommended"
             )
     return None
 
 
 def basis_text(ref: Reference, pass_ratio: float, class_basis: str) -> str:
-    """Build the parenthesized basis appended to a FAIL summary (Japanese text).
+    """Build the parenthesized basis appended to a FAIL summary.
 
-    Nominal: "(nominal 90.0 x 0.80)"; configured class: "(USB3.0 flash default 50.0 x 0.80)";
-    inferred class: "(USB3.0 flash default 50.0 x 0.80, class inferred)".
+    Nominal: " (nominal 90.0 x 0.80)"; configured class: " (USB3.0 flash default 50.0 x 0.80)";
+    inferred class: " (USB3.0 flash default 50.0 x 0.80, class inferred)".
 
     Args:
         ref: Reference that was compared. Empty string if value is None.
@@ -128,10 +130,10 @@ def basis_text(ref: Reference, pass_ratio: float, class_basis: str) -> str:
     if ref.value is None:
         return ""
     if ref.basis == "nominal" or ref.device_class is None:
-        return f"（公称{ref.value:.1f}×{pass_ratio:.2f}）"
+        return f" (nominal {ref.value:.1f} x {pass_ratio:.2f})"
     label = DEVICE_FLOORS[ref.device_class].label
-    suffix = "・種別推定" if class_basis == "link_speed" else ""
-    return f"（{label}既定{ref.value:.1f}×{pass_ratio:.2f}{suffix}）"
+    suffix = ", class inferred" if class_basis == "link_speed" else ""
+    return f" ({label} default {ref.value:.1f} x {pass_ratio:.2f}{suffix})"
 
 
 def severity_for(ratios: Iterable[float]) -> str:

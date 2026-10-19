@@ -1,7 +1,7 @@
 """Speed step reference values (nominal > kind > none), link-limit warnings, and severity
 boundaries.
 
-Fixtures (fio_runner, _step, _with_speed, _with_link) are borrowed from test_speed.py.
+Helpers (fio_runner, _step, _with_speed, _with_link) are borrowed from test_speed.py.
 """
 
 from __future__ import annotations

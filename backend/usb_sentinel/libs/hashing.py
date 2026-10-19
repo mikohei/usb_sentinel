@@ -49,7 +49,7 @@ def _hash_file(path: Path, budget: Budget) -> tuple[str, int] | None:
 def _write_ledger(
     ctx: StepContext, stream: TextIO, budget: Budget, details: dict[str, Any]
 ) -> None:
-    """Write every file under the mount points to the ledger. Progress goes into details."""
+    """Write every file under the mount points to the hash inventory. Progress goes into details."""
     for index, mountpoint in enumerate(ctx.mountpoints):
         for path in sorted(mountpoint.rglob("*")):
             # Apply the budget to many zero-byte files and directory walks too (separate from
@@ -63,7 +63,7 @@ def _write_ledger(
             try:
                 hashed = _hash_file(path, budget)
             except OSError as exc:
-                # Record per-file failures and move on (do not lose the whole ledger).
+                # Record per-file failures and move on (do not lose the whole inventory).
                 details["read_error_count"] += 1
                 if len(details["read_errors"]) < MAX_READ_ERRORS:
                     details["read_errors"].append({"path": name, "errno": exc.errno})
@@ -80,7 +80,7 @@ def _write_ledger(
 
 
 def inventory(ctx: StepContext, monotonic: Callable[[], float] = time.monotonic) -> StepResult:
-    """Build the hash inventory and put the SHA-256 of the ledger itself in details.digest.
+    """Build the hash inventory and put the SHA-256 of the inventory file itself in details.digest.
 
     Args:
         ctx: Step context. `ctx.config.hash_inventory_timeout_s` is the time limit.
@@ -88,7 +88,7 @@ def inventory(ctx: StepContext, monotonic: Callable[[], float] = time.monotonic)
 
     Returns:
         PASS even with zero files. ERROR if the time limit is exceeded or at least one file is
-        unreadable. Also ERROR if the ledger file itself cannot be written.
+        unreadable. Also ERROR if the inventory file itself cannot be written.
     """
     timeout_s = ctx.config.hash_inventory_timeout_s
     budget = Budget(timeout_s, monotonic)

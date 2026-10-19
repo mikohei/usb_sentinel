@@ -33,7 +33,7 @@ uv run python -m usb_sentinel_display --help
 - コメントとdocstringは英語で書く。UIに出す文言は`ui/i18n.py`に日本語と英語の両方で持つ。実行時に出力する文字列（`summary`、`reasons`、例外メッセージなど）は既存の言語のまま変えない。
 - `except:`（bare except）は使わない。具体的な例外クラスを指定する。
 - パッケージ側（`usb_sentinel_display/`）で`assert`を使わない。ruffの`S101`が検出する。テストと`scripts/`では許可している。
-- 型チェッカーの指摘は、まず型注釈を直して解消する。抑制コメントを使う場合は、その行だけに`# ty: ignore[<ルール名>]`を付け、理由を日本語で添える。ルール指定なしの`# ty: ignore`、ルールの全体無効化、ファイル除外で指摘を隠さない。
+- 型チェッカーの指摘は、まず型注釈を直して解消する。抑制コメントを使う場合は、その行だけに`# ty: ignore[<ルール名>]`を付け、理由を英語で添える。ルール指定なしの`# ty: ignore`、ルールの全体無効化、ファイル除外で指摘を隠さない。
 - 1ファイルは300行以内を目安にする。
 - UIの文言は`ui/i18n.py`にja／enの2組で持ち、GUI層はキーで参照する。`libs/`直下に日本語のUI文言リテラルを置かない。QRペイロード（`qr_payload.py`）は言語に依存せず、`i18n.py`をimportしない。
 
@@ -90,7 +90,7 @@ scripts/                 開発用スクリプト（パッケージには含め�
   dev-screenshot.py      Appをウィンドウで起動しscreencaptureで480x320を撮る（macOS用）
 deploy/
   usb-sentinel-display.desktop   XDG autostart用。--offline --frozen --no-syncと--kiosk付き
-  display.example.toml           設定の全キーと日本語コメント
+  display.example.toml           設定の全キーと英語コメント
 ```
 
 - 新しいモジュールは`libs/`配下に置く。`usb_sentinel_display/`直下に増やさない。

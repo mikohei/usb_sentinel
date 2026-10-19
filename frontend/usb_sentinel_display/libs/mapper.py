@@ -29,7 +29,8 @@ def bind_result(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord
     """Pick the readable result bound to a disk (design doc 3.5 plus port_path priority).
 
     Candidates are readable with mtime at or after the connect time. The primary key is port_path
-    (kernel_name if the result has none). With several, prefer a dir-name serial match; tie: max.
+    (kernel_name if the result has none). With several, prefer a dir-name serial match;
+    on a tie, the largest directory name.
     """
     candidates: list[ResultRecord] = []
     for record in records:

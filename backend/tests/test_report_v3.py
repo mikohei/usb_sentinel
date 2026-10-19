@@ -1,4 +1,4 @@
-"""Payload of the file QR v:3 (design doc section 6). Fixtures are borrowed from test_report.py."""
+"""Payload of the file QR v:3 (design doc section 6). Helpers are borrowed from test_report.py."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Gate for the destructive steps (capacity, speed) in the inspection sequence, and the
 non-destructive advertised-capacity check.
 
-Fixtures (full_runner, _statuses, _assert_nothing_destructive) are borrowed from
+Helpers (full_runner, _statuses, _assert_nothing_destructive) are borrowed from
 test_orchestrator.py.
 """
 

@@ -1,4 +1,4 @@
-"""Shrink order of QR v:3 (design doc section 6.3). Fixtures are borrowed from test_report_v3.py."""
+"""Shrink order of QR v:3 (design doc section 6.3). Helpers are borrowed from test_report_v3.py."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Wiring between inspect() and SQLite recording, scan_executed(), and result directory names.
 
-Fixtures (full_runner, _statuses) are borrowed from test_orchestrator.py.
+Helpers (full_runner, _statuses) are borrowed from test_orchestrator.py.
 """
 
 from __future__ import annotations

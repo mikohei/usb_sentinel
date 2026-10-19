@@ -1,7 +1,7 @@
 """Error paths of the speed step (permissions, I/O errors, parse failures, timeouts, missing fio,
 leftover mounts).
 
-Fixtures (fio_runner, _step, _with_speed, _fio_calls) are borrowed from test_speed.py.
+Helpers (fio_runner, _step, _with_speed, _fio_calls) are borrowed from test_speed.py.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Lines added to result.txt in phase 2. Fixtures are borrowed from test_report.py and
+"""Lines added to result.txt in phase 2. Helpers are borrowed from test_report.py and
 test_report_v3.py."""
 
 from __future__ import annotations

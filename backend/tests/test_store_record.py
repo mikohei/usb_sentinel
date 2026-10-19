@@ -1,6 +1,6 @@
 """SqliteStore start and completion records, concurrent writes, and file modes.
 
-Fixtures (db_path, store, _started, _completed, _rows) are borrowed from test_store.py.
+Helpers (db_path, store, _started, _completed, _rows) are borrowed from test_store.py.
 """
 
 from __future__ import annotations

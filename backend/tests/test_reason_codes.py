@@ -1,4 +1,4 @@
-"""Reason codes (reason_codes_for). Fixtures are borrowed from test_classify.py."""
+"""Reason codes (reason_codes_for). Helpers are borrowed from test_classify.py."""
 
 from __future__ import annotations
 

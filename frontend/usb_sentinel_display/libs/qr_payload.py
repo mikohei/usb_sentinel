@@ -139,7 +139,7 @@ def _detail_page2(summary: ResultSummary) -> dict[str, object]:
 
 
 def _detail_page3(summary: ResultSummary) -> dict[str, object]:
-    """Body of page 3 (speed, DB, and ledger, doc/qr-payload.md 5.4)."""
+    """Body of page 3 (speed, DB, and hash inventory, doc/qr-payload.md 5.4)."""
     detail = summary.detail
     return {
         "sr": _round(detail.read_mb_s, 1),

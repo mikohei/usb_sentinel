@@ -225,8 +225,8 @@ def test_install_all_arms_only_in_step_10() -> None:
 
 
 def test_install_all_writes_autostart_hidden() -> None:
-    """The autostart entry is hidden right after it is written and chmod-ed."""
-    lines = _script("install-all.sh").splitlines()
+    """A fresh autostart entry is hidden right after it is written and chmod-ed."""
+    lines = [line.strip() for line in _script("install-all.sh").splitlines()]
     written = next(i for i, line in enumerate(lines) if line.endswith('> "${DESKTOP_FILE}"'))
     chmod = lines.index('chmod 0644 "${DESKTOP_FILE}"')
     hidden = lines.index('kiosk_autostart_hide "${DESKTOP_FILE}"')

@@ -302,3 +302,72 @@ def test_kiosk_enable_no_longer_dies(tmp_path: Path, force: str | None) -> None:
     assert ("no longer needed" in result.stderr) is (force is not None)
     assert "Hidden=" not in run.desktop.read_text()
     assert LOCKDOWN_SET in (tmp_path / "calls.log").read_text()
+
+
+# Fake uv whose `usb-sentinel-display --help` fails, so install-all.sh dies in step 9.
+UV_FAILS_STEP_9 = UV_FAKE.replace("exit 0\n", 'case "$*" in *--help*) exit 1;; esac\nexit 0\n')
+
+
+def _armed(run: InstallRun) -> None:
+    """自動起動の項目を有効（Hidden=true なし）の状態で置く。
+
+    Args:
+        run: 準備済みのサンドボックス。
+    """
+    run.desktop.parent.mkdir(parents=True)
+    run.desktop.write_text("[Desktop Entry]\nExec=old\n")
+
+
+def test_second_yes_run_keeps_kiosk_armed(tmp_path: Path) -> None:
+    """有効な端末で INSTALL_YES=1 を再実行しても Hidden=true が付かない。"""
+    run = run_install_all_to_end(tmp_path, "", {"INSTALL_YES": "1"}, before=_armed)
+    assert run.code == 0, run.output
+    assert not hidden_lines(run.desktop)
+    assert any(line.startswith("Exec=") for line in run.desktop.read_text().splitlines())
+    assert "kept enabled; armed before this run" in run.output
+
+
+def test_two_consecutive_yes_runs_end_armed(tmp_path: Path) -> None:
+    """同じ端末で 2 回続けて実行しても、最後は有効のまま。"""
+    first = tmp_path / "first"
+    first.mkdir()
+    run1 = run_install_all_to_end(first, "", {"INSTALL_YES": "1"})
+    assert run1.code == 0, run1.output
+    armed = run1.desktop.read_text()
+
+    def copy_armed(run: InstallRun) -> None:
+        run.desktop.parent.mkdir(parents=True)
+        run.desktop.write_text(armed)
+
+    second = tmp_path / "second"
+    second.mkdir()
+    run2 = run_install_all_to_end(second, "", {"INSTALL_YES": "1"}, before=copy_armed)
+    assert run2.code == 0, run2.output
+    assert not hidden_lines(run2.desktop)
+    assert "Exec=" in run2.desktop.read_text()
+
+
+def test_aborted_rerun_does_not_disarm(tmp_path: Path) -> None:
+    """有効な端末の再実行が途中（手順9）で止まっても無効にしない。"""
+    run = run_install_all_to_end(
+        tmp_path, "", {"INSTALL_YES": "1"}, uv_fake=UV_FAILS_STEP_9, before=_armed
+    )
+    assert run.code != 0
+    assert "frontend does not start" in run.output
+    assert not hidden_lines(run.desktop)
+
+
+def test_aborted_fresh_install_stays_hidden(tmp_path: Path) -> None:
+    """初回導入が途中で止まったときは従来どおり Hidden=true のまま。"""
+    run = run_install_all_to_end(tmp_path, "", {"INSTALL_YES": "1"}, uv_fake=UV_FAILS_STEP_9)
+    assert run.code != 0
+    assert hidden_lines(run.desktop) == ["Hidden=true"]
+
+
+def test_install_kiosk_0_keeps_armed_entry_and_hints(tmp_path: Path) -> None:
+    """INSTALL_KIOSK=0 でも有効な項目は外さず、無効化の方法を案内する。"""
+    env = {"INSTALL_YES": "1", "INSTALL_KIOSK": "0"}
+    run = run_install_all_to_end(tmp_path, "", env, before=_armed)
+    assert run.code == 0, run.output
+    assert not hidden_lines(run.desktop)
+    assert "kiosk-disable.sh" in run.output

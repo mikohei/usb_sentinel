@@ -37,7 +37,8 @@
 #      a venv on uv's own Python is rebuilt; tkinter import and Xft checks
 #   6. Display user: usb-sentinel group, GDM autologin, GNOME automount off,
 #      sleep/lock off, display.toml, XDG autostart entry written DISABLED
-#      (Hidden=true) so an aborted run never leaves autostart armed; boot video
+#      (Hidden=true) on a fresh install so an aborted run never leaves autostart
+#      armed; an entry already armed stays armed on a re-run; boot video
 #      hint (cmdline.txt) only with INSTALL_VIDEO_HINT=1
 #   7. SSH maintenance access, only with INSTALL_SSH=1 (default: nothing is
 #      installed): openssh-server, key-only login for the sudo caller
@@ -333,20 +334,33 @@ else
     echo "display.toml: created from the example (${DISPLAY_CONF})"
 fi
 
-# XDG autostart entry with <user> and the project path filled in. It is written with
-# Hidden=true so an aborted run never leaves autostart armed; step 10 (kiosk_arm) or
-# scripts/kiosk-enable.sh removes that line.
+# XDG autostart entry with <user> and the project path filled in. On a fresh install it is
+# written with Hidden=true so an aborted run never leaves autostart armed; step 10
+# (kiosk_arm) or scripts/kiosk-enable.sh removes that line. An entry that was already armed
+# (present without Hidden=true) stays armed, so a re-run that stops early or uses
+# INSTALL_KIOSK=0 never disarms it; scripts/kiosk-disable.sh is the way to disarm.
 readonly AUTOSTART_DIR="${USER_HOME}/.config/autostart"
 readonly DESKTOP_FILE="${AUTOSTART_DIR}/usb-sentinel-display.desktop"
 install -d -o "${DISPLAY_USER}" -g "${DISPLAY_USER}" -m 0755 "${AUTOSTART_DIR}"
+WAS_ARMED=0
+if [[ -f "${DESKTOP_FILE}" ]] && ! grep -q '^Hidden=true$' "${DESKTOP_FILE}"; then
+    WAS_ARMED=1
+fi
 sed -e "s|/home/<user>/.local/bin/uv|${UV_BIN}|g" \
     -e "s|/home/<user>/usb_sentinel/frontend|${REPO_DIR}/frontend|g" \
     -e "s|<user>|${DISPLAY_USER}|g" \
     "${REPO_DIR}/frontend/deploy/usb-sentinel-display.desktop" > "${DESKTOP_FILE}"
 chown "${DISPLAY_USER}:${DISPLAY_USER}" "${DESKTOP_FILE}"
 chmod 0644 "${DESKTOP_FILE}"
-kiosk_autostart_hide "${DESKTOP_FILE}"
-echo "autostart: ${DESKTOP_FILE} (disabled until step 10/10)"
+if [[ "${WAS_ARMED}" == 1 ]]; then
+    echo "autostart: ${DESKTOP_FILE} (kept enabled; armed before this run)"
+    if [[ "${ARM_KIOSK}" != 1 ]]; then
+        echo "autostart: to disarm the kiosk run sudo bash ${REPO_DIR}/scripts/kiosk-disable.sh"
+    fi
+else
+    kiosk_autostart_hide "${DESKTOP_FILE}"
+    echo "autostart: ${DESKTOP_FILE} (disabled until step 10/10)"
+fi
 grep '^Exec=' "${DESKTOP_FILE}"
 
 # Boot video hint (scripts/boot-video-hint.sh), opt-in. The status line is kept for step 10;

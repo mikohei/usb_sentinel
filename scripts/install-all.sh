@@ -56,7 +56,8 @@
 #
 # What it leaves to the operator (printed at the end):
 #   - Touch panel driver (vendor scripts are never executed by this project)
-#   - Port calibration (optional: uncalibrated ports show P? and keep working)
+#   - Port calibration (only on hardware other than Raspberry Pi 4, where step 6
+#     writes the port table; INSTALL_PORTS=0 skips it; uncalibrated ports show P?)
 #   - Nominal capacity/speed in config.toml
 #   - Switching the display to "Scan + erase" (M key or the mode button, code shown on
 #     screen). The installer enables erasing on the host (allow_destructive = true,
@@ -79,6 +80,9 @@ readonly INSTALL_ALLOW_ERASE="${INSTALL_ALLOW_ERASE:-1}"
 # Large text-console font (Terminus 16x32) for recovery on the small LCD: 1 (default) or 0.
 readonly INSTALL_CONSOLE_FONT="${INSTALL_CONSOLE_FONT:-1}"
 readonly CONSOLE_SETUP_FILE="${CONSOLE_SETUP_FILE:-/etc/default/console-setup}"
+# Built-in port table for Raspberry Pi 4 written into display.toml: 1 (default) or 0.
+readonly INSTALL_PORTS="${INSTALL_PORTS:-1}"
+readonly DEVICE_MODEL_FILE="${DEVICE_MODEL_FILE:-/proc/device-tree/model}"
 # Admin user allowed to log in over SSH: the sudo caller, never the display (kiosk) user.
 readonly SSH_ADMIN_USER="${SSH_ADMIN_USER:-${SUDO_USER:-}}"
 readonly UV_VERSION_PIN="${UV_VERSION_PIN:-}"   # e.g. 0.11.7; empty = latest
@@ -322,7 +326,8 @@ else
     warn "gsettings not found; disable automount and sleep manually"
 fi
 
-# display.toml: created from the example when missing. Port table is filled by calibrate later.
+# display.toml: created from the example when missing. The port table is built in for a
+# Raspberry Pi 4 (below) and filled by calibrate elsewhere.
 readonly DISPLAY_CONF_DIR="${USER_HOME}/.config/usb-sentinel"
 readonly DISPLAY_CONF="${DISPLAY_CONF_DIR}/display.toml"
 install -d -o "${DISPLAY_USER}" -g "${DISPLAY_USER}" -m 0755 "${DISPLAY_CONF_DIR}"
@@ -333,6 +338,42 @@ else
         "${REPO_DIR}/frontend/deploy/display.example.toml" "${DISPLAY_CONF}"
     echo "display.toml: created from the example (${DISPLAY_CONF})"
 fi
+# Raspberry Pi 4 port table, measured on a Pi 4 Model B Rev 1.5 with a USB 2.0 stick, viewed
+# facing the USB ports: left column black USB 2.0, right column blue USB 3.0. Tiles follow
+# reading order. The 2-1 / 2-2 (USB 3.0 device) paths are NOT verified on the device.
+# Appended once, only when display.toml has no active [[ports]] table; a .bak is kept.
+DEVICE_MODEL="$(tr -d '\0' < "${DEVICE_MODEL_FILE}" 2>/dev/null)" || DEVICE_MODEL=""
+PORTS_STATE="port table: not set (calibrate needed on this hardware)"
+if grep -q '^[[:space:]]*\[\[ports\]\]' "${DISPLAY_CONF}"; then
+    PORTS_STATE="port table: existing [[ports]] table kept"
+elif [[ "${INSTALL_PORTS}" != 1 ]]; then
+    PORTS_STATE="port table: not written (INSTALL_PORTS=0)"
+elif [[ "${DEVICE_MODEL}" == "Raspberry Pi 4"* ]]; then
+    cp -p "${DISPLAY_CONF}" "${DISPLAY_CONF}.bak"
+    cat >> "${DISPLAY_CONF}" <<'PORTS'
+
+# Raspberry Pi 4 USB ports (written by install-all.sh), viewed facing the ports:
+# P1 left-top (black), P2 right-top (blue), P3 left-bottom (black), P4 right-bottom (blue).
+# 2-1 and 2-2 (USB 3.0 devices in the blue ports) are assumed, not measured.
+[[ports]]
+label = "P1"
+paths = ["1-1.3"]
+
+[[ports]]
+label = "P2"
+paths = ["1-1.1", "2-1"]
+
+[[ports]]
+label = "P3"
+paths = ["1-1.4"]
+
+[[ports]]
+label = "P4"
+paths = ["1-1.2", "2-2"]
+PORTS
+    PORTS_STATE="port table: Raspberry Pi 4 layout written (old file kept as display.toml.bak)"
+fi
+echo "${PORTS_STATE}"
 
 # XDG autostart entry with <user> and the project path filled in. On a fresh install it is
 # written with Hidden=true so an aborted run never leaves autostart armed; step 10
@@ -454,8 +495,10 @@ Kiosk: ${KIOSK_STATE}
         sudo bash ${REPO_DIR}/scripts/kiosk-disable.sh     undo autostart and lockdown
     - Ctrl+Alt+F1 returns to the graphical session.
 
-[Port calibration (optional, later)]
-  Uncalibrated ports show P? and the screen keeps working. Over SSH or from the
+[Port calibration (only needed on hardware other than Raspberry Pi 4)]
+  ${PORTS_STATE}
+  On a Raspberry Pi 4 the ports are already set. Elsewhere, uncalibrated ports
+  show P? and the screen keeps working. Over SSH or from the
   text console run
       ${UV_BIN} run --offline --frozen --no-sync \\
           --project ${REPO_DIR}/frontend usb-sentinel-display calibrate

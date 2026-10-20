@@ -72,8 +72,9 @@ sys_class_input = "/sys/class/input"
 
 # Mapping from physical ports to sysfs port paths. Entries fill tiles 1 to 4 in the
 # order they appear in this file.
-# Measure each unit with `calibrate` and fill it in. It is empty by default, so
-# every port shows as P?.
+# On a Raspberry Pi 4, scripts/install-all.sh appends the measured table at the end of
+# this file (INSTALL_PORTS=0 skips it). On other hardware, measure each unit with
+# `calibrate` and fill it in; while it is empty every port shows as P?.
 # One physical port gets a different path for USB 2.0 and USB 3.0 devices, so list
 # both.
 # label is 1 to 4 printable ASCII characters. Duplicate labels, a path shared by

@@ -244,3 +244,22 @@ paths = ["1-1.1"]
         path = write(tmp_path, '[[ports]]\nlabel = "P1"\npaths = [1]\n')
         with pytest.raises(ValueError, match="paths"):
             load_config(path)
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_install_all_pi4_port_table_loads(tmp_path: Path) -> None:
+    """install-all.sh が Pi 4 で追記する表を、例の設定に足して読み込める。"""
+    script = (ROOT / "scripts" / "install-all.sh").read_text()
+    table = script.split("<<'PORTS'\n", 1)[1].split("\nPORTS\n", 1)[0]
+    example = (ROOT / "frontend" / "deploy" / "display.example.toml").read_text()
+    path = tmp_path / "display.toml"
+    path.write_text(f"{example}\n{table}\n")
+    ports = {p.label: p.paths for p in load_config(path).ports}
+    assert ports == {
+        "P1": ("1-1.3",),
+        "P2": ("1-1.1", "2-1"),
+        "P3": ("1-1.4",),
+        "P4": ("1-1.2", "2-2"),
+    }

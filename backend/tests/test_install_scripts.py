@@ -126,7 +126,7 @@ def _run_install_all(tmp_path: Path, stdin: str, env_extra: dict[str, str]) -> t
     assert ROOT_CHECK in original
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    for helper in ("kiosk-lockdown.sh", "boot-video-hint.sh", "clamav-db.sh"):
+    for helper in ("kiosk-lockdown.sh", "boot-video-hint.sh", "clamav-db.sh", "keyfile.sh"):
         (scripts / helper).write_text(_script(helper))
     script = scripts / "install-all.sh"
     script.write_text(original.replace(ROOT_CHECK, "true"))

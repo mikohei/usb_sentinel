@@ -198,7 +198,10 @@ sudo bash scripts/install-all.sh
 sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 ```
 
-After fetching the official uv installer, the script shows its SHA-256 and asks for confirmation before running it (`INSTALL_YES=1` skips this).
+Every question is asked up front, in the preflight, before anything is changed: the script fetches the
+official uv installer, shows its SHA-256 and asks for confirmation (skipped when uv is already
+installed), then asks whether to run freshclam. After that the run is unattended (about 15 minutes).
+`sudo INSTALL_YES=1 bash scripts/install-all.sh` answers yes to everything and asks nothing.
 Installing the touch panel driver, setting the 480x320 screen resolution, port calibration, and
 enabling the capacity and speed inspections (which erase the sample) are not automated; the script describes them as steps at the end.
 `kiosk-enable.sh` refuses to arm the kiosk unless `~/.config/monitors.xml` (or `xrandr` on X11)

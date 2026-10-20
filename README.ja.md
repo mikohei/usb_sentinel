@@ -197,7 +197,9 @@ sudo bash scripts/install-all.sh
 sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 ```
 
-uvの公式インストーラは取得後にSHA-256を表示して実行前に確認を求める（`INSTALL_YES=1`で省略できる）。
+質問はすべて冒頭の事前確認でまとめて行い、何も変更する前に済ませる。uvの公式インストーラを取得してSHA-256を表示し、
+実行してよいか尋ねる（uvが入っていれば省く）。続けてfreshclamを実行するかを尋ねる。以後は操作なしで完了まで進む（約15分）。
+`sudo INSTALL_YES=1 bash scripts/install-all.sh`はすべてに「はい」と答え、質問を一切しない。
 タッチパネルのドライバ導入、画面解像度480x320の設定、ポートのキャリブレーション、
 容量・速度検査の有効化（検体を消去する）は自動化せず、終了時に手順として案内する。
 `kiosk-enable.sh`は`~/.config/monitors.xml`（X11では`xrandr`）に480x320が無いと実行を拒む。

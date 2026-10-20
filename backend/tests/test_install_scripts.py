@@ -53,6 +53,119 @@ def test_scripts_parse(name: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_install_all_prompts_only_in_preflight() -> None:
+    """Every confirm/read call sits before step 2; steps 3 and 8 only read the stored answers."""
+    lines = _script("install-all.sh").splitlines()
+    step2 = lines.index('log "2/10 Installing apt packages"')
+    prompts = [i for i, line in enumerate(lines) if re.search(r"\bconfirm \"|\bread -r\b", line)]
+    assert prompts, "the preflight must still ask the questions"
+    assert all(i < step2 for i in prompts), [lines[i] for i in prompts if i >= step2]
+    text = "\n".join(lines)
+    assert "No more questions; the rest runs unattended" in text
+    assert "INSTALL_YES=1 skips the questions" in text
+    assert 'if [[ "${RUN_UV_INSTALLER}" == 0 ]]; then' in text
+    assert 'if [[ "${RUN_FRESHCLAM}" == 1 ]]; then' in text
+    # The SHA-256 is shown before the uv question, and both questions precede apt-get.
+    _ordered(
+        text,
+        'curl -LsSf "${UV_INSTALLER_URL}"',
+        'echo "SHA-256:',
+        'confirm "Run this installer as',
+        'confirm "Run freshclam',
+        'log "2/10',
+        "apt-get update",
+    )
+
+
+ROOT_CHECK = '[[ ${EUID} -eq 0 ]] || die "run with sudo"'
+
+FAKE_BINARIES = {
+    # uname -s -> Linux, uname -m -> aarch64
+    "uname": 'echo "uname $*" >> "$FAKE_LOG"\ncase "$1" in -s) echo Linux;; *) echo aarch64;; esac',
+    "id": 'echo "id $*" >> "$FAKE_LOG"\n[ "$1" = -u ] && echo 1000\nexit 0',
+    "getent": (
+        'echo "getent $*" >> "$FAKE_LOG"\n'
+        'case "$1" in passwd) echo "$2:x:1000:1000::$FAKE_HOME:/bin/bash";;'
+        ' *) echo "1.2.3.4 $2";; esac'
+    ),
+    "curl": (
+        'echo "curl $*" >> "$FAKE_LOG"\n'
+        'while [ $# -gt 1 ]; do [ "$1" = -o ] && out="$2"; shift; done\n'
+        'printf "#!/bin/sh\\necho fake uv installer\\n" > "$out"'
+    ),
+    "sha256sum": 'echo "sha256sum $*" >> "$FAKE_LOG"\necho "deadbeef  $1"',
+    # The run stops at the first apt-get so nothing after step 2 is exercised. Whatever is
+    # still unread on stdin is logged: prompts consumed before this point leave it empty.
+    "apt-get": 'echo "apt-get $* stdin=[$(cat)]" >> "$FAKE_LOG"\nexit 99',
+}
+
+
+def _run_install_all(tmp_path: Path, stdin: str, env_extra: dict[str, str]) -> tuple[int, str]:
+    """Run install-all.sh with fake binaries; return the exit code and the fake call log."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name, body in FAKE_BINARIES.items():
+        path = bindir / name
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    log = tmp_path / "calls.log"
+    log.touch()
+    # EUID is a readonly bash variable, so the sudo check is disabled in a scratch copy.
+    original = _script("install-all.sh")
+    assert ROOT_CHECK in original
+    script = tmp_path / "install-all.sh"
+    script.write_text(original.replace(ROOT_CHECK, "true"))
+    env = {
+        "PATH": f"{bindir}:/usr/bin:/bin",
+        "HOME": str(home),
+        "FAKE_LOG": str(log),
+        "FAKE_HOME": str(home),
+        "DISPLAY_USER": "kiosk",
+        **env_extra,
+    }
+    result = subprocess.run(
+        [bash_path(), str(script)],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    return result.returncode, log.read_text() + result.stdout + result.stderr
+
+
+def test_install_all_consumes_both_answers_before_apt_get(tmp_path: Path) -> None:
+    """With INSTALL_YES unset, both y answers on stdin are read before the first apt-get call."""
+    code, log = _run_install_all(tmp_path, "y\ny\n", {})
+    assert code == 99, log
+    _ordered(
+        log,
+        "curl -LsSf https://astral.sh/uv/install.sh",
+        "sha256sum ",
+        "apt-get update",
+    )
+    # read -p prints nothing when stdin is a pipe, so the proof is the drained stdin.
+    assert "apt-get update stdin=[]" in log
+    assert "No more questions" in log
+
+
+def test_install_all_rejecting_uv_dies_before_apt_get(tmp_path: Path) -> None:
+    """Answering N to the uv question exits in the preflight; apt-get never runs."""
+    code, log = _run_install_all(tmp_path, "n\ny\n", {})
+    assert code == 1
+    assert "uv installation cancelled" in log
+    assert "apt-get" not in log
+
+
+def test_install_all_yes_env_asks_nothing(tmp_path: Path) -> None:
+    """INSTALL_YES=1 reaches apt-get without reading stdin (the n answers stay unread)."""
+    code, log = _run_install_all(tmp_path, "n\nn\n", {"INSTALL_YES": "1"})
+    assert code == 99, log
+    assert "apt-get update stdin=[n\nn]" in log
+
+
 def test_install_all_sources_lockdown_after_gsettings_user() -> None:
     """install-all.sh sources kiosk-lockdown.sh once gsettings_user exists."""
     lines = (SCRIPTS / "install-all.sh").read_text().splitlines()

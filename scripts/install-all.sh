@@ -8,17 +8,20 @@
 # Usage:
 #   sudo bash scripts/install-all.sh                 # display user = the sudo caller
 #   sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
-#   sudo INSTALL_YES=1 bash scripts/install-all.sh   # answer every prompt with yes
+#   sudo INSTALL_YES=1 bash scripts/install-all.sh   # answer every question with yes (no prompts at all)
 #   sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
 #                                                    # opt-in key-only SSH for the sudo caller
 #   sudo bash scripts/kiosk-enable.sh                # final step, after the manual steps
 #   sudo bash scripts/kiosk-disable.sh               # undo from a text console
 #
 # What it does:
-#   1. Preflight checks (Ubuntu, arm64, sudo, internet)
+#   1. Preflight checks (Ubuntu, arm64, sudo, internet), then EVERY question the
+#      script has is asked here, before anything is changed: the uv installer is
+#      downloaded, its SHA-256 shown and confirmation asked (skipped when uv is
+#      already installed), and whether to run freshclam in step 8. After the
+#      preflight the run is unattended. INSTALL_YES=1 answers yes to everything.
 #   2. apt: Docker Engine, Noto CJK fonts, python3-tk, curl
-#   3. uv (official installer; the script is downloaded, its SHA-256 shown,
-#      and confirmation asked before running it)
+#   3. uv (official installer downloaded and confirmed in step 1)
 #   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs)
 #   5. frontend: uv sync --frozen and a tkinter import check
 #   6. Display user: usb-sentinel group, GDM autologin (kept on purpose: it lands
@@ -96,19 +99,10 @@ fi
 echo "display user: ${DISPLAY_USER} (${USER_HOME})"
 echo "repository:   ${REPO_DIR}"
 
-# ---------------------------------------------------------------- 2. apt
-log "2/10 Installing apt packages"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-# docker.io: inspection container. fonts-noto-cjk: Japanese UI text.
-# python3-tk: fallback when uv's Python lacks tkinter. curl/ca-certificates: uv download.
-apt-get install -y --no-install-recommends \
-    docker.io curl ca-certificates fonts-noto-cjk python3 python3-tk
-systemctl enable --now docker.service
-
-# ---------------------------------------------------------------- 3. uv
-log "3/10 Installing uv into the display user's ~/.local/bin"
+# All questions are asked here so that the rest of the run needs no operator.
+# Steps 3 and 8 only read RUN_UV_INSTALLER and RUN_FRESHCLAM.
 readonly UV_BIN="${USER_HOME}/.local/bin/uv"
+RUN_UV_INSTALLER=0
 if [[ -x "${UV_BIN}" ]]; then
     echo "uv already present: $("${UV_BIN}" --version)"
 else
@@ -121,8 +115,34 @@ else
     echo "downloaded uv installer: ${UV_INSTALLER_URL}"
     echo "SHA-256: $(sha256sum "${UV_TMP}/install.sh" | cut -d' ' -f1)"
     echo "to inspect it first, run in another terminal: less ${UV_TMP}/install.sh"
-    confirm "Run this installer as ${DISPLAY_USER}?" \
+    confirm "Run this installer as ${DISPLAY_USER} (in step 3/10)?" \
         || die "uv installation cancelled; install uv manually and re-run"
+    RUN_UV_INSTALLER=1
+fi
+readonly RUN_UV_INSTALLER
+if confirm "Run freshclam in step 8/10 to update ${CLAMAV_DB_DIR}? (takes a few minutes)"; then
+    readonly RUN_FRESHCLAM=1
+else
+    readonly RUN_FRESHCLAM=0
+fi
+echo "No more questions; the rest runs unattended (about 15 minutes). INSTALL_YES=1 skips the questions entirely."
+
+# ---------------------------------------------------------------- 2. apt
+log "2/10 Installing apt packages"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+# docker.io: inspection container. fonts-noto-cjk: Japanese UI text.
+# python3-tk: fallback when uv's Python lacks tkinter. curl/ca-certificates: uv download.
+apt-get install -y --no-install-recommends \
+    docker.io curl ca-certificates fonts-noto-cjk python3 python3-tk
+systemctl enable --now docker.service
+
+# ---------------------------------------------------------------- 3. uv
+log "3/10 Installing uv into the display user's ~/.local/bin"
+if [[ "${RUN_UV_INSTALLER}" == 0 ]]; then
+    echo "uv already present: $("${UV_BIN}" --version)"
+else
+    # Installer downloaded, shown and confirmed in step 1.
     chown "${DISPLAY_USER}" "${UV_TMP}/install.sh"
     if [[ -n "${UV_VERSION_PIN}" ]]; then
         run_as_user env UV_INSTALL_DIR="${USER_HOME}/.local/bin" UV_NO_MODIFY_PATH=1 \
@@ -244,7 +264,7 @@ fi
 
 # ---------------------------------------------------------------- 8. ClamAV DB
 log "8/10 Fetching the ClamAV signature database (cannot be updated once isolated)"
-if confirm "Run freshclam now to update ${CLAMAV_DB_DIR}? (takes a few minutes)"; then
+if [[ "${RUN_FRESHCLAM}" == 1 ]]; then   # answered in step 1
     docker run --rm --entrypoint freshclam \
         --mount "type=bind,src=${CLAMAV_DB_DIR},dst=/var/lib/clamav" \
         "${IMAGE}" --user=root --stdout || warn "freshclam failed; update later using the README steps"

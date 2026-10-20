@@ -69,3 +69,14 @@ class TestFontFallbacks:
         monkeypatch.setattr(theme.tkfont, "families", lambda root: ("DejaVu Sans",))
         monkeypatch.setattr(theme.tkfont, "nametofont", lambda name, root: _FakeFont())
         assert theme.resolve_font(ROOT, "Noto Sans CJK JP") == ("DejaVu Sans", False)
+
+
+class TestVerdictColors:
+    def test_scan_only_color_is_distinct(self) -> None:
+        """検査のみの色は、異常なしとも判定不能とも違う。"""
+        scan_only = theme.verdict_color("No Defect (Scan Only)")
+        assert scan_only not in (
+            theme.verdict_color("No Defect"),
+            theme.verdict_color("Inconclusive"),
+            theme.UNKNOWN_VERDICT_COLOR,
+        )

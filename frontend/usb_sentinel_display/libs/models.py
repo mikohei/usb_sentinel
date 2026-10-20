@@ -115,6 +115,7 @@ class Slot:
 # Mapping from backend Verdict values (strings in result.json) to 1-char QR payload codes.
 VERDICT_CODES: dict[str, str] = {
     "No Defect": "N",
+    "No Defect (Scan Only)": "n",
     "Malware Detected": "M",
     "Counterfeit Suspected": "C",
     "Spec Mismatch": "S",

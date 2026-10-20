@@ -230,14 +230,45 @@ class TestTilesView:
         view.render(empty, 0, False, 1, NOW, lang, SCAN_ONLY_VIEW)
 
     def test_verdict_labels_fit_tile(self, fonts: Fonts) -> None:
-        """All verdict labels (incl. unknown), both langs, fit tile width (160-8x2) with "P1 "."""
+        """All verdict labels (incl. unknown), both langs, fit tile width (160-8x2) with "P1 ".
+
+        Only 異常なし（検査のみ） may need the compact font; it must fit at that size."""
         limit = theme.TILE_W - TEXT_X * 2
         for lang in i18n.LANGUAGES:
             labels = [i18n.verdict_label(lang, v) for v in VERDICT_CODES]
             labels.append(i18n.verdict_label(lang, "Bogus"))
             for label in labels:
                 width = fonts.verdict.measure("P1 " + label)
+                if label == "異常なし（検査のみ）":
+                    width = min(width, fonts.verdict_compact.measure("P1 " + label))
                 assert width <= limit, f"{lang} {label!r} {width}px > {limit}px"
+
+    def test_long_title_uses_compact_font(self, root: tk.Tk, fonts: Fonts) -> None:
+        """幅に収まらない 1 行目は小さい太字に切り替え、通常の判定名は元の太字のまま描く。"""
+        canvas = tk.Canvas(root, width=160, height=320)
+        view = TilesView(
+            canvas, fonts, lambda _i: None, lambda _d: None, lambda: None, lambda: None, 3
+        )
+        slots = [
+            Slot(0, "P1", SlotState.DONE, disk("sda", "1-1.1", "A1"), summary(), None, False),
+            Slot(
+                1,
+                "P2",
+                SlotState.DONE,
+                disk("sdb", "1-1.2", "B2"),
+                summary("No Defect (Scan Only)", "B2"),
+                None,
+                False,
+            ),
+        ]
+        view.render(slots, 0, False, 1, NOW, "ja", SCAN_ONLY_VIEW)
+        used: dict[str, str] = {
+            canvas.itemcget(item, "text"): canvas.itemcget(item, "font")
+            for item in canvas.find_all()
+            if canvas.type(item) == "text"
+        }
+        assert used["P1 異常なし"] == str(fonts.verdict)
+        assert used["P2 異常なし（検査のみ）"] == str(fonts.verdict_compact)
 
     def test_state_labels_fit_tile(self, fonts: Fonts) -> None:
         """Title-row state labels (empty, inspecting, etc.) also fit the tile width with "P4 "."""

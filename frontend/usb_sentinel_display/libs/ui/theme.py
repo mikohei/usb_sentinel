@@ -43,6 +43,8 @@ TILE_PAD = 3
 # Background color per verdict (design doc section 8).
 VERDICT_COLORS: dict[str, str] = {
     "No Defect": "#2E7D32",
+    # Scan only (capacity and speed not tested). Teal, distinct from full No Defect green.
+    "No Defect (Scan Only)": "#00695C",
     "Malware Detected": "#B71C1C",
     # Suspected counterfeit (phase 2). Deep magenta, distinct from malware red and bad purple
     # (doc/qr-payload.md 6.1).
@@ -163,6 +165,8 @@ class Fonts:
     verdict: tkfont.Font
     body: tkfont.Font
     arrow: tkfont.Font
+    # Smaller bold font for a tile line 1 that does not fit at the verdict size.
+    verdict_compact: tkfont.Font
 
     @classmethod
     def create(cls, root: tk.Misc, family: str, geometry: Geometry = IDENTITY) -> "Fonts":
@@ -171,6 +175,9 @@ class Fonts:
             verdict=tkfont.Font(root, family=family, size=-geometry.font_px(18), weight="bold"),
             body=tkfont.Font(root, family=family, size=-geometry.font_px(14)),
             arrow=tkfont.Font(root, family=family, size=-geometry.font_px(24)),
+            verdict_compact=tkfont.Font(
+                root, family=family, size=-geometry.font_px(13), weight="bold"
+            ),
         )
 
 

@@ -149,7 +149,12 @@ class TilesView:
         y = y0 + theme.TILE_PAD
         canvas = self.canvas
         title = title_text(slot, self._lang)
-        canvas.create_text(TEXT_X, y, text=title, anchor="nw", fill=color, font=self.fonts.verdict)
+        # A long label (e.g. 異常なし（検査のみ）) switches to the compact font instead of clipping.
+        title_room = self.geometry.px(TILE_W - TEXT_X * 2)
+        title_font = self.fonts.verdict
+        if title_font.measure(title) > title_room:
+            title_font = self.fonts.verdict_compact
+        canvas.create_text(TEXT_X, y, text=title, anchor="nw", fill=color, font=title_font)
         y += verdict_h
         serial = serial_text(slot, self.rows)
         status = status_text(slot, now, dots, self._lang)

@@ -88,6 +88,11 @@ class TestParseSummary:
         assert summary.mtime == 5.0
         assert summary.dir_name == NAME
 
+    @pytest.mark.parametrize("verdict", ["No Defect (Scan Only)", "Inconclusive", "No Defect"])
+    def test_new_and_old_verdicts_load(self, verdict: str) -> None:
+        """新しい検査のみの判定も、以前からの判定もそのまま読み込める。"""
+        assert self.parse_ok(sample_result(verdict=verdict)).verdict == verdict
+
     def test_port_path_missing_or_null(self) -> None:
         """None if port_path is missing or null."""
         assert self.parse_ok(sample_result()).port_path is None

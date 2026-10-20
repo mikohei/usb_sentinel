@@ -101,6 +101,7 @@ class TestMessages:
         ("verdict", "ja", "en"),
         [
             ("No Defect", "異常なし", "No Defect"),
+            ("No Defect (Scan Only)", "異常なし（検査のみ）", "Scan OK"),
             ("Malware Detected", "マルウェア検知", "Malware"),
             ("Counterfeit Suspected", "偽装疑い", "Counterfeit"),
             ("Spec Mismatch", "仕様不一致", "Mismatch"),
@@ -110,7 +111,7 @@ class TestMessages:
         ],
     )
     def test_verdict_label(self, verdict: str, ja: str, en: str) -> None:
-        """Labels for the six verdicts and an unknown value."""
+        """Labels for the seven verdicts and an unknown value."""
         assert verdict_label("ja", verdict) == ja
         assert verdict_label("en", verdict) == en
 

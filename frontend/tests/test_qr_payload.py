@@ -134,6 +134,8 @@ class TestBuildPayload:
     def test_verdict_codes(self) -> None:
         for verdict, code in (
             ("No Defect", "N"),
+            ("No Defect (Scan Only)", "n"),
+            ("Inconclusive", "I"),
             ("Malware Detected", "M"),
             ("Spec Mismatch", "S"),
             ("Defective", "D"),

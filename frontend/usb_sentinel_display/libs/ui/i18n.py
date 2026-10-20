@@ -152,6 +152,7 @@ MESSAGES: dict[str, dict[str, str]] = {
 VERDICT_LABELS: dict[str, dict[str, str]] = {
     "en": {
         "No Defect": "No Defect",
+        "No Defect (Scan Only)": "Scan OK",
         "Malware Detected": "Malware",
         "Counterfeit Suspected": "Counterfeit",
         # "Spec Mismatch" with "P1 " is 157 px (18 px bold, measured on macOS), over 144 px,
@@ -162,6 +163,7 @@ VERDICT_LABELS: dict[str, dict[str, str]] = {
     },
     "ja": {
         "No Defect": "異常なし",
+        "No Defect (Scan Only)": "異常なし（検査のみ）",
         "Malware Detected": "マルウェア検知",
         "Counterfeit Suspected": "偽装疑い",
         "Spec Mismatch": "仕様不一致",

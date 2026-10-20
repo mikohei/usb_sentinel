@@ -210,3 +210,18 @@ class TestClassifyCounterfeit:
         )
 
         assert classify(result)[0] is Verdict.NO_DEFECT
+
+
+def test_missing_db_reason_reaches_reasons() -> None:
+    """定義DB欠落の理由文が Inconclusive の reasons にそのまま載る。"""
+    from usb_sentinel.libs.steps.malware import DB_MISSING_SUMMARY
+
+    device = DeviceInfo(path="/dev/sda", kernel_name="sda", advertised_bytes=1)
+    result = InspectionResult(
+        device=device,
+        started_at="2024-01-01T00:00:00+00:00",
+        steps=[StepResult(name="malware", status=StepStatus.ERROR, summary=DB_MISSING_SUMMARY)],
+    )
+    verdict, reasons = classify(result)
+    assert verdict is Verdict.INCONCLUSIVE
+    assert f"malware: {DB_MISSING_SUMMARY}" in reasons

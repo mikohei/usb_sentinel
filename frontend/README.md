@@ -205,7 +205,7 @@ The on-screen QR code uses a shortened format (`v:2`) that is separate from `res
 | Key | Meaning | Value |
 |---|---|---|
 | `v` | Format version | Fixed at `2` |
-| `r` | Verdict | `N`=No Defect, `M`=Malware Detected, `C`=Counterfeit Suspected, `S`=Spec Mismatch, `D`=Defective, `I`=Inconclusive, `?`=unknown |
+| `r` | Verdict | `N`=No Defect, `n`=No Defect (Scan Only), `M`=Malware Detected, `C`=Counterfeit Suspected, `S`=Spec Mismatch, `D`=Defective, `I`=Inconclusive, `?`=unknown |
 | `s` | Serial | The first 32 characters of `device.serial` in `result.json`, converted to ASCII. Non-ASCII characters become `?`. If it is empty, the kernel name is put here and `k` is added |
 | `k` | Indicates that `s` is a kernel name | `1`. When `s` is a serial, the key itself is absent |
 | `t` | Inspection start time (UTC) | `YYYYmmddTHHMMSSZ`. Matches the first 16 characters of the results directory name |
@@ -241,11 +241,12 @@ If the 16 digits (12 digits for the detail QR) match, it is the same `result.jso
 
 ## Meaning of the display
 
-Line 1 of a tile shows the port name and the verdict label, and the background color is the verdict color. The display does not rely on color alone: it also shows a text label and the one-character code of the QR. The labels switch with the screen language. The English labels are shortened forms that fit the tile width (160px, 18px bold); `Spec Mismatch` becomes `Mismatch`.
+Line 1 of a tile shows the port name and the verdict label, and the background color is the verdict color. The display does not rely on color alone: it also shows a text label and the one-character code of the QR. The labels switch with the screen language. The English labels are shortened forms that fit the tile width (160px, 18px bold); `Spec Mismatch` becomes `Mismatch`. The Japanese label 異常なし（検査のみ） is wider than the tile, so line 1 switches to a 13px bold font for it.
 
 | Verdict | Background color | Label (Japanese, romanized) | Label (English) | Code |
 |---|---|---|---|---|
 | No Defect | `#2E7D32` (green) | Ijo nashi | No Defect | N |
+| No Defect (Scan Only) | `#00695C` (teal) | Ijo nashi (kensa nomi) | Scan OK | n |
 | Malware Detected | `#B71C1C` (red) | Marueya kenchi | Malware | M |
 | Counterfeit Suspected | `#AD1457` (dark magenta) | Gisou utagai | Counterfeit | C |
 | Spec Mismatch | `#E65100` (orange) | Shiyou fuitchi | Mismatch | S |

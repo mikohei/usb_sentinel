@@ -24,7 +24,7 @@ Step 3  Unmount (prerequisite for the destructive inspections that follow)
 Step 4  Capacity verification (f3write + f3read / f3probe)
 Step 5  Speed verification (fio)
 Step 6  Write results (result.json / result.txt / result-qr.png), record one row in SQLite
-Step 7  Classify the verdict (No Defect / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive)
+Step 7  Classify the verdict (No Defect / No Defect (Scan Only) / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive)
 ```
 
 ### Safety design
@@ -388,11 +388,12 @@ the device stays read-only and the container runs `--mode scan_only`. With `allo
 (reason `Inspection mode is scan_only` in the second case). Behaviour change: with
 `allow_destructive = true` and `docker.env` still `ro`, the steps are now also `SKIPPED`
 "Inspection mode is scan_only" instead of `ERROR` (insufficient permission), because the host
-never requests `full` without `rw`. In every case the verdict is `Inconclusive`, so a
-scan-only inspection is `Inconclusive` even with a complete ClamAV DB. The `reasons` in
-`result.json` and the detail QR tell which: `capacity: Inspection mode is scan_only` means scan
-only, `malware: ClamAV signature database missing ...` means no DB. `No Defect` needs "Scan +
-erase". A manual run
+never requests `full` without `rw`. When every other step passed, these two skip reasons
+give `No Defect (Scan Only)` (shown as 異常なし（検査のみ）, teal), with the reason
+`Scan only: capacity and speed not tested`. If another step failed or errored, or the capacity
+and speed steps were skipped for another reason (for example a missing ClamAV DB:
+`malware: ClamAV signature database missing ...`), the verdict stays `Inconclusive`. Full
+`No Defect` needs "Scan + erase". A manual run
 (`usb-sentinel inspect`) erases only with `--mode full` (default `scan_only`).
 
 The mode is fixed when a drive is inserted. Switching the display back to scan only does not
@@ -556,7 +557,7 @@ On a PC connected to the network, compare `sha256sum result.json` with `digest` 
 | Code | Meaning |
 |---|---|
 | 0 | `No Defect` |
-| 1 | The verdict is not clean (`Malware Detected` / `Counterfeit Suspected` / `Spec Mismatch` / `Defective` / `Inconclusive`) |
+| 1 | The verdict is not a full `No Defect` (`No Defect (Scan Only)` / `Malware Detected` / `Counterfeit Suspected` / `Spec Mismatch` / `Defective` / `Inconclusive`) |
 | 2 | Dangerous device (the inspection was refused) |
 | 3 | Runtime error (a dependent command is missing, and so on) |
 
@@ -570,8 +571,9 @@ On a PC connected to the network, compare `sha256sum result.json` with `digest` 
 | `Spec Mismatch` | Any step is FAIL (insufficient capacity, insufficient speed) |
 | `Inconclusive` | ERROR, or SKIPPED / unimplemented steps remain |
 | `No Defect` | All steps Pass |
+| `No Defect (Scan Only)` | Scan-only mode: malware and the other steps Pass, and capacity and speed are `SKIPPED` only because of `allow_destructive = false` or `Inspection mode is scan_only` |
 
-The priority is `Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect`, and if any ERROR or SKIPPED remains the verdict is `Inconclusive`. The basis for a verdict is kept in `reasons` (sentences) and `reason_codes` (`m:found`, `c:over`, `c:probe`, `c:lost`, `c:short`, `c:defect`, `s:severe`, `s:minor`, and `<step abbreviation>:timeout` / `error` / `skipped`) in `result.json`.
+The priority is `Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect` > `No Defect (Scan Only)`, and if any other ERROR or SKIPPED remains the verdict is `Inconclusive`. The basis for a verdict is kept in `reasons` (sentences) and `reason_codes` (`m:found`, `c:over`, `c:probe`, `c:lost`, `c:short`, `c:defect`, `s:severe`, `s:minor`, and `<step abbreviation>:timeout` / `error` / `skipped`) in `result.json`.
 
 `Counterfeit Suspected` is treated as a signal to escalate, because f3probe can output `Bad news` even for a genuine product with many bad blocks, and mixing up GB and GiB can push a value over 107%. The nominal, advertised, and measured values and their ratios are kept in `result.json`, the QR, and SQLite, so a person makes the final decision.
 

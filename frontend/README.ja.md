@@ -205,7 +205,7 @@ uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /pa
 | キー | 意味 | 値 |
 |---|---|---|
 | `v` | 形式バージョン | `2`固定 |
-| `r` | 判定 | `N`=No Defect、`M`=Malware Detected、`C`=Counterfeit Suspected、`S`=Spec Mismatch、`D`=Defective、`I`=Inconclusive、`?`=未知 |
+| `r` | 判定 | `N`=No Defect、`n`=No Defect (Scan Only)、`M`=Malware Detected、`C`=Counterfeit Suspected、`S`=Spec Mismatch、`D`=Defective、`I`=Inconclusive、`?`=未知 |
 | `s` | シリアル | `result.json`の`device.serial`をASCII化した先頭32文字。非ASCII文字は`?`になる。空ならカーネル名を入れ`k`を付ける |
 | `k` | `s`がカーネル名であることを示す | `1`。シリアルのときはキー自体が無い |
 | `t` | 検査開始時刻（UTC） | `YYYYmmddTHHMMSSZ`。結果ディレクトリ名の先頭16文字と一致する |
@@ -241,11 +241,12 @@ sha256sum result.json | cut -c1-12   # 詳細QRのd（12桁）
 
 ## 表示の意味
 
-タイルの1行目はポート名と判定ラベル、背景色は判定色である。色だけに頼らず、文字ラベルとQRの1文字コードを併記する。ラベルは画面の言語で切り替わる。英語ラベルはタイル幅（160px、18px太字）に収めるための短縮形で、`Spec Mismatch`は`Mismatch`になる。
+タイルの1行目はポート名と判定ラベル、背景色は判定色である。色だけに頼らず、文字ラベルとQRの1文字コードを併記する。ラベルは画面の言語で切り替わる。英語ラベルはタイル幅（160px、18px太字）に収めるための短縮形で、`Spec Mismatch`は`Mismatch`になる。日本語ラベル「異常なし（検査のみ）」はタイル幅を超えるため、この判定だけ1行目を13px太字で描く。
 
 | 判定 | 背景色 | ラベル（日本語） | ラベル（英語） | コード |
 |---|---|---|---|---|
 | No Defect | `#2E7D32`（緑） | 異常なし | No Defect | N |
+| No Defect (Scan Only) | `#00695C`（青緑） | 異常なし（検査のみ） | Scan OK | n |
 | Malware Detected | `#B71C1C`（赤） | マルウェア検知 | Malware | M |
 | Counterfeit Suspected | `#AD1457`（濃いマゼンタ） | 偽装疑い | Counterfeit | C |
 | Spec Mismatch | `#E65100`（橙） | 仕様不一致 | Mismatch | S |

@@ -120,7 +120,7 @@ The identification QR that the frontend shows on the screen. 150 bytes or less, 
 | Key | Meaning | Value | Max bytes (value only) |
 |---|---|---|---|
 | `v` | Format version | Fixed at `2` | 1 |
-| `r` | Verdict | `N`=No Defect, `M`=Malware Detected, `C`=Counterfeit Suspected, `S`=Spec Mismatch, `D`=Defective, `I`=Inconclusive. A verdict not in the mapping is `?` | 1 |
+| `r` | Verdict | `N`=No Defect, `n`=No Defect (Scan Only), `M`=Malware Detected, `C`=Counterfeit Suspected, `S`=Spec Mismatch, `D`=Defective, `I`=Inconclusive. A verdict not in the mapping is `?` | 1 |
 | `s` | Serial | The first 32 characters of `device.serial` in `result.json`, converted to ASCII (non-ASCII becomes `?`). If it is empty, put `device.kernel_name` here and set `k` to `1` | 32 |
 | `k` | Indicates that `s` is a kernel name | `1`. The key itself is omitted when `s` is a serial | 1 |
 | `t` | Inspection start time (UTC) | The 16 characters of `started_at` converted to `YYYYmmddTHHMMSSZ`. Matches the first 16 characters of the results directory name | 16 |
@@ -151,7 +151,7 @@ The frontend shows these as the pages after the normal QR. As in the medicine no
 | `t` | str | Start time `YYYYmmddTHHMMSSZ` (same as the normal QR) | 16 |
 | `s` | str | The serial converted to ASCII, 32 characters (same as the normal QR) | 32 |
 | `k` | int | `1` if `s` is a kernel name; otherwise the key is omitted | 1 |
-| `r` | str | Verdict code (`N`/`M`/`C`/`S`/`D`/`I`) | 1 |
+| `r` | str | Verdict code (`N`/`n`/`M`/`C`/`S`/`D`/`I`) | 1 |
 | `e` | int | `elapsed_s` rounded to whole seconds | 6 |
 | `m` | int | Number of malware detections | 4 |
 | `dv` | int \| null | ClamAV DB version (`db_version` as an integer; `null` on failure) | 6 |
@@ -227,13 +227,14 @@ This is not part of the payload specification; it supplements how the frontend p
 | Code | `verdict` string | Japanese label (romanized) | Meaning |
 |---|---|---|---|
 | `N` | `No Defect` | Fuguai nashi | All steps PASS |
+| `n` | `No Defect (Scan Only)` | Ijo nashi (kensa nomi) | Scan-only mode; every step except capacity and speed PASS, and those two SKIPPED only for the scan-only reason |
 | `M` | `Malware Detected` | Marueya kenchi | Detected by ClamAV. Takes priority over other failures |
 | `C` | `Counterfeit Suspected` | Gisou utagai | Any of: the advertised or real capacity exceeds 107% of the nominal capacity, f3probe `Bad news`, 50% or more lost. This is a suspicion, not a conclusion |
 | `S` | `Spec Mismatch` | Shiyou fuitchi | Insufficient capacity or insufficient speed |
 | `D` | `Defective` | Furyou | The capacity is sufficient, but f3read detected lost, corrupted, changed, or overwritten sectors |
 | `I` | `Inconclusive` | Hantei fuka | ERROR, SKIPPED, or unimplemented steps remain |
 
-The priority is `M` > `C` > `D` > `S` > `N`, and if any ERROR or SKIPPED remains the verdict is `I`.
+The priority is `M` > `C` > `D` > `S` > `N` > `n`, and if any ERROR or SKIPPED remains the verdict is `I`.
 
 Request to the frontend (phase 2): show `Counterfeit Suspected` as the Japanese label for "counterfeit suspected" in Japanese display and as "Counterfeit Suspected" in English display, with the dark magenta `#AD1457`, which can be told apart from the red `#B71C1C` for Malware Detected and the purple `#6A1B9A` for Defective. Using the same colors in the reader app keeps it consistent with the screen.
 

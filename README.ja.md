@@ -24,7 +24,7 @@ Step 3  アンマウント（以降の破壊的検査の前提）
 Step 4  容量検証（f3write + f3read / f3probe）
 Step 5  速度検証（fio）
 Step 6  結果出力（result.json / result.txt / result-qr.png）、SQLiteへ1行記録
-Step 7  判定分類（No Defect / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive）
+Step 7  判定分類（No Defect / No Defect (Scan Only) / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive）
 ```
 
 ### 安全設計
@@ -374,10 +374,11 @@ mountのため`SYS_ADMIN`、ファイル読み取りのため`DAC_OVERRIDE`を�
 `allow_destructive = false`のとき、またはディスプレイが検査のみのときは、容量・速度の両ステップが`SKIPPED`になる
 （後者の理由は`Inspection mode is scan_only`）。挙動の変更点として、`allow_destructive = true`で`docker.env`が
 `ro`のままの場合も、従来の`ERROR`（権限不足）ではなく`SKIPPED`「Inspection mode is scan_only」になる
-（ホストは`rw`なしに`full`を要求しない）。いずれも総合判定は`Inconclusive`である。
-つまり検査のみのモードでは、定義DBがそろっていても判定は`Inconclusive`になる。理由は`result.json`の`reasons`と詳細QRで分かる。
-`capacity: Inspection mode is scan_only`なら検査のみだったこと、`malware: ClamAV signature database missing ...`なら定義DBが無いことが原因である。
-`No Defect`を得るには「検査＋消去」で検査する。手動実行
+（ホストは`rw`なしに`full`を要求しない）。
+この2つの理由で容量と速度を飛ばし、ほかのステップがすべて合格なら、判定は`No Defect (Scan Only)`になる。
+画面には「異常なし（検査のみ）」と青緑で出る。理由は`Scan only: capacity and speed not tested`である。
+ほかのステップが失敗したときや、別の理由で飛ばしたとき（例: 定義DBが無い`malware: ClamAV signature database missing ...`）は`Inconclusive`のままである。
+完全な`No Defect`を得るには「検査＋消去」で検査する。手動実行
 （`usb-sentinel inspect`）で消去するには`--mode full`を付ける（既定は`scan_only`）。
 
 モードは挿入時に固定される。ディスプレイを検査のみに戻しても、すでに消去モードで走っている検査は止まらず、
@@ -530,7 +531,7 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 | コード | 意味 |
 |---|---|
 | 0 | `No Defect` |
-| 1 | 判定がcleanでない（`Malware Detected` / `Counterfeit Suspected` / `Spec Mismatch` / `Defective` / `Inconclusive`） |
+| 1 | 完全な`No Defect`でない（`No Defect (Scan Only)` / `Malware Detected` / `Counterfeit Suspected` / `Spec Mismatch` / `Defective` / `Inconclusive`） |
 | 2 | 危険なデバイス（検査を拒否した） |
 | 3 | 実行エラー（依存コマンド不在など） |
 
@@ -544,8 +545,9 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 | `Spec Mismatch` | いずれかのステップがFAIL（容量不足、速度不足） |
 | `Inconclusive` | ERROR、またはSKIPPED / 未実装ステップが残る |
 | `No Defect` | 全ステップPass |
+| `No Defect (Scan Only)` | 検査のみモードで、マルウェア検査などほかのステップがPass。容量と速度は`allow_destructive = false`または`Inspection mode is scan_only`の理由だけで`SKIPPED` |
 
-優先順位は`Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect`で、ERRORやSKIPPEDが残れば`Inconclusive`になる。判定の根拠は`result.json`の`reasons`（文）と`reason_codes`（`m:found`、`c:over`、`c:probe`、`c:lost`、`c:short`、`c:defect`、`s:severe`、`s:minor`、`<ステップ略号>:timeout`／`error`／`skipped`）に残る。
+優先順位は`Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect` > `No Defect (Scan Only)`で、それ以外のERRORやSKIPPEDが残れば`Inconclusive`になる。判定の根拠は`result.json`の`reasons`（文）と`reason_codes`（`m:found`、`c:over`、`c:probe`、`c:lost`、`c:short`、`c:defect`、`s:severe`、`s:minor`、`<ステップ略号>:timeout`／`error`／`skipped`）に残る。
 
 `Counterfeit Suspected`は、f3probeが不良ブロックの多い正規品にも`Bad news`を出し得ること、GB／GiBの混同で107%を超え得ることから、エスカレーションの合図として扱う。公称・申告・実測の各値とその比率が`result.json`、QR、SQLiteに残るので、人が最終判断する。
 

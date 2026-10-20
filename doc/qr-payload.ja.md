@@ -120,7 +120,7 @@ frontendが画面に出す同定用のQR。150バイト以下、ASCIIのみ、�
 | キー | 意味 | 値 | 最大バイト（値のみ） |
 |---|---|---|---|
 | `v` | 形式バージョン | `2`固定 | 1 |
-| `r` | 判定 | `N`=No Defect、`M`=Malware Detected、`C`=Counterfeit Suspected、`S`=Spec Mismatch、`D`=Defective、`I`=Inconclusive。対応表に無い判定は`?` | 1 |
+| `r` | 判定 | `N`=No Defect、`n`=No Defect (Scan Only)、`M`=Malware Detected、`C`=Counterfeit Suspected、`S`=Spec Mismatch、`D`=Defective、`I`=Inconclusive。対応表に無い判定は`?` | 1 |
 | `s` | シリアル | `result.json`の`device.serial`をASCII化（非ASCIIは`?`）した先頭32文字。空なら`device.kernel_name`を入れ`k`を`1`にする | 32 |
 | `k` | `s`がカーネル名であることを示す | `1`。`s`がシリアルのときはキー自体を省く | 1 |
 | `t` | 検査開始時刻（UTC） | `started_at`を`YYYYmmddTHHMMSSZ`に直した16文字。結果ディレクトリ名の先頭16文字と一致する | 16 |
@@ -151,7 +151,7 @@ frontendが通常QRの次のページとして出す。お薬手帳のQR（JAHIS
 | `t` | str | 開始時刻`YYYYmmddTHHMMSSZ`（通常QRと同じ） | 16 |
 | `s` | str | シリアルのASCII化、32文字（通常QRと同じ） | 32 |
 | `k` | int | `s`がカーネル名なら`1`、それ以外はキーを省く | 1 |
-| `r` | str | 判定コード（`N`/`M`/`C`/`S`/`D`/`I`） | 1 |
+| `r` | str | 判定コード（`N`/`n`/`M`/`C`/`S`/`D`/`I`） | 1 |
 | `e` | int | `elapsed_s`を整数秒に丸めた値 | 6 |
 | `m` | int | マルウェア検知数 | 4 |
 | `dv` | int \| null | ClamAV DBバージョン（`db_version`を整数化。失敗なら`null`） | 6 |
@@ -227,13 +227,14 @@ frontendが通常QRの次のページとして出す。お薬手帳のQR（JAHIS
 | コード | `verdict`の文字列 | 日本語表示 | 意味 |
 |---|---|---|---|
 | `N` | `No Defect` | 不良なし | 全ステップPASS |
+| `n` | `No Defect (Scan Only)` | 異常なし（検査のみ） | 検査のみモードで容量・速度以外が全てPASS。容量・速度は検査のみの理由でSKIPPED |
 | `M` | `Malware Detected` | マルウェア検知 | ClamAVが検知。他の失敗より優先 |
 | `C` | `Counterfeit Suspected` | 偽装疑い | 申告容量または実容量が公称の107%超、f3probeの`Bad news`、消失50%以上のいずれか。「疑い」であり断定ではない |
 | `S` | `Spec Mismatch` | 仕様不一致 | 容量不足または速度不足 |
 | `D` | `Defective` | 不良 | 容量は足りているがf3readが消失・破損・変化・上書きセクタを検知 |
 | `I` | `Inconclusive` | 判定不能 | ERROR、SKIPPED、未実装のステップが残る |
 
-優先順位は`M` > `C` > `D` > `S` > `N`で、ERRORやSKIPPEDが残れば`I`になる。
+優先順位は`M` > `C` > `D` > `S` > `N` > `n`で、ERRORやSKIPPEDが残れば`I`になる。
 
 frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語「偽装疑い」、英語表示は「Counterfeit Suspected」のまま、色はマルウェア検知の赤`#B71C1C`と不良の紫`#6A1B9A`と区別できる濃いマゼンタ系`#AD1457`を推奨する。読み取りアプリも同じ配色にすると画面と揃う。
 

@@ -130,6 +130,10 @@ scripts/
   ssh-access.sh            Opt-in key-only SSH for maintenance (sourced by install-all.sh, INSTALL_SSH=1)
   install-docker.sh        Docker setup (called from install-all.sh; can also be used alone)
   run-docker.sh            Starts an inspection container per USB drive
+  update-clamav.sh         Fetches and verifies the ClamAV definition DB (use it to refresh later)
+  clamav-db.sh             Shared fetch/verify functions (sourced by install-all.sh and update-clamav.sh)
+  erase-setting.sh         Shared setter for the two erase keys (sourced by install-docker.sh)
+  keyfile.sh               Shared idempotent "KEY = value" line setter
 README.md                  Overview and setup of the whole project
 LICENSE                    License of the whole project
 ```
@@ -191,14 +195,45 @@ Two steps. The station is ready for people who do not know the technology inside
    ```
    It installs Docker, uv, the display app and the ClamAV definition DB, turns on automatic
    login, writes the autostart entry and, in its last step, arms the kiosk (autostart enabled,
-   GNOME lockdown applied). The run is unattended and takes about 15 minutes.
+   GNOME lockdown applied). It also installs the Japanese font and enables erasing on the
+   host (see "3. Plug in a USB drive"). The run is unattended and takes about 15 minutes.
+   For a scan-only station that never erases, add `INSTALL_ALLOW_ERASE=0`.
 2. `sudo reboot`. From now on the app starts full screen every time the Pi is powered on.
 
-Without `INSTALL_YES=1` the script asks three questions up front, before anything is changed:
-whether to run the official uv installer (SHA-256 shown; skipped when uv is already installed),
-whether to run freshclam, and whether to arm the kiosk at the end (`[Y/n]`, Enter means yes).
+Without `INSTALL_YES=1` the script asks two questions up front, before anything is changed:
+whether to run the official uv installer (SHA-256 shown; skipped when uv is already installed)
+and whether to arm the kiosk at the end (`[Y/n]`, Enter means yes). Fetching the ClamAV
+definition DB (freshclam) is not a question: it always runs, retries up to 3 times, and the
+install stops with the re-run command when `main`, `daily` and `bytecode` are still missing.
 At the end it prints the kiosk state, the escape routes, the optional steps and a "checklist
-before unplugging the LAN". Re-running it keeps existing settings.
+before unplugging the LAN". Re-running it keeps existing settings, except the two erase lines
+(`allow_destructive` in `config.toml`, `USB_SENTINEL_DEVICE_ACCESS` in `docker.env`), which
+follow `INSTALL_ALLOW_ERASE` (the previous file is kept as `.bak`).
+
+#### Controls (mode switch)
+
+Press `M` to switch the inspection mode (or tap the mode button at the bottom left). From scan
+only a dialog shows a 4-digit code; enter it with keys `1`-`4` or the on-screen buttons. In
+"Scan + erase", `M` returns to scan only at once. The same key works in the kiosk (`--kiosk`).
+
+#### Japanese font and text console
+
+The installer installs `fonts-noto-cjk` and runs `fc-cache -f`. The app uses
+`Noto Sans CJK JP`, else the first installed fallback (`Noto Sans JP`, `IPAGothic`, ...). When
+none is found, the info strip shows "No Japanese font (install fonts-noto-cjk)" (in ASCII,
+because Japanese would render as boxes). If uv's Python Tk lacks Xft, Japanese shows as boxes
+even with the font installed; step 5 of the install prints `Tk font system: xft` when it is
+fine. On the device you can check with (prints `xft` when supported):
+
+```bash
+uv run --project frontend python -c "import tkinter; r = tkinter.Tk(); print(r.tk.call('::tk::pkgconfig', 'get', 'fontsystem'))"
+```
+
+To make the text console (Ctrl+Alt+F3) readable on the small screen, the installer sets
+`FONTFACE="Terminus"` and `FONTSIZE="16x32"` in `/etc/default/console-setup` (the old file is
+kept as `.bak`). It applies during the install or after a reboot; `sudo setupcon` applies it at
+once. The console cannot show Japanese, so the locale is unchanged. Use
+`INSTALL_CONSOLE_FONT=0` to keep the current font.
 
 #### Optional: port calibration
 
@@ -232,8 +267,7 @@ setting is needed. `INSTALL_VIDEO_HINT=1` adds the boot hint `video=HDMI-A-1:480
 because the panel's acceptance of that mode is unverified. The installer keeps
 `cmdline.txt.bak` for undoing it.
 
-Installing the touch panel driver and enabling the capacity and speed inspections (which erase
-the sample) are not automated; the script lists them at the end.
+Installing the touch panel driver is not automated; the script lists it at the end.
 
 #### SSH for maintenance (optional)
 
@@ -272,7 +306,8 @@ sudo bash scripts/install-docker.sh
 ```
 
 Settings go in `/etc/usb-sentinel/config.toml`, and startup settings such as the image go in
-`/etc/usb-sentinel/docker.env`. A reinstall keeps the existing settings.
+`/etc/usb-sentinel/docker.env`. A reinstall keeps the existing settings except the two erase
+lines, which follow `INSTALL_ALLOW_ERASE` (default `1`).
 When you change the image, also update `USB_SENTINEL_IMAGE` in `docker.env`.
 The old udev rule for direct Python execution is removed during installation, so nothing starts twice.
 Re-plug any USB drive that was already connected before the installation.
@@ -280,13 +315,23 @@ Re-plug any USB drive that was already connected before the installation.
 ### 2. Prepare the ClamAV definition DB
 
 The DB is stored on the host and passed to the inspection container read-only.
-Fetch and update it with the following while connected to the network,
-and then bring it into the isolated environment. Do not update it during a USB inspection.
+`install-all.sh` fetches it. To refresh it later, plug in the LAN and run (safe to repeat):
 
 ```bash
-sudo docker run --rm --entrypoint freshclam \
-  --mount type=bind,src=/var/lib/clamav,dst=/var/lib/clamav \
-  usb-sentinel:local --user=root --stdout
+sudo bash scripts/update-clamav.sh
+```
+
+The script runs freshclam in the container up to 3 times and checks that `main`, `daily` and
+`bytecode` (`.cvd` or `.cld`) exist and are non-empty in `/var/lib/clamav`; otherwise it
+prints the reason and exits 1. Do not update it during a USB inspection.
+
+Without the DB the malware step is `ERROR` with the reason
+`malware: ClamAV signature database missing (run scripts/update-clamav.sh)`, and the verdict
+is `Inconclusive`.
+
+To check by hand:
+
+```bash
 
 sudo docker run --rm --network none \
   --mount type=bind,src=/var/lib/clamav,dst=/var/lib/clamav,readonly \
@@ -323,7 +368,8 @@ and the container's AppArmor restriction is lifted. Mounting takes place inside 
 `--privileged` and sharing the Docker socket with the container are not used.
 
 Destructive inspections (capacity and speed) run only when three conditions hold at the
-moment the drive is inserted:
+moment the drive is inserted. The installer meets the administrator conditions 1 and 2 by
+default; the operator chooses condition 3 with `M` or the mode button.
 
 1. `USB_SENTINEL_DEVICE_ACCESS=rw` in `/etc/usb-sentinel/docker.env` (the container gets the
    device with `:rw`);
@@ -333,7 +379,8 @@ moment the drive is inserted:
    within 30 s. The code is shown only on the screen, so a keyboard alone cannot turn erase
    mode on.
 
-The first two are the administrator's ceiling, the third is the operator's choice per
+The first two are the administrator's ceiling (enabled by the installer by default, disabled
+with `INSTALL_ALLOW_ERASE=0`), the third is the operator's choice per
 session. `run-docker.sh` reads the display's mode file (`/run/usb-sentinel-control/mode`) once
 at insertion and passes `--mode full` together with `:rw` only when all three hold; otherwise
 the device stays read-only and the container runs `--mode scan_only`. With `allow_destructive
@@ -341,7 +388,11 @@ the device stays read-only and the container runs `--mode scan_only`. With `allo
 (reason `Inspection mode is scan_only` in the second case). Behaviour change: with
 `allow_destructive = true` and `docker.env` still `ro`, the steps are now also `SKIPPED`
 "Inspection mode is scan_only" instead of `ERROR` (insufficient permission), because the host
-never requests `full` without `rw`. In every case the verdict is `Inconclusive`. A manual run
+never requests `full` without `rw`. In every case the verdict is `Inconclusive`, so a
+scan-only inspection is `Inconclusive` even with a complete ClamAV DB. The `reasons` in
+`result.json` and the detail QR tell which: `capacity: Inspection mode is scan_only` means scan
+only, `malware: ClamAV signature database missing ...` means no DB. `No Defect` needs "Scan +
+erase". A manual run
 (`usb-sentinel inspect`) erases only with `--mode full` (default `scan_only`).
 
 The mode is fixed when a drive is inserted. Switching the display back to scan only does not
@@ -354,24 +405,20 @@ display before inserting a drive. The mode is written to `result.json` (`mode`),
 backend and the frontend together, because an old frontend rejects `user_version` 2 and falls
 back to scanning the results directory (see [doc/qr-payload.md](doc/qr-payload.md)).
 
-`scripts/install-docker.sh` keeps the existing `docker.env` on reinstall, so a `docker.env`
-created by an earlier installation does not contain `USB_SENTINEL_DEVICE_ACCESS` (`run-docker.sh` treats
-an undefined value as `ro`). To enable it, append it by hand.
+On every run `scripts/install-docker.sh` sets only the `allow_destructive` and
+`USB_SENTINEL_DEVICE_ACCESS` lines from `INSTALL_ALLOW_ERASE` (other lines unchanged, previous
+file kept as `.bak`), so re-installing a host that still had `ro` enables erasing. To make a
+scan-only station:
 
 ```bash
-# Append the write permission to docker.env (existing environment)
-echo 'USB_SENTINEL_DEVICE_ACCESS=rw' | sudo tee -a /etc/usb-sentinel/docker.env
-
-# Set allow_destructive in config.toml to true
-sudo sed -i 's/^allow_destructive = false/allow_destructive = true/' /etc/usb-sentinel/config.toml
+sudo INSTALL_ALLOW_ERASE=0 bash scripts/install-docker.sh
 
 # Confirm the change (takes effect the next time a USB drive is plugged in)
 grep USB_SENTINEL_DEVICE_ACCESS /etc/usb-sentinel/docker.env
 grep allow_destructive /etc/usb-sentinel/config.toml
 ```
 
-To revert, set the value in `docker.env` to `ro` or set `allow_destructive = false`.
-Either one alone returns the device to read-only, and the display's button becomes
+Either one disabled returns the device to read-only, and the display's button becomes
 "Scan only (locked)".
 
 ### Hardening against BadUSB

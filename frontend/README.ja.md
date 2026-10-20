@@ -143,7 +143,7 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/ins
 | `unit_template` | 文字列 | `usb-sentinel-docker@{kernel}.service` | 検査ユニット名の雛形。`{kernel}`を含まないと起動しない |
 | `poll_interval_s` | 数値 | `1.0` | 更新周期（秒）。`0.2`〜`10` |
 | `retain_minutes` | 整数 | `60` | 抜去後に結果を表示し続ける時間（分）。`1`以上 |
-| `font_family` | 文字列 | `Noto Sans CJK JP` | 無ければ警告を出してTkの既定フォントを使う |
+| `font_family` | 文字列 | `Noto Sans CJK JP` | 無ければ`Noto Sans CJK JP`、`Noto Sans JP`、`Noto Sans CJK SC`、`IPAGothic`、`IPAexGothic`、`TakaoGothic`、`VL Gothic`の順に探し、選んだフォント名をログに出す。どれも無ければTkの既定フォントを使い、情報ストリップに「No Japanese font (install fonts-noto-cjk)」と出す |
 | `language` | 文字列 | `en` | 起動時の画面の言語（`en`／`ja`）。画面の言語ボタンかキー`L`で切り替えた言語は状態ファイル（「操作」節）に記録され、設定より優先される。それ以外の値は起動エラー |
 | `sqlite_path` | 文字列 | `/var/lib/usb-sentinel/db/inspections.sqlite` | backendのSQLite索引。読み取り専用で開く。空文字`""`で無効化し、結果ディレクトリの走査だけにする。無い・開けないときは自動で走査にフォールバックする（「SQLite索引の読み取り」節） |
 | `control_dir` | 文字列 | `/run/usb-sentinel-control` | `run-docker.sh`が挿入ごとに読む検査モードファイルの置き場所。状態ディレクトリ以外でアプリが書く唯一の場所。絶対パスで、`results_dir`と`sqlite_path`のディレクトリの外にあること。`""`で切替を無効にする（ボタンは「検査のみ（消去不可）」） |
@@ -171,7 +171,7 @@ uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /pa
 | 言語切替 | 左下中央のボタン（切替先の言語名を表示） | `L` |
 | 詳細QRと通常QRの切替 | QR領域（右側）をタップ | `Q`。通常QR→詳細QRの1枚目、詳細QR中→通常QR |
 | 強制再読み込み | なし | `F5`。読み込み済みの`result.json`のキャッシュと「結果破損」の記録を捨て、次の更新で全部読み直す |
-| 検査モードの切替 | モードボタン（左下の最下段）をタップ | `M`。検査のみからはコードのダイアログが開く。「検査＋消去」からはすぐに検査のみへ戻る |
+| 検査モードの切替 | モードボタン（左下の最下段）をタップ | `M`（`--kiosk`でも使える）。検査のみからはコードのダイアログが開く。「検査＋消去」からはすぐに検査のみへ戻る。導入スクリプトがホスト側の消去許可を既定で有効にするため、操作者は`M`で切り替えるだけでよい |
 | コード入力（ダイアログ中） | `1`〜`4`の4つのボタンをタップ | `1`〜`4`（テンキーでも可）。ダイアログに`コード: 3 1 4 2`のように出る数字を順に入れる |
 | ダイアログを閉じる | 右上の「やめる」をタップ | `Esc`。誤入力に数えずに閉じる |
 | 終了 | なし | `Ctrl+Q`（`--kiosk`では無効） |

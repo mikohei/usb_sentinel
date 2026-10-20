@@ -130,6 +130,10 @@ scripts/
   ssh-access.sh            保守用の鍵認証SSH（任意。install-all.shがINSTALL_SSH=1のときに読み込む）
   install-docker.sh        Docker構成の導入（install-all.shから呼ばれる。単独でも使える）
   run-docker.sh            USBごとに検査コンテナを起動
+  update-clamav.sh         ClamAV定義DBの取得と確認（あとから更新するときに使う）
+  clamav-db.sh             定義DBの取得・確認の共通関数（install-all.shとupdate-clamav.shが読み込む）
+  erase-setting.sh         消去許可の2行を設定する共通関数（install-docker.shが読み込む）
+  keyfile.sh               設定ファイルの1行を冪等に書き換える共通関数
 README.md                  プロジェクト全体の説明と導入手順
 LICENSE                    プロジェクト全体のライセンス
 ```
@@ -189,15 +193,44 @@ DBが壊れたときは、検査が走っていないことを確認してから
    # 表示ユーザーをsudoの実行者以外にする場合
    sudo INSTALL_YES=1 DISPLAY_USER=kiosk bash scripts/install-all.sh
    ```
-   Docker、uv、表示アプリ、ClamAV定義DBを導入する。自動ログインを有効にし、自動起動の項目を書く。
+   Docker、uv、表示アプリ、ClamAV定義DB、日本語フォントを導入する。自動ログインを有効にし、自動起動の項目を書く。
+   消去（容量・速度検査）はホスト側で既定で許可する（後述「3. USBを挿して実行確認」）。
    最後の手順でキオスクを有効化する（自動起動を有効にし、GNOMEのロックダウンを適用する）。
    途中の操作は不要で、約15分で終わる。
+   消去をしない検査専用機にするときは`INSTALL_ALLOW_ERASE=0`を付ける。
 2. `sudo reboot`を実行する。以後、電源を入れるたびにアプリが全画面で起動する。
 
-`INSTALL_YES=1`を付けない場合、スクリプトは冒頭で3つの質問をする。何も変更する前に済ませる。
-uvの公式インストーラを実行するか（SHA-256を表示する。uvが入っていれば省く）、freshclamを実行するか、
-最後にキオスクを有効化するか（`[Y/n]`。Enterだけなら「はい」）の3つである。
-終了時にキオスクの状態、復旧の経路、任意の手順、「LANを外す前のチェックリスト」を表示する。再実行しても既存の設定は保持する。
+`INSTALL_YES=1`を付けない場合、スクリプトは冒頭で2つの質問をする。何も変更する前に済ませる。
+uvの公式インストーラを実行するか（SHA-256を表示する。uvが入っていれば省く）と、
+最後にキオスクを有効化するか（`[Y/n]`。Enterだけなら「はい」）である。
+ClamAV定義DBの取得（freshclam）は質問せず必ず実行する。失敗したら3回まで試し、
+`main`・`daily`・`bytecode`の3つがそろわなければ導入を止めて、再実行のコマンドを表示する。
+終了時にキオスクの状態、復旧の経路、任意の手順、「LANを外す前のチェックリスト」を表示する。
+再実行しても既存の設定は保持する。例外は`config.toml`の`allow_destructive`と`docker.env`の
+`USB_SENTINEL_DEVICE_ACCESS`の2行で、`INSTALL_ALLOW_ERASE`に合わせて書き換える（元のファイルは`.bak`に残す）。
+
+#### 操作（モード切替）
+
+モードの切替は`M`キーで行う。左下のモードボタンをタップしてもよい。
+「検査のみ」から切り替えるとダイアログに4桁のコードが出るので、キー`1`〜`4`か画面のボタンで入力する。
+「検査＋消去」で`M`を押すと、すぐに検査のみへ戻る。キオスク（`--kiosk`）でも同じキーで動く。
+
+#### 日本語フォントとテキストコンソール
+
+導入スクリプトは`fonts-noto-cjk`を入れて`fc-cache -f`を実行する。アプリは`Noto Sans CJK JP`を使い、
+無ければ`Noto Sans JP`、`IPAGothic`などの代替を順に探す。どれも無いときは情報ストリップに
+「No Japanese font (install fonts-noto-cjk)」と出る（英字で出すのは、日本語が豆腐表示になるため）。
+uvのPythonに付くTkがXftに対応していないと、フォントがあっても日本語が四角になる。導入の手順5で
+`Tk font system: xft`と出れば問題ない。実機では次のコマンドで確かめられる（`xft`と出れば対応している）。
+
+```bash
+uv run --project frontend python -c "import tkinter; r = tkinter.Tk(); print(r.tk.call('::tk::pkgconfig', 'get', 'fontsystem'))"
+```
+
+テキストコンソール（Ctrl+Alt+F3）は小さな画面でも読めるよう、`/etc/default/console-setup`を
+`FONTFACE="Terminus"`、`FONTSIZE="16x32"`にする（元のファイルは`.bak`に残す）。反映は導入中か再起動後で、
+`sudo setupcon`でもすぐに反映できる。コンソールは日本語を表示できないため、ロケールは変えない。
+変えたくないときは`INSTALL_CONSOLE_FONT=0`を付ける。
 
 #### 任意: ポートのキャリブレーション
 
@@ -228,7 +261,7 @@ Ctrl+Alt+F1でデスクトップに戻る。ログイン時の異常終了は`~/
 テキストコンソールとGDMのログイン画面が鮮明になる。パネルがこのモードを受け付けるか未確認のため、既定では付けない。
 スクリプトは元に戻すための`cmdline.txt.bak`を残す。
 
-タッチパネルのドライバ導入と、容量・速度検査の有効化（検体を消去する）は自動化しない。スクリプトが終了時に案内する。
+タッチパネルのドライバ導入は自動化しない。スクリプトが終了時に案内する。
 
 #### 保守用SSH（任意）
 
@@ -267,7 +300,8 @@ sudo bash scripts/install-docker.sh
 ```
 
 設定は`/etc/usb-sentinel/config.toml`、イメージなどの起動設定は
-`/etc/usb-sentinel/docker.env`に置く。再導入時は既存設定を保持する。
+`/etc/usb-sentinel/docker.env`に置く。再導入時は既存設定を保持し、消去に関わる2行だけを
+`INSTALL_ALLOW_ERASE`（既定`1`）に合わせる。
 イメージを変更する場合は`docker.env`の`USB_SENTINEL_IMAGE`も合わせて更新する。
 従来の直接Python実行用udevルールは導入時に削除するので、二重起動しない。
 導入前から接続していたUSBは、導入後に挿し直す。
@@ -275,14 +309,22 @@ sudo bash scripts/install-docker.sh
 ### 2. ClamAV定義DBの準備
 
 DBはホストに保存し、検査コンテナへ読み取り専用で渡す。
-ネットワーク接続中に以下で取得・更新してから隔離環境へ持ち込む。
+`install-all.sh`が導入時に取得する。あとから更新するときは、LANをつないで次を実行する（何度実行してもよい）。
 USB検査中は更新しない。
 
 ```bash
-sudo docker run --rm --entrypoint freshclam \
-  --mount type=bind,src=/var/lib/clamav,dst=/var/lib/clamav \
-  usb-sentinel:local --user=root --stdout
+sudo bash scripts/update-clamav.sh
+```
 
+このスクリプトはコンテナ内でfreshclamを最大3回実行し、`/var/lib/clamav`に`main`・`daily`・`bytecode`
+（`.cvd`か`.cld`）が空でなくそろっているかを確かめる。そろわなければ理由を表示して終了コード1で終わる。
+
+定義DBが無いまま検査すると、マルウェアのステップは`ERROR`になり、理由は
+`malware: ClamAV signature database missing (run scripts/update-clamav.sh)`となる。総合判定は`Inconclusive`である。
+
+確認には次を使う。
+
+```bash
 sudo docker run --rm --network none \
   --mount type=bind,src=/var/lib/clamav,dst=/var/lib/clamav,readonly \
   usb-sentinel:local selftest
@@ -318,19 +360,24 @@ mountのため`SYS_ADMIN`、ファイル読み取りのため`DAC_OVERRIDE`を�
 `--privileged`やDockerソケットのコンテナ共有は使わない。
 
 破壊的検査（容量・速度）は、ドライブを挿した時点で次の3条件がそろっているときだけ動く。
+導入スクリプトは管理者側の条件1と2を既定で満たす。操作者は`M`キーかモードボタンで条件3を選ぶ。
 
 1. `/etc/usb-sentinel/docker.env`の`USB_SENTINEL_DEVICE_ACCESS=rw`（コンテナにデバイスを`:rw`で渡す）
 2. `/etc/usb-sentinel/config.toml`の`allow_destructive = true`（この機器は消去して「よい」）
 3. ディスプレイ左下のモードボタンが「検査＋消去」になっている。切り替えるとダイアログに4桁のコードが出るので、
    30秒以内にキー`1`〜`4`か画面のボタンで入力する。コードは画面にしか出ないため、キーボードだけでは消去モードにできない。
 
-前の2つは管理者が決める上限、3つ目は操作者がセッションごとに選ぶ。`run-docker.sh`は挿入時に
+前の2つは管理者が決める上限（導入スクリプトが既定で有効にする。`INSTALL_ALLOW_ERASE=0`なら無効）、
+3つ目は操作者がセッションごとに選ぶ。`run-docker.sh`は挿入時に
 ディスプレイのモードファイル（`/run/usb-sentinel-control/mode`）を1回読み、3条件がそろったときだけ
 `--mode full`と`:rw`をそろえて渡す。それ以外はデバイスを読み取り専用のまま渡し、コンテナは`--mode scan_only`で動く。
 `allow_destructive = false`のとき、またはディスプレイが検査のみのときは、容量・速度の両ステップが`SKIPPED`になる
 （後者の理由は`Inspection mode is scan_only`）。挙動の変更点として、`allow_destructive = true`で`docker.env`が
 `ro`のままの場合も、従来の`ERROR`（権限不足）ではなく`SKIPPED`「Inspection mode is scan_only」になる
-（ホストは`rw`なしに`full`を要求しない）。いずれも総合判定は`Inconclusive`である。手動実行
+（ホストは`rw`なしに`full`を要求しない）。いずれも総合判定は`Inconclusive`である。
+つまり検査のみのモードでは、定義DBがそろっていても判定は`Inconclusive`になる。理由は`result.json`の`reasons`と詳細QRで分かる。
+`capacity: Inspection mode is scan_only`なら検査のみだったこと、`malware: ClamAV signature database missing ...`なら定義DBが無いことが原因である。
+`No Defect`を得るには「検査＋消去」で検査する。手動実行
 （`usb-sentinel inspect`）で消去するには`--mode full`を付ける（既定は`scan_only`）。
 
 モードは挿入時に固定される。ディスプレイを検査のみに戻しても、すでに消去モードで走っている検査は止まらず、
@@ -341,24 +388,19 @@ mountのため`SYS_ADMIN`、ファイル読み取りのため`DAC_OVERRIDE`を�
 書かれる。古いfrontendは`user_version` 2を拒否して結果ディレクトリの走査にフォールバックするため、
 backendとfrontendは同時に更新する（[doc/qr-payload.ja.md](doc/qr-payload.ja.md)参照）。
 
-`scripts/install-docker.sh`は再導入時に既存の`docker.env`を保持するため、以前の導入で
-作られた`docker.env`に`USB_SENTINEL_DEVICE_ACCESS`は含まれない（`run-docker.sh`は
-未定義を`ro`と扱う）。有効にするには手で追記する。
+`scripts/install-docker.sh`は再導入時も`allow_destructive`と`USB_SENTINEL_DEVICE_ACCESS`の2行だけを
+`INSTALL_ALLOW_ERASE`に合わせて書き換える（ほかの行は変えず、変更前のファイルを`.bak`に残す）。
+以前の導入で`ro`のままの機器も、再導入すれば消去を許可した状態になる。検査専用機に戻すには次を実行する。
 
 ```bash
-# docker.envに書き込み許可を追記（既存環境）
-echo 'USB_SENTINEL_DEVICE_ACCESS=rw' | sudo tee -a /etc/usb-sentinel/docker.env
-
-# config.tomlのallow_destructiveをtrueにする
-sudo sed -i 's/^allow_destructive = false/allow_destructive = true/' /etc/usb-sentinel/config.toml
+sudo INSTALL_ALLOW_ERASE=0 bash scripts/install-docker.sh
 
 # 反映確認（次にUSBを挿したときから有効）
 grep USB_SENTINEL_DEVICE_ACCESS /etc/usb-sentinel/docker.env
 grep allow_destructive /etc/usb-sentinel/config.toml
 ```
 
-元に戻すには`docker.env`の値を`ro`にするか、`allow_destructive = false`にする。
-どちらか一方で読み取り専用に戻り、ディスプレイのボタンは「検査のみ（消去不可）」になる。
+どちらか一方が無効なら読み取り専用になり、ディスプレイのボタンは「検査のみ（消去不可）」になる。
 
 ### BadUSB対策（ハードニング）
 

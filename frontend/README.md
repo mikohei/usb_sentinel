@@ -143,7 +143,7 @@ Place it at `~/.config/usb-sentinel/display.toml`. Without it, the app runs with
 | `unit_template` | string | `usb-sentinel-docker@{kernel}.service` | Template for the inspection unit name. The app does not start unless it contains `{kernel}` |
 | `poll_interval_s` | number | `1.0` | Update interval in seconds. `0.2` to `10` |
 | `retain_minutes` | integer | `60` | How long to keep showing a result after removal, in minutes. `1` or more |
-| `font_family` | string | `Noto Sans CJK JP` | If it is missing, the app prints a warning and uses Tk's default font |
+| `font_family` | string | `Noto Sans CJK JP` | If it is missing, the app tries `Noto Sans CJK JP`, `Noto Sans JP`, `Noto Sans CJK SC`, `IPAGothic`, `IPAexGothic`, `TakaoGothic` and `VL Gothic` in order and logs the family it chose. With none installed it uses Tk's default font and the info strip shows "No Japanese font (install fonts-noto-cjk)" |
 | `language` | string | `en` | The language of the screen at startup (`en`/`ja`). A language chosen with the on-screen language button or the `L` key is recorded in the state file (the "Controls" section) and takes precedence over this setting. Any other value is a startup error |
 | `sqlite_path` | string | `/var/lib/usb-sentinel/db/inspections.sqlite` | The backend's SQLite index. Opened read-only. The empty string `""` disables it and uses only the results directory scan. If the file is missing or cannot be opened, the app falls back to the scan automatically (the "Reading the SQLite index" section) |
 | `control_dir` | string | `/run/usb-sentinel-control` | Directory of the inspection-mode file read by `run-docker.sh` at each insertion. The only place outside the state directory the app writes to. Must be absolute and outside `results_dir` and the `sqlite_path` directory. `""` disables switching (the button shows "Scan only (locked)") |
@@ -171,7 +171,7 @@ The options of `calibrate` are `--sys-block` and `--interval` (the check interva
 | Switch language | The button at the bottom center left (shows the name of the language to switch to) | `L` |
 | Switch between detail QR and normal QR | Tap the QR area (right side) | `Q`. From the normal QR to the first detail QR; from a detail QR back to the normal QR |
 | Force reload | None | `F5`. Discards the cache of loaded `result.json` files and the "Broken" records, and reads everything again on the next update |
-| Toggle the inspection mode | Tap the mode button (bottom left, lowest row) | `M`. From scan only it opens the code dialog; from "Scan + erase" it returns to scan only at once |
+| Toggle the inspection mode | Tap the mode button (bottom left, lowest row) | `M` (also in `--kiosk`). From scan only it opens the code dialog; from "Scan + erase" it returns to scan only at once. The installer enables the admin erase settings on the host by default, so the operator only switches with `M` |
 | Enter the code (dialog open) | Tap the four buttons `1` to `4` | `1` to `4` (the numeric keypad also works). The dialog shows `Code: 3 1 4 2`-style digits; enter them in order |
 | Cancel the dialog | Tap "Cancel" (top right) | `Esc`. Closes the dialog without counting a wrong code |
 | Quit | None | `Ctrl+Q` (disabled with `--kiosk`) |

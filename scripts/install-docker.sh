@@ -4,11 +4,19 @@ set -euo pipefail
 readonly REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly APP_DIR="/opt/usb-sentinel"
 readonly IMAGE="${USB_SENTINEL_IMAGE:-usb-sentinel:local}"
+# 1 (default): this host may erase (allow_destructive = true, USB_SENTINEL_DEVICE_ACCESS=rw);
+# the operator still has to switch the display to "Scan + erase". 0: scan-only station.
+readonly INSTALL_ALLOW_ERASE="${INSTALL_ALLOW_ERASE:-1}"
 
 if [[ ${EUID} -ne 0 || "$(uname -s)" != Linux ]]; then
     echo "error: run with sudo on the Ubuntu host" >&2
     exit 1
 fi
+case "${INSTALL_ALLOW_ERASE}" in
+    0|1) ;;
+    *) echo "error: INSTALL_ALLOW_ERASE must be 0 or 1" >&2; exit 1 ;;
+esac
+source "${REPO_DIR}/scripts/erase-setting.sh"
 for command in docker udevadm systemctl lsblk systemd-tmpfiles; do
     command -v "${command}" >/dev/null || { echo "error: missing ${command}" >&2; exit 1; }
 done
@@ -29,20 +37,14 @@ install -m 0755 "${REPO_DIR}/scripts/run-docker.sh" "${APP_DIR}/scripts/run-dock
 if [[ ! -f /etc/usb-sentinel/config.toml ]]; then
     install -m 0644 "${REPO_DIR}/deploy/config.example.toml" /etc/usb-sentinel/config.toml
 fi
-# Existing docker.env is kept as-is. Reinstalls therefore never add or change its keys;
-# run-docker.sh treats a missing USB_SENTINEL_DEVICE_ACCESS as "ro".
+# Existing docker.env and config.toml keep every key except the two erase keys, which
+# apply_erase_setting (scripts/erase-setting.sh) sets from INSTALL_ALLOW_ERASE.
 if [[ ! -f /etc/usb-sentinel/docker.env ]]; then
-    cat > /etc/usb-sentinel/docker.env <<EOF
-USB_SENTINEL_IMAGE=${IMAGE}
-# Host ceiling for USB device access passed to docker --device: ro (default) or rw.
-# rw lets the capacity (f3) and speed (fio) checks ERASE the drive contents.
-# The device becomes writable only when this is rw AND config.toml has
-# allow_destructive = true AND the display is switched to "Scan + erase" when the
-# drive is inserted. Any one of the three missing keeps the device read-only.
-USB_SENTINEL_DEVICE_ACCESS=ro
-EOF
-    chmod 0644 /etc/usb-sentinel/docker.env
+    fresh_access=ro
+    [[ "${INSTALL_ALLOW_ERASE}" == 1 ]] && fresh_access=rw
+    docker_env_write /etc/usb-sentinel/docker.env "${IMAGE}" "${fresh_access}"
 fi
+apply_erase_setting /etc/usb-sentinel "${INSTALL_ALLOW_ERASE}"
 install -m 0644 "${REPO_DIR}/deploy/usb-sentinel-docker@.service" \
     /etc/systemd/system/usb-sentinel-docker@.service
 # Remove only this project's legacy rule to prevent two inspections of the same disk.
@@ -52,5 +54,5 @@ install -m 0644 "${REPO_DIR}/deploy/99-usb-sentinel-docker.rules" \
 systemctl daemon-reload
 udevadm control --reload
 echo "Display users need: sudo usermod -aG usb-sentinel <user> (then log in again)."
-echo "Installed. Update ClamAV DB using the README steps, then insert a USB disk."
-echo "Erasing checks run only when the display's mode button is set to \"Scan + erase\"."
+echo "Installed. Fetch the ClamAV DB (sudo bash scripts/update-clamav.sh), then insert a USB disk."
+echo "Erasing checks run only when the display is switched to \"Scan + erase\" (M key or the mode button)."

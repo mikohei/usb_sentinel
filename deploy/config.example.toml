@@ -19,6 +19,8 @@ mount_root = "/run/usb-sentinel/mnt"
 # then passes --mode full with the device read-write. Drives inserted in scan-only
 # mode keep their data. The steps are reached only after the ClamAV scan and the
 # hash inventory have finished. Keep false when samples are returned to their owner.
+# This example keeps the safe value; scripts/install-docker.sh sets true (and
+# USB_SENTINEL_DEVICE_ACCESS=rw) unless it runs with INSTALL_ALLOW_ERASE=0.
 allow_destructive = false
 
 # Whether to build the file hash inventory (hash-inventory.tsv).

@@ -44,6 +44,8 @@ def _ordered(text: str, *needles: str) -> None:
         "boot-video-hint.sh",
         "run-docker.sh",
         "ssh-access.sh",
+        "keyfile.sh",
+        "erase-setting.sh",
     ],
 )
 def test_scripts_parse(name: str) -> None:

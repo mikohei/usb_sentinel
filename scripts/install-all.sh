@@ -3,7 +3,8 @@
 #
 # Run once while the Pi is connected to the network. Afterwards unplug the wired
 # LAN and use the Pi as an isolated inspection station. Re-running is safe: the
-# existing config.toml, docker.env and display.toml are never overwritten.
+# existing display.toml is never overwritten, and config.toml/docker.env keep every key
+# except the two erase keys (allow_destructive, USB_SENTINEL_DEVICE_ACCESS).
 #
 # Usage:
 #   sudo bash scripts/install-all.sh                 # display user = the sudo caller
@@ -12,6 +13,8 @@
 #   sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
 #                                                    # opt-in key-only SSH for the sudo caller
 #   sudo INSTALL_KIOSK=0 bash scripts/install-all.sh # install but do NOT arm the kiosk at the end
+#   sudo INSTALL_ALLOW_ERASE=0 bash scripts/install-all.sh
+#                                                    # scan-only station: the host never erases
 #   sudo INSTALL_VIDEO_HINT=1 bash scripts/install-all.sh
 #                                                    # also add video=HDMI-A-1:480x320@60 to cmdline.txt
 #   sudo bash scripts/kiosk-enable.sh                # arm later, when INSTALL_KIOSK=0 was used
@@ -27,7 +30,8 @@
 #      kiosk question.
 #   2. apt: Docker Engine, Noto CJK fonts, python3-tk, curl
 #   3. uv (official installer downloaded and confirmed in step 1)
-#   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs)
+#   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs,
+#      erase enabled on the host unless INSTALL_ALLOW_ERASE=0)
 #   5. frontend: uv sync --frozen and a tkinter import check
 #   6. Display user: usb-sentinel group, GDM autologin, GNOME automount off,
 #      sleep/lock off, display.toml, XDG autostart entry written DISABLED
@@ -48,9 +52,10 @@
 # What it leaves to the operator (printed at the end):
 #   - Touch panel driver (vendor scripts are never executed by this project)
 #   - Port calibration (optional: uncalibrated ports show P? and keep working)
-#   - Nominal capacity/speed in config.toml, and enabling destructive checks
-#     (allow_destructive = true plus USB_SENTINEL_DEVICE_ACCESS=rw; erasing then
-#     still needs the display's mode button switched to "Scan + erase")
+#   - Nominal capacity/speed in config.toml
+#   - Switching the display to "Scan + erase" (M key or the mode button, code shown on
+#     screen). The installer enables erasing on the host (allow_destructive = true,
+#     USB_SENTINEL_DEVICE_ACCESS=rw; INSTALL_ALLOW_ERASE=0 for scan-only stations).
 #   The app scales its 480x320 design to the actual screen; no resolution setting
 #   is needed.
 set -euo pipefail
@@ -63,6 +68,9 @@ readonly INSTALL_SSH="${INSTALL_SSH:-0}"
 readonly INSTALL_KIOSK="${INSTALL_KIOSK:-}"
 # Boot video hint (video=HDMI-A-1:480x320@60 in cmdline.txt): opt-in, the app scales anyway.
 readonly INSTALL_VIDEO_HINT="${INSTALL_VIDEO_HINT:-0}"
+# Host erase gates (config.toml allow_destructive, docker.env USB_SENTINEL_DEVICE_ACCESS):
+# 1 (default) enables them, 0 makes a scan-only station. Read by install-docker.sh.
+readonly INSTALL_ALLOW_ERASE="${INSTALL_ALLOW_ERASE:-1}"
 # Admin user allowed to log in over SSH: the sudo caller, never the display (kiosk) user.
 readonly SSH_ADMIN_USER="${SSH_ADMIN_USER:-${SUDO_USER:-}}"
 readonly UV_VERSION_PIN="${UV_VERSION_PIN:-}"   # e.g. 0.11.7; empty = latest
@@ -109,6 +117,8 @@ source "${REPO_DIR}/scripts/boot-video-hint.sh"
 log "1/10 Preflight checks"
 [[ ${EUID} -eq 0 ]] || die "run with sudo"
 [[ "$(uname -s)" == Linux ]] || die "run on Linux (Ubuntu)"
+[[ "${INSTALL_ALLOW_ERASE}" == 0 || "${INSTALL_ALLOW_ERASE}" == 1 ]] \
+    || die "INSTALL_ALLOW_ERASE must be 0 or 1"
 [[ -n "${DISPLAY_USER}" ]] || die "cannot determine the display user; set DISPLAY_USER=<user>"
 id "${DISPLAY_USER}" >/dev/null 2>&1 || die "user ${DISPLAY_USER} does not exist"
 readonly USER_HOME="$(getent passwd "${DISPLAY_USER}" | cut -d: -f6)"
@@ -194,6 +204,8 @@ fi
 
 # ---------------------------------------------------------------- 4. backend
 log "4/10 backend (Docker image, udev, systemd, result directories)"
+# INSTALL_ALLOW_ERASE is readonly here, so it is exported rather than set per command.
+export INSTALL_ALLOW_ERASE
 USB_SENTINEL_IMAGE="${IMAGE}" bash "${REPO_DIR}/scripts/install-docker.sh"
 
 # ---------------------------------------------------------------- 5. frontend
@@ -379,9 +391,10 @@ Kiosk: ${KIOSK_STATE}
 [Optional]
   - Touch panel driver (the keyboard covers every action): https://osoyoo.com/ja/?p=56145
   - /etc/usb-sentinel/config.toml: [capacity] nominal_bytes, [speed] nominal_*_mb_s.
-    Capacity and speed checks ERASE the sample; they need all three of
-      config.toml allow_destructive = true, docker.env USB_SENTINEL_DEVICE_ACCESS=rw,
-      and the display's mode button switched to "Scan + erase" (code shown on screen).
+    Capacity and speed checks ERASE the sample. The installer enabled erasing on the
+      host (allow_destructive = true, USB_SENTINEL_DEVICE_ACCESS=rw; re-run with
+      INSTALL_ALLOW_ERASE=0 for a scan-only station). The operator switches the display
+      to "Scan + erase" with M or the mode button (code shown on screen).
   - The app scales to any screen; no resolution setting is needed.
   - GDM autologin stays on in both kiosk states (${GDM_CONF}; remove the two
     AutomaticLogin lines to turn it off).

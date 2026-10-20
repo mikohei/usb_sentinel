@@ -22,10 +22,9 @@
 #
 # What it does:
 #   1. Preflight checks (Ubuntu, arm64, sudo, internet), then EVERY question the
-#      script has is asked here, before anything is changed. Three questions: the
+#      script has is asked here, before anything is changed. Two questions: the
 #      uv installer (downloaded, SHA-256 shown; skipped when uv is already
-#      installed), whether to run freshclam in step 8, and whether to arm the
-#      kiosk at the end (default yes). After the preflight the run is unattended.
+#      installed) and whether to arm the kiosk at the end (default yes). After the preflight the run is unattended.
 #      INSTALL_YES=1 answers yes to everything; INSTALL_KIOSK=0/1 overrides the
 #      kiosk question.
 #   2. apt: Docker Engine, Noto CJK fonts, python3-tk, curl
@@ -42,7 +41,9 @@
 #      (SSH_AUTHORIZED_KEY or SSH_AUTHORIZED_KEY_FILE required; no password
 #      fallback), drop-in /etc/ssh/sshd_config.d/90-usb-sentinel.conf, ufw rule
 #      only when ufw is already active. See scripts/ssh-access.sh
-#   8. ClamAV signature database (freshclam inside the container)
+#   8. ClamAV signature database: freshclam inside the container (always, up to 3
+#      attempts), then main/daily/bytecode are verified; the install stops with the
+#      re-run command (scripts/update-clamav.sh) when they are still missing
 #   9. Offline self-check (selftest with --network none, uv run --offline)
 #  10. Arms the kiosk (GNOME lockdown + autostart enabled) unless the kiosk
 #      question was answered no or INSTALL_KIOSK=0, then prints the escape
@@ -75,7 +76,7 @@ readonly INSTALL_ALLOW_ERASE="${INSTALL_ALLOW_ERASE:-1}"
 readonly SSH_ADMIN_USER="${SSH_ADMIN_USER:-${SUDO_USER:-}}"
 readonly UV_VERSION_PIN="${UV_VERSION_PIN:-}"   # e.g. 0.11.7; empty = latest
 readonly IMAGE="${USB_SENTINEL_IMAGE:-usb-sentinel:local}"
-readonly CLAMAV_DB_DIR="/var/lib/clamav"
+readonly CLAMAV_DB_DIR="${CLAMAV_DB_DIR:-/var/lib/clamav}"
 readonly UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
 log()  { printf '\n==> %s\n' "$*"; }
@@ -110,8 +111,10 @@ run_as_user() {
 # Shared helpers, sourced before step 1 so steps 6 and 10 can use them:
 #   kiosk-lockdown.sh: kiosk_gsettings_user, kiosk_autostart_hide, kiosk_resolution_hint, kiosk_arm
 #   boot-video-hint.sh: video_hint_append (step 6, only with INSTALL_VIDEO_HINT=1)
+#   clamav-db.sh: clamav_db_present, clamav_fetch, clamav_die_hint (step 8)
 source "${REPO_DIR}/scripts/kiosk-lockdown.sh"
 source "${REPO_DIR}/scripts/boot-video-hint.sh"
+source "${REPO_DIR}/scripts/clamav-db.sh"
 
 # ---------------------------------------------------------------- 1. preflight
 log "1/10 Preflight checks"
@@ -137,7 +140,7 @@ echo "display user: ${DISPLAY_USER} (${USER_HOME})"
 echo "repository:   ${REPO_DIR}"
 
 # All questions are asked here so that the rest of the run needs no operator.
-# Steps 3 and 8 only read RUN_UV_INSTALLER and RUN_FRESHCLAM.
+# Step 3 only reads RUN_UV_INSTALLER; step 8 (freshclam) always runs and asks nothing.
 readonly UV_BIN="${USER_HOME}/.local/bin/uv"
 RUN_UV_INSTALLER=0
 if [[ -x "${UV_BIN}" ]]; then
@@ -157,11 +160,6 @@ else
     RUN_UV_INSTALLER=1
 fi
 readonly RUN_UV_INSTALLER
-if confirm "Run freshclam in step 8/10 to update ${CLAMAV_DB_DIR}? (takes a few minutes)"; then
-    readonly RUN_FRESHCLAM=1
-else
-    readonly RUN_FRESHCLAM=0
-fi
 # Precedence: INSTALL_KIOSK (0 or 1) > INSTALL_YES=1 (yes) > prompt (default yes).
 if [[ "${INSTALL_KIOSK}" == 0 ]]; then
     readonly ARM_KIOSK=0; echo "kiosk: not armed at the end (INSTALL_KIOSK=0)"
@@ -315,13 +313,16 @@ fi
 
 # ---------------------------------------------------------------- 8. ClamAV DB
 log "8/10 Fetching the ClamAV signature database (cannot be updated once isolated)"
-if [[ "${RUN_FRESHCLAM}" == 1 ]]; then   # answered in step 1
-    docker run --rm --entrypoint freshclam \
-        --mount "type=bind,src=${CLAMAV_DB_DIR},dst=/var/lib/clamav" \
-        "${IMAGE}" --user=root --stdout || warn "freshclam failed; update later using the README steps"
+# A kiosk without signatures cannot do its job, so a missing database stops the install.
+# An offline re-install that keeps an existing complete database only warns.
+install -d -m 0755 "${CLAMAV_DB_DIR}"
+if clamav_db_present "${CLAMAV_DB_DIR}"; then
+    clamav_fetch "${IMAGE}" "${CLAMAV_DB_DIR}" \
+        || warn "freshclam failed; the existing database is kept. Refresh later with scripts/update-clamav.sh"
 else
-    warn "signature database not fetched; run README section '2. ClamAV definition DB' before isolating"
+    clamav_fetch "${IMAGE}" "${CLAMAV_DB_DIR}" || die "$(clamav_die_hint "${REPO_DIR}" "${CLAMAV_DB_DIR}")"
 fi
+echo "ClamAV signature database: present in ${CLAMAV_DB_DIR}"
 
 # ---------------------------------------------------------------- 9. self-check
 log "9/10 Verifying that everything works offline"
@@ -405,7 +406,8 @@ Kiosk: ${KIOSK_STATE}
  [ ] A disposable USB stick shows "Scanning" and then a verdict
  [ ] result.json appears under /var/lib/usb-sentinel/results/
  [ ] The on-screen QR codes scan with a phone (summary QR and the 3 detail pages)
- [ ] The ClamAV database date is recent (result.json: steps.malware.details.database)
+ [ ] The ClamAV database date is recent (result.json: steps.malware.details.database);
+     refresh it any time the LAN is plugged in:  sudo bash ${REPO_DIR}/scripts/update-clamav.sh
 
 Once all items pass, unplug the wired LAN. No network is needed at boot
 (autostart runs with --offline, inspections run with --network none).

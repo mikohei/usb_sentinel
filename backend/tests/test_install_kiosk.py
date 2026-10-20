@@ -2,8 +2,10 @@
 
 The scripts and frontend/deploy are copied under tmp_path/repo so REPO_DIR resolves there;
 install-docker.sh is stubbed, the sudo check patched to `true`, and uv is pre-installed in the
-fake home so the preflight asks only the freshclam and kiosk questions. Fakes append their argv
-to $FAKE_LOG; `install` replaces BSD install (which fails on -o/-g as non-root). bash 3.2.
+fake home so the preflight asks only the kiosk question. CLAMAV_DB_DIR points at a temp dir
+that already holds a complete signature database, so step 8 passes with the fake docker.
+Fakes append their argv to $FAKE_LOG; `install` replaces BSD install (which fails on -o/-g
+as non-root). bash 3.2.
 """
 
 from __future__ import annotations
@@ -110,6 +112,10 @@ def prepare(tmp_path: Path, extra_fakes: dict[str, str] | None = None) -> Instal
     uv.write_text(UV_FAKE)
     uv.chmod(0o755)
     (tmp_path / "calls.log").touch()
+    clamav = tmp_path / "clamav"
+    clamav.mkdir()
+    for name in ("main.cvd", "daily.cld", "bytecode.cvd"):
+        (clamav / name).write_text("signatures")
     desktop = home / ".config" / "autostart" / "usb-sentinel-display.desktop"
     return InstallRun(-1, "", "", desktop, tmp_path / "cmdline.txt", home, repo, bindir)
 
@@ -123,6 +129,8 @@ def base_env(run: InstallRun, env: dict[str, str]) -> dict[str, str]:
         "FAKE_HOME": str(run.home),
         "DISPLAY_USER": "kiosk",
         "CMDLINE_FILE": str(run.cmdline),
+        "CLAMAV_DB_DIR": str(run.home.parent / "clamav"),
+        "CLAMAV_RETRY_DELAY": "0",
         **env,
     }
 
@@ -173,7 +181,7 @@ def test_default_run_arms_kiosk(tmp_path: Path) -> None:
 
 def test_answer_n_leaves_hidden(tmp_path: Path) -> None:
     """Answering n to the kiosk question keeps Hidden=true and applies no lockdown."""
-    run = run_install_all_to_end(tmp_path, "y\nn\n", {})
+    run = run_install_all_to_end(tmp_path, "n\n", {})
     assert run.code == 0, run.output
     assert hidden_lines(run.desktop) == ["Hidden=true"]
     assert "gsettings set org.gnome.desktop.lockdown" not in run.log
@@ -183,7 +191,7 @@ def test_answer_n_leaves_hidden(tmp_path: Path) -> None:
 
 def test_answer_no_word_also_declines(tmp_path: Path) -> None:
     """The word no declines like n."""
-    run = run_install_all_to_end(tmp_path, "y\nno\n", {})
+    run = run_install_all_to_end(tmp_path, "no\n", {})
     assert run.code == 0, run.output
     assert hidden_lines(run.desktop) == ["Hidden=true"]
     assert "gsettings set org.gnome.desktop.lockdown" not in run.log
@@ -201,8 +209,8 @@ def test_install_kiosk_0_overrides_yes(tmp_path: Path) -> None:
 
 
 def test_install_kiosk_1_skips_prompt(tmp_path: Path) -> None:
-    """INSTALL_KIOSK=1 arms without asking; only the freshclam answer is read."""
-    run = run_install_all_to_end(tmp_path, "y\nn\n", {"INSTALL_KIOSK": "1"})
+    """INSTALL_KIOSK=1 arms without asking; the n stays unread."""
+    run = run_install_all_to_end(tmp_path, "n\n", {"INSTALL_KIOSK": "1"})
     assert run.code == 0, run.output
     assert not hidden_lines(run.desktop)
     assert LOCKDOWN_SET in run.log

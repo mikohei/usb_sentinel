@@ -46,6 +46,8 @@ def _ordered(text: str, *needles: str) -> None:
         "ssh-access.sh",
         "keyfile.sh",
         "erase-setting.sh",
+        "clamav-db.sh",
+        "update-clamav.sh",
     ],
 )
 def test_scripts_parse(name: str) -> None:
@@ -57,7 +59,7 @@ def test_scripts_parse(name: str) -> None:
 
 
 def test_install_all_prompts_only_in_preflight() -> None:
-    """Every confirm/read call sits before step 2; steps 3 and 8 only read the stored answers."""
+    """Every confirm/read call sits before step 2; step 3 only reads the stored answer."""
     lines = _script("install-all.sh").splitlines()
     step2 = lines.index('log "2/10 Installing apt packages"')
     prompt_re = r"\bconfirm(_default_yes)? \"|\bread -r\b"
@@ -68,14 +70,15 @@ def test_install_all_prompts_only_in_preflight() -> None:
     assert "No more questions; the rest runs unattended" in text
     assert "INSTALL_YES=1 skips the questions" in text
     assert 'if [[ "${RUN_UV_INSTALLER}" == 0 ]]; then' in text
-    assert 'if [[ "${RUN_FRESHCLAM}" == 1 ]]; then' in text
+    # freshclam always runs: there is no question for it any more.
+    assert "RUN_FRESHCLAM" not in text
+    assert 'confirm "Run freshclam' not in text
     # The SHA-256 is shown before the uv question, and both questions precede apt-get.
     _ordered(
         text,
         'curl -LsSf "${UV_INSTALLER_URL}"',
         'echo "SHA-256:',
         'confirm "Run this installer as',
-        'confirm "Run freshclam',
         'confirm_default_yes "Arm the kiosk',
         'log "2/10',
         "apt-get update",
@@ -123,7 +126,7 @@ def _run_install_all(tmp_path: Path, stdin: str, env_extra: dict[str, str]) -> t
     assert ROOT_CHECK in original
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    for helper in ("kiosk-lockdown.sh", "boot-video-hint.sh"):
+    for helper in ("kiosk-lockdown.sh", "boot-video-hint.sh", "clamav-db.sh"):
         (scripts / helper).write_text(_script(helper))
     script = scripts / "install-all.sh"
     script.write_text(original.replace(ROOT_CHECK, "true"))
@@ -147,8 +150,8 @@ def _run_install_all(tmp_path: Path, stdin: str, env_extra: dict[str, str]) -> t
 
 
 def test_install_all_consumes_all_answers_before_apt_get(tmp_path: Path) -> None:
-    """With INSTALL_YES unset, all three y answers on stdin are read before the first apt-get."""
-    code, log = _run_install_all(tmp_path, "y\ny\ny\n", {})
+    """With INSTALL_YES unset, both y answers on stdin are read before the first apt-get."""
+    code, log = _run_install_all(tmp_path, "y\ny\n", {})
     assert code == 99, log
     _ordered(
         log,
@@ -163,7 +166,7 @@ def test_install_all_consumes_all_answers_before_apt_get(tmp_path: Path) -> None
 
 def test_install_all_rejecting_uv_dies_before_apt_get(tmp_path: Path) -> None:
     """Answering N to the uv question exits in the preflight; apt-get never runs."""
-    code, log = _run_install_all(tmp_path, "n\ny\ny\n", {})
+    code, log = _run_install_all(tmp_path, "n\ny\n", {})
     assert code == 1
     assert "uv installation cancelled" in log
     assert "apt-get" not in log

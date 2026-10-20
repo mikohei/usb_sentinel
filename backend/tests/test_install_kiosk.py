@@ -131,6 +131,7 @@ def base_env(run: InstallRun, env: dict[str, str]) -> dict[str, str]:
         "CMDLINE_FILE": str(run.cmdline),
         "CLAMAV_DB_DIR": str(run.home.parent / "clamav"),
         "CLAMAV_RETRY_DELAY": "0",
+        "CONSOLE_SETUP_FILE": str(run.home.parent / "console-setup"),
         **env,
     }
 

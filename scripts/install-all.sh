@@ -27,7 +27,9 @@
 #      installed) and whether to arm the kiosk at the end (default yes). After the preflight the run is unattended.
 #      INSTALL_YES=1 answers yes to everything; INSTALL_KIOSK=0/1 overrides the
 #      kiosk question.
-#   2. apt: Docker Engine, Noto CJK fonts, python3-tk, curl
+#   2. apt: Docker Engine, Noto CJK fonts (+ fc-cache -f), python3-tk, curl,
+#      console-setup; the text console font becomes Terminus 16x32 so Ctrl+Alt+F3 is
+#      readable on the small LCD (INSTALL_CONSOLE_FONT=0 keeps the current font)
 #   3. uv (official installer downloaded and confirmed in step 1)
 #   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs,
 #      erase enabled on the host unless INSTALL_ALLOW_ERASE=0)
@@ -72,6 +74,9 @@ readonly INSTALL_VIDEO_HINT="${INSTALL_VIDEO_HINT:-0}"
 # Host erase gates (config.toml allow_destructive, docker.env USB_SENTINEL_DEVICE_ACCESS):
 # 1 (default) enables them, 0 makes a scan-only station. Read by install-docker.sh.
 readonly INSTALL_ALLOW_ERASE="${INSTALL_ALLOW_ERASE:-1}"
+# Large text-console font (Terminus 16x32) for recovery on the small LCD: 1 (default) or 0.
+readonly INSTALL_CONSOLE_FONT="${INSTALL_CONSOLE_FONT:-1}"
+readonly CONSOLE_SETUP_FILE="${CONSOLE_SETUP_FILE:-/etc/default/console-setup}"
 # Admin user allowed to log in over SSH: the sudo caller, never the display (kiosk) user.
 readonly SSH_ADMIN_USER="${SSH_ADMIN_USER:-${SUDO_USER:-}}"
 readonly UV_VERSION_PIN="${UV_VERSION_PIN:-}"   # e.g. 0.11.7; empty = latest
@@ -112,9 +117,28 @@ run_as_user() {
 #   kiosk-lockdown.sh: kiosk_gsettings_user, kiosk_autostart_hide, kiosk_resolution_hint, kiosk_arm
 #   boot-video-hint.sh: video_hint_append (step 6, only with INSTALL_VIDEO_HINT=1)
 #   clamav-db.sh: clamav_db_present, clamav_fetch, clamav_die_hint (step 8)
+#   keyfile.sh: set_key_line (step 2, console font)
 source "${REPO_DIR}/scripts/kiosk-lockdown.sh"
 source "${REPO_DIR}/scripts/boot-video-hint.sh"
 source "${REPO_DIR}/scripts/clamav-db.sh"
+source "${REPO_DIR}/scripts/keyfile.sh"
+
+console_font_setup() {
+    # Terminus 16x32 makes the text console readable on the 3.5-inch LCD. Latin only: the
+    # kernel console cannot draw Japanese, so the locale is left unchanged. Cosmetic, so
+    # every failure only warns.
+    if [[ ! -f "${CONSOLE_SETUP_FILE}" ]]; then
+        warn "${CONSOLE_SETUP_FILE} not found; console font unchanged"
+        return 0
+    fi
+    set_key_line "${CONSOLE_SETUP_FILE}" FONTFACE 'FONTFACE="Terminus"' \
+        && set_key_line "${CONSOLE_SETUP_FILE}" FONTSIZE 'FONTSIZE="16x32"' \
+        || { warn "could not edit ${CONSOLE_SETUP_FILE}; console font unchanged"; return 0; }
+    echo "console font: Terminus 16x32 (${CONSOLE_SETUP_FILE})"
+    if [[ -e /dev/tty1 ]] && command -v setupcon >/dev/null; then
+        setupcon --force </dev/null || warn "setupcon failed; the font applies after a reboot"
+    fi
+}
 
 # ---------------------------------------------------------------- 1. preflight
 log "1/10 Preflight checks"
@@ -176,10 +200,20 @@ echo "No more questions; the rest runs unattended (about 15 minutes). INSTALL_YE
 log "2/10 Installing apt packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-# docker.io: inspection container. fonts-noto-cjk: Japanese UI text.
-# python3-tk: fallback when uv's Python lacks tkinter. curl/ca-certificates: uv download.
+# docker.io: inspection container. fonts-noto-cjk: Japanese UI text ("Noto Sans CJK JP"
+# regular and bold, all the UI uses; fonts-noto-cjk-extra is not needed). fontconfig:
+# fc-cache. python3-tk: fallback when uv's Python lacks tkinter. curl/ca-certificates:
+# uv download. console-setup: larger text-console font.
 apt-get install -y --no-install-recommends \
-    docker.io curl ca-certificates fonts-noto-cjk python3 python3-tk
+    docker.io curl ca-certificates fonts-noto-cjk fontconfig console-setup python3 python3-tk
+if command -v fc-cache >/dev/null; then
+    fc-cache -f || warn "fc-cache failed; fonts are picked up after a reboot"
+fi
+if [[ "${INSTALL_CONSOLE_FONT}" == 1 ]]; then
+    console_font_setup
+else
+    echo "console font: unchanged (INSTALL_CONSOLE_FONT=0)"
+fi
 systemctl enable --now docker.service
 
 # ---------------------------------------------------------------- 3. uv
@@ -216,6 +250,17 @@ else
     warn "tkinter cannot be imported from uv's Python; switch to apt's python3-tk"
     warn "see frontend/README.md, 'Display setup' step 8, for the alternative .desktop Exec line"
 fi
+# Japanese needs Tk built with Xft (fontconfig fonts). Without it the app warns on screen.
+# The probe needs a display; without one it reports "unknown" and the app check decides.
+TK_FONTSYSTEM="$(run_as_user "${UV_BIN}" run --offline --frozen --no-sync \
+    --project "${REPO_DIR}/frontend" python -c \
+    "import tkinter; r = tkinter.Tk(); print(r.tk.call('::tk::pkgconfig', 'get', 'fontsystem'))" \
+    2>/dev/null | tail -n 1)" || true
+case "${TK_FONTSYSTEM}" in
+    xft) echo "Tk font system: xft (Japanese fonts via fontconfig)" ;;
+    x11) warn "uv's Python Tk lacks Xft; Japanese text may show as boxes (see README, Japanese font)" ;;
+    *) echo "Tk font system: unknown (no display during install; the app warns on screen if no Japanese font is found)" ;;
+esac
 
 # ---------------------------------------------------------------- 6. display user
 log "6/10 Configuring the display user ${DISPLAY_USER}"

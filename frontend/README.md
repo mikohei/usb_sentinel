@@ -76,10 +76,10 @@ These steps assume Ubuntu Desktop (Pi 4, GNOME). `scripts/install-all.sh` does e
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
    cd frontend
-   uv sync --frozen
+   uv sync --frozen --python /usr/bin/python3 --python-preference only-system
    uv run python -c "import tkinter"
    ```
-   If `import tkinter` fails, switch to a setup that runs with the apt packages `python3`, `python3-tk`, and `python3-qrcode`. In that case, change `Exec` in the `.desktop` file of step 10 to `/usr/bin/python3 -m usb_sentinel_display run --kiosk` and point `PYTHONPATH` at `frontend/`.
+   The venv uses the system Python so tkinter comes from apt's `python3-tk` (Tk with Xft, needed for Japanese text). If `import tkinter` fails, install `python3-tk`. The `.desktop` `Exec` of step 10 stays unchanged.
 
    **Synchronize dependencies only in this step.** `Exec` in `deploy/usb-sentinel-display.desktop` starts the app with `uv run --offline --frozen --no-sync`. Without these options, `uv run` checks the lock and the environment for consistency on every start, and tries to resolve or sync if there is a difference. On a Pi with no network connection that causes an error and the app fails to start, so nothing is resolved at startup. This is the same policy by which the backend aligns its environment with `uv sync --frozen`.
 9. **Calibrate the ports.** As described in the "Port calibration" section, run `uv run usb-sentinel-display calibrate` and write the port path of each port to `~/.config/usb-sentinel/display.toml`.
@@ -396,7 +396,7 @@ Scene A has four disks (No Defect, Malware Detected, scanning, broken result), a
 
 Items that cannot be checked on the development machine (macOS) and must be verified on the Pi (aarch64, Ubuntu Desktop).
 
-1. `import tkinter` works with uv-managed Python 3.13. If it does not, switch to the apt setup in step 8.
+1. `import tkinter` works with the system Python 3.14 and apt's `python3-tk` (step 8).
 2. Letterboxing on the panel's actual mode: black bars, tiles and QR readable, QR scans with a phone.
 3. The touch driver works on Ubuntu, taps arrive as `<Button-1>`, and the selection changes with the tiles and ◀▶. The system can be operated from the keyboard even if it does not work.
 4. The `st_mtime` of the port-path directory in sysfs (for example the real target of `/sys/bus/usb/devices/1-1.3`) becomes the time the USB drive was plugged in. Compare before and after insertion with `stat`. If it does not, the app falls back to the system boot time, so every result written after boot becomes a candidate (results from before boot are not picked up).

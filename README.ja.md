@@ -220,11 +220,14 @@ ClamAV定義DBの取得（freshclam）は質問せず必ず実行する。失敗
 導入スクリプトは`fonts-noto-cjk`を入れて`fc-cache -f`を実行する。アプリは`Noto Sans CJK JP`を使い、
 無ければ`Noto Sans JP`、`IPAGothic`などの代替を順に探す。どれも無いときは情報ストリップに
 「No Japanese font (install fonts-noto-cjk)」と出る（英字で出すのは、日本語が豆腐表示になるため）。
-uvのPythonに付くTkがXftに対応していないと、フォントがあっても日本語が四角になる。導入の手順5で
-`Tk font system: xft`と出れば問題ない。実機では次のコマンドで確かめられる（`xft`と出れば対応している）。
-
+TkもXftに対応している必要がある。uvが用意するPythonのTkはXftに対応していない。
+そのため手順5は`frontend/.venv`をシステムのPython（`/usr/bin/python3`）で作り、aptの`python3-tk`を使う。このTkはXftに対応している。
+以前の実行でuvのPythonに作ったvenvは消して作り直す。古い端末は`sudo INSTALL_YES=1 bash scripts/install-all.sh`を再実行すれば直る。
+手順5で`Tk font system: xft`と出れば問題ない。対応していなければ枠で囲んだ警告が出る。この確認に画面は要らない。
+実機では次のコマンドで確かめられる（`libXft`の行が出るか、数が1以上なら対応している）。
 ```bash
-uv run --project frontend python -c "import tkinter; r = tkinter.Tk(); print(r.tk.call('::tk::pkgconfig', 'get', 'fontsystem'))"
+so=$(frontend/.venv/bin/python -c "import _tkinter; print(_tkinter.__file__)")
+ldd "$so" | grep libXft; grep -c XftDrawString "$so"
 ```
 
 テキストコンソール（Ctrl+Alt+F3）は小さな画面でも読めるよう、`/etc/default/console-setup`を

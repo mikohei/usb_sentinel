@@ -76,10 +76,10 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/ins
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
    cd frontend
-   uv sync --frozen
+   uv sync --frozen --python /usr/bin/python3 --python-preference only-system
    uv run python -c "import tkinter"
    ```
-   `import tkinter`が通らない場合はaptの`python3`、`python3-tk`、`python3-qrcode`で動かす構成に切り替える。その場合は手順10の`.desktop`の`Exec`を`/usr/bin/python3 -m usb_sentinel_display run --kiosk`に変え、`PYTHONPATH`で`frontend/`を指す。
+   venvはシステムのPythonで作る。tkinterをaptの`python3-tk`から使うためである（日本語表示に要るXft対応のTk）。`import tkinter`が通らなければ`python3-tk`を入れる。手順10の`.desktop`の`Exec`は変えない。
 
    **依存の同期はこの手順でだけ行う。** `deploy/usb-sentinel-display.desktop`の`Exec`は`uv run --offline --frozen --no-sync`で起動する。これらが無いと`uv run`は起動ごとにロックと環境の整合を確認し、差分があれば解決や同期を試みる。ネットワーク非接続のPiではそれがエラーになって起動が止まるので、起動時には何も解決しない。backendが`uv sync --frozen`で環境を揃えるのと同じ方針である。
 9. **ポートをキャリブレーションする。** 「ポートのキャリブレーション」節のとおり`uv run usb-sentinel-display calibrate`を実行し、各ポートのポートパスを`~/.config/usb-sentinel/display.toml`に書く。
@@ -396,7 +396,7 @@ uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --
 
 開発機（macOS）では確認できず、Pi（aarch64、Ubuntu Desktop）で確かめる事項。
 
-1. uv管理のPython 3.13で`import tkinter`が通ること。通らなければ手順8のapt構成に切り替える。
+1. システムのPython 3.14とaptの`python3-tk`で`import tkinter`が通ること（手順8）。
 2. パネルの実際のモードでの拡大表示。黒い余白が出て、タイルとQRが読め、QRをスマートフォンで読み取れること。
 3. タッチドライバがUbuntuで動き、タップが`<Button-1>`として届いてタイルと◀▶で選択が変わること。動かなくてもキーボードで運用できる。
 4. sysfsのポートパスのディレクトリ（例`/sys/bus/usb/devices/1-1.3`の実体）の`st_mtime`がUSBを挿した時刻になること。`stat`で挿入前後を比べる。ならない場合はシステム起動時刻へフォールバックするため、起動後に書かれた結果はすべて候補になる（起動前の結果は拾わない）。

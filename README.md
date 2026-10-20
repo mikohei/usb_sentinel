@@ -221,12 +221,16 @@ only a dialog shows a 4-digit code; enter it with keys `1`-`4` or the on-screen 
 The installer installs `fonts-noto-cjk` and runs `fc-cache -f`. The app uses
 `Noto Sans CJK JP`, else the first installed fallback (`Noto Sans JP`, `IPAGothic`, ...). When
 none is found, the info strip shows "No Japanese font (install fonts-noto-cjk)" (in ASCII,
-because Japanese would render as boxes). If uv's Python Tk lacks Xft, Japanese shows as boxes
-even with the font installed; step 5 of the install prints `Tk font system: xft` when it is
-fine. On the device you can check with (prints `xft` when supported):
-
+because Japanese would render as boxes). Tk must also be built with Xft. uv's own Python has a
+Tk without Xft, so step 5 builds `frontend/.venv` on the system Python (`/usr/bin/python3`) with
+apt's `python3-tk`, whose Tk uses Xft. A venv left by an earlier run on uv's Python is removed and
+rebuilt, so re-running `sudo INSTALL_YES=1 bash scripts/install-all.sh` fixes an old device.
+Step 5 prints `Tk font system: xft` when it is fine, and a boxed warning when it is not. The check
+needs no display; on the device you can repeat it with (a `libXft` line, or a count above 0,
+means Xft is present):
 ```bash
-uv run --project frontend python -c "import tkinter; r = tkinter.Tk(); print(r.tk.call('::tk::pkgconfig', 'get', 'fontsystem'))"
+so=$(frontend/.venv/bin/python -c "import _tkinter; print(_tkinter.__file__)")
+ldd "$so" | grep libXft; grep -c XftDrawString "$so"
 ```
 
 To make the text console (Ctrl+Alt+F3) readable on the small screen, the installer sets

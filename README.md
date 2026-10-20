@@ -123,7 +123,9 @@ deploy/
   usb-sentinel-docker@.service systemd unit that starts Docker (host side)
   config.example.toml      All configuration keys
 scripts/
-  install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, autostart, ClamAV DB)
+  install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, ClamAV DB; autostart is written disabled)
+  kiosk-enable.sh          Final step: enables autostart and applies the GNOME lockdown
+  kiosk-disable.sh         Recovery: disables autostart, stops the app, resets the lockdown
   install-docker.sh        Docker setup (called from install-all.sh; can also be used alone)
   run-docker.sh            Starts an inspection container per USB drive
 README.md                  Overview and setup of the whole project
@@ -175,9 +177,19 @@ lost, because all of them remain in `result.json`. The `reindex` subcommand, whi
 
 ### 0. One-shot setup (recommended)
 
-Run this once on a Pi that is connected to the network, after cloning the repository.
-It performs everything together: Docker, uv, the display app, automatic login, autostart, and fetching the ClamAV definition DB.
-At the end it prints the remaining manual work and a "checklist before unplugging the LAN". Re-running it keeps existing settings.
+Setup happens in three phases, so that a fresh install never leaves the operator in front of a
+locked-down kiosk on an unreadable screen.
+
+1. `sudo bash scripts/install-all.sh` on a Pi that is connected to the network, after cloning the
+   repository. It installs Docker, uv, the display app and the ClamAV definition DB, turns on
+   automatic login and writes the autostart entry with `Hidden=true`. Nothing starts at login;
+   the display user lands on the normal GNOME desktop.
+2. Manual tuning: fix the resolution at 480x320, install the touch driver, calibrate the ports
+   and adjust `config.toml` (the script lists these steps at the end).
+3. `sudo bash scripts/kiosk-enable.sh`, then reboot. It removes `Hidden=true` and applies the
+   GNOME lockdown. From now on the app covers the whole screen.
+
+At the end `install-all.sh` prints the remaining manual work and a "checklist before unplugging the LAN". Re-running it keeps existing settings.
 
 ```bash
 sudo bash scripts/install-all.sh
@@ -188,6 +200,14 @@ sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 After fetching the official uv installer, the script shows its SHA-256 and asks for confirmation before running it (`INSTALL_YES=1` skips this).
 Installing the touch panel driver, setting the 480x320 screen resolution, port calibration, and
 enabling the capacity and speed inspections (which erase the sample) are not automated; the script describes them as steps at the end.
+`kiosk-enable.sh` refuses to arm the kiosk unless `~/.config/monitors.xml` (or `xrandr` on X11)
+shows 480x320; `KIOSK_FORCE=1` overrides that check.
+
+**Recovery.** Once armed, the app takes focus back from every window and GNOME has no shortcuts
+left. Press Ctrl+Alt+F3 for the text console (or use SSH), log in, then run
+`pkill -f usb-sentinel-display` to stop the app and `sudo bash scripts/kiosk-disable.sh` to turn
+autostart off and reset the lockdown. Ctrl+Alt+F1 returns to the desktop. A crash at login is
+logged in `~/.local/state/usb-sentinel-display/autostart.log`.
 Steps 1 to 3 explain what `install-all.sh` does internally, and are used to redo individual parts.
 
 ### 1. Install Docker and the services
@@ -313,21 +333,15 @@ Either one alone returns the device to read-only, and the display's button becom
 A USB device that presents itself as a keyboard (BadUSB) could type at the kiosk. Three
 measures limit what it can do; none of them replaces the air gap.
 
-**GNOME lockdown (installed by `scripts/install-all.sh`).** `scripts/kiosk-lockdown.sh` clears
+**GNOME lockdown (applied by `scripts/kiosk-enable.sh`).** `scripts/kiosk-lockdown.sh` clears
 every shortcut in `org.gnome.desktop.wm.keybindings`, `org.gnome.shell.keybindings`,
 `org.gnome.mutter.keybindings`, `org.gnome.mutter.wayland.keybindings` and
 `org.gnome.settings-daemon.plugins.media-keys` except `switch-to-session-1..12`
 (Ctrl+Alt+F1..F12, the password-protected text console that stays the administrator's way in),
 clears the Ubuntu Dock hot keys, disables the run dialog, logout, user switching, the bare
 Super key, hot corners, the accessibility toggles and the power key, and leaves one workspace
-and an empty dock. To undo it, as the display user run `gsettings reset-recursively <schema>`
-for each schema above and `gsettings reset <schema> <key>` for the fixed keys
-(`org.gnome.desktop.lockdown` `disable-command-line`/`disable-log-out`/`disable-user-switching`,
-`org.gnome.mutter` `overlay-key`/`dynamic-workspaces`, `org.gnome.desktop.wm.preferences`
-`num-workspaces`, `org.gnome.desktop.interface` `enable-hot-corners`, `org.gnome.shell`
-`favorite-apps`, `org.gnome.shell.extensions.dash-to-dock` `hot-keys`,
-`org.gnome.desktop.a11y.keyboard` `enable`, `org.gnome.settings-daemon.plugins.power`
-`power-button-action`).
+and an empty dock. To undo it run `sudo bash scripts/kiosk-disable.sh` (`kiosk_unlock` in
+`scripts/kiosk-lockdown.sh` resets every key the lockdown set; the key list lives there).
 
 **Per-boot input baseline.** The first start of the display after boot records the input
 devices present (`/sys/class/input/inputN`) in `/run/usb-sentinel-control/input-baseline`. Any
@@ -375,7 +389,7 @@ Items that only the real station can confirm:
    and letting autologin restart the display keeps the lock (baseline in `/run`).
 5. After a reboot the button shows "Mode: Scan only" and the mode file is gone.
 6. One wrong code survives a logout and a reboot in `~/.local/state/usb-sentinel-display/erase-strikes`.
-7. After the installer ran, Super, Super+1..9, Shift+Super+1, Ctrl+Super+1, Super+A/S/V,
+7. After `kiosk-enable.sh` ran, Super, Super+1..9, Shift+Super+1, Ctrl+Super+1, Super+A/S/V,
    Super+Page Down, Ctrl+Alt+arrows, Shift+Ctrl+Alt+arrows, Alt+F1, Alt+F2, Alt+Space,
    Alt+Tab, Alt+Esc, Alt+F4, Ctrl+Alt+T, Ctrl+Alt+Del, Ctrl+Alt+Tab, Print and the power key do
    nothing visible; Ctrl+Alt+F3 still opens the text console;
@@ -434,7 +448,8 @@ For setup, port calibration, settings, controls, and troubleshooting, see
   results root as `root:usb-sentinel` with `0750`, so group members can read it. The SQLite index
   directory (`2770`) is also readable by the same group.
 - Install `fonts-noto-cjk`.
-- Register `frontend/deploy/usb-sentinel-display.desktop` for XDG autostart (`~/.config/autostart/`).
+- Register `frontend/deploy/usb-sentinel-display.desktop` for XDG autostart (`~/.config/autostart/`);
+  `install-all.sh` writes it with `Hidden=true` and `kiosk-enable.sh` removes that line.
 
 ## Carrying out results (across the air gap)
 

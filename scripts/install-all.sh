@@ -9,6 +9,8 @@
 #   sudo bash scripts/install-all.sh                 # display user = the sudo caller
 #   sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 #   sudo INSTALL_YES=1 bash scripts/install-all.sh   # answer every prompt with yes
+#   sudo bash scripts/kiosk-enable.sh                # final step, after the manual steps
+#   sudo bash scripts/kiosk-disable.sh               # undo from a text console
 #
 # What it does:
 #   1. Preflight checks (Ubuntu, arm64, sudo, internet)
@@ -17,10 +19,12 @@
 #      and confirmation asked before running it)
 #   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs)
 #   5. frontend: uv sync --frozen and a tkinter import check
-#   6. Display user: usb-sentinel group, GDM autologin, GNOME automount off,
-#      sleep/lock off, GNOME kiosk lockdown (scripts/kiosk-lockdown.sh clears
-#      every keyboard shortcut except Ctrl+Alt+F1..F12 and turns off the run
-#      dialog, hot corners and dock hot keys), display.toml, XDG autostart entry
+#   6. Display user: usb-sentinel group, GDM autologin (kept on purpose: it lands
+#      the user on the normal desktop for the manual steps; the app does NOT
+#      start until scripts/kiosk-enable.sh is run), GNOME automount off,
+#      sleep/lock off, display.toml, XDG autostart entry written DISABLED
+#      (Hidden=true)
+#      Kiosk lockdown and autostart are armed later by scripts/kiosk-enable.sh
 #   7. ClamAV signature database (freshclam inside the container)
 #   8. Offline self-check (selftest with --network none, uv run --offline)
 #   9. Remaining manual steps and the "before unplugging the LAN" checklist
@@ -173,7 +177,7 @@ gsettings_user() {
         sudo -u "${DISPLAY_USER}" dbus-run-session -- gsettings "$@"
     fi
 }
-# Kiosk lockdown functions (kiosk_lockdown); they use warn and the gsettings_user helper.
+# Kiosk helpers (kiosk_autostart_hide here; kiosk_lockdown is used by kiosk-enable.sh).
 source "${REPO_DIR}/scripts/kiosk-lockdown.sh"
 if command -v gsettings >/dev/null; then
     # With automount on, run-docker.sh refuses the disk ("host-mounted disk refused").
@@ -184,12 +188,10 @@ if command -v gsettings >/dev/null; then
     gsettings_user set org.gnome.desktop.screensaver idle-activation-enabled false
     gsettings_user set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
     echo "GNOME: automount off, sleep and lock off"
-    # A USB keyboard must not leave the kiosk window through GNOME shortcuts.
-    # When the user is not logged in this starts one dbus session per call (about a minute).
-    kiosk_lockdown gsettings_user
+    # Kiosk lockdown is deliberately NOT applied here; scripts/kiosk-enable.sh does it
+    # once the display is tuned.
 else
     warn "gsettings not found; disable automount and sleep manually"
-    warn "gsettings not found; GNOME kiosk lockdown skipped (see scripts/kiosk-lockdown.sh)"
 fi
 
 # display.toml: created from the example when missing. Port table is filled by calibrate later.
@@ -204,7 +206,8 @@ else
     echo "display.toml: created from the example (${DISPLAY_CONF})"
 fi
 
-# XDG autostart entry with <user> and the project path filled in.
+# XDG autostart entry with <user> and the project path filled in. It is written with
+# Hidden=true so nothing starts at login until scripts/kiosk-enable.sh removes that line.
 readonly AUTOSTART_DIR="${USER_HOME}/.config/autostart"
 readonly DESKTOP_FILE="${AUTOSTART_DIR}/usb-sentinel-display.desktop"
 install -d -o "${DISPLAY_USER}" -g "${DISPLAY_USER}" -m 0755 "${AUTOSTART_DIR}"
@@ -214,7 +217,8 @@ sed -e "s|/home/<user>/.local/bin/uv|${UV_BIN}|g" \
     "${REPO_DIR}/frontend/deploy/usb-sentinel-display.desktop" > "${DESKTOP_FILE}"
 chown "${DISPLAY_USER}:${DISPLAY_USER}" "${DESKTOP_FILE}"
 chmod 0644 "${DESKTOP_FILE}"
-echo "autostart: ${DESKTOP_FILE}"
+kiosk_autostart_hide "${DESKTOP_FILE}"
+echo "autostart: ${DESKTOP_FILE} (disabled until kiosk-enable.sh)"
 grep '^Exec=' "${DESKTOP_FILE}"
 
 # ---------------------------------------------------------------- 7. ClamAV DB
@@ -268,18 +272,23 @@ cat <<EOF
         then switch the display's mode button to "Scan + erase" and enter the
         code shown (resets to scan only at every start). All three are required;
         without any one of them the device stays read-only.
- 5. Log out once and let autologin bring you back (activates the group and autostart)
- 6. GNOME kiosk lockdown was applied to ${DISPLAY_USER} (no shortcuts except Ctrl+Alt+F1..F12).
-      Admin access: text console Ctrl+Alt+F3 (password) or SSH.
-      To undo, as ${DISPLAY_USER}:
-        gsettings reset-recursively <schema>   for each schema in KIOSK_CLEAR_SCHEMAS
-                                               and ${KIOSK_DOCK_SCHEMA}
-        gsettings reset <schema> <key>         for each fixed setting in kiosk_lockdown
-      (both lists: scripts/kiosk-lockdown.sh)
+ 5. Log out once and let autologin bring you back (activates the usb-sentinel group).
+      The display app does NOT start yet: its autostart entry is written with Hidden=true.
+ 6. Arm the kiosk (only after steps 1 and 3 are done):
+      sudo bash ${REPO_DIR}/scripts/kiosk-enable.sh
+    This enables autostart and applies the GNOME lockdown (scripts/kiosk-lockdown.sh:
+    every shortcut except Ctrl+Alt+F1..F12 is cleared, the dock is emptied).
+    Once armed, the app covers the whole screen, hides the cursor and takes focus back
+    from every other window. The only ways out are:
+      - Ctrl+Alt+F3 (text console, password) or SSH, then
+          pkill -f usb-sentinel-display                      stop the app until the next login
+          sudo bash ${REPO_DIR}/scripts/kiosk-disable.sh     undo autostart and lockdown
+    GDM autologin stays on in both states (${GDM_CONF}; remove the two AutomaticLogin
+    lines to turn it off).
 
 [Checklist before unplugging the LAN]
  [ ] backend selftest exited 0 (see step 8/9 above)
- [ ] After re-login the full-screen display shows four tiles
+ [ ] After kiosk-enable.sh and a reboot the full-screen display shows four tiles
  [ ] A disposable USB stick shows "Scanning" and then a verdict
  [ ] result.json appears under /var/lib/usb-sentinel/results/
  [ ] The on-screen QR codes scan with a phone (summary QR and the 3 detail pages)

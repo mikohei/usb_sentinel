@@ -123,7 +123,9 @@ deploy/
   usb-sentinel-docker@.service Docker起動用systemdユニット（ホスト側）
   config.example.toml      設定の全キー
 scripts/
-  install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、自動起動、ClamAV DB）
+  install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、ClamAV DB。自動起動は無効の状態で書く）
+  kiosk-enable.sh          最終手順。自動起動を有効にし、GNOMEのロックダウンを適用する
+  kiosk-disable.sh         復旧用。自動起動を無効にし、アプリを止め、ロックダウンを戻す
   install-docker.sh        Docker構成の導入（install-all.shから呼ばれる。単独でも使える）
   run-docker.sh            USBごとに検査コンテナを起動
 README.md                  プロジェクト全体の説明と導入手順
@@ -175,9 +177,18 @@ DBが壊れたときは、検査が走っていないことを確認してから
 
 ### 0. 一括導入（推奨）
 
-ネットワーク接続中のPi上で、リポジトリをcloneしたあと1回だけ実行する。
-Docker、uv、表示アプリ、自動ログイン、自動起動、ClamAV定義DBの取得までをまとめて行い、
-最後に残る手作業と「LANを外す前のチェックリスト」を表示する。再実行しても既存の設定は保持する。
+導入は3段階で進める。導入直後に、文字が読めない画面でロックダウン済みのキオスクに
+閉じ込められないようにするためである。
+
+1. ネットワーク接続中のPi上で、リポジトリをcloneしたあと`sudo bash scripts/install-all.sh`を1回実行する。
+   Docker、uv、表示アプリ、ClamAV定義DBを導入し、自動ログインを有効にし、自動起動の項目を`Hidden=true`付きで書く。
+   この時点では再起動しても表示アプリは起動しない。表示ユーザーは通常のGNOMEデスクトップに入る。
+2. 手作業の調整。解像度を480x320に固定し、タッチパネルのドライバを入れ、ポートを校正し、`config.toml`を直す
+   （スクリプトが終了時に手順を表示する）。
+3. `sudo bash scripts/kiosk-enable.sh`を実行して再起動する。`Hidden=true`を外し、GNOMEのロックダウンを適用する。
+   これ以後、アプリが画面全体を覆う。
+
+`install-all.sh`は最後に残る手作業と「LANを外す前のチェックリスト」を表示する。再実行しても既存の設定は保持する。
 
 ```bash
 sudo bash scripts/install-all.sh
@@ -188,6 +199,13 @@ sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 uvの公式インストーラは取得後にSHA-256を表示して実行前に確認を求める（`INSTALL_YES=1`で省略できる）。
 タッチパネルのドライバ導入、画面解像度480x320の設定、ポートのキャリブレーション、
 容量・速度検査の有効化（検体を消去する）は自動化せず、終了時に手順として案内する。
+`kiosk-enable.sh`は`~/.config/monitors.xml`（X11では`xrandr`）に480x320が無いと実行を拒む。
+`KIOSK_FORCE=1`でこの確認を省略できる。
+
+**復旧。** 有効化後はアプリがすべてのウィンドウからフォーカスを奪い、GNOMEのショートカットも残らない。
+復旧するには、Ctrl+Alt+F3でテキストコンソールに入る（またはSSH）。
+`pkill -f usb-sentinel-display`でアプリを止め、`sudo bash scripts/kiosk-disable.sh`で自動起動とロックダウンを戻す。
+Ctrl+Alt+F1でデスクトップに戻る。ログイン時の異常終了は`~/.local/state/usb-sentinel-display/autostart.log`に残る。
 手順1〜3は`install-all.sh`が内部で行う内容の説明で、個別にやり直すときに使う。
 
 ### 1. Dockerとサービスの導入
@@ -304,19 +322,14 @@ grep allow_destructive /etc/usb-sentinel/config.toml
 キーボードを装うUSB機器（BadUSB）はキオスクに向けて打鍵できる。次の3つの対策で被害を限定するが、
 いずれもエアギャップの代わりにはならない。
 
-**GNOMEのロックダウン（`scripts/install-all.sh`が導入）。** `scripts/kiosk-lockdown.sh`は
+**GNOMEのロックダウン（`scripts/kiosk-enable.sh`が適用）。** `scripts/kiosk-lockdown.sh`は
 `org.gnome.desktop.wm.keybindings`、`org.gnome.shell.keybindings`、`org.gnome.mutter.keybindings`、
 `org.gnome.mutter.wayland.keybindings`、`org.gnome.settings-daemon.plugins.media-keys`の全ショートカットを
 `switch-to-session-1..12`（Ctrl+Alt+F1〜F12。パスワード付きのテキストコンソールで、管理者の入口として残す）を
 除いて空にし、Ubuntu Dockのホットキーも消す。さらに実行ダイアログ、ログアウト、ユーザー切替、Superキー単押し、
 ホットコーナー、アクセシビリティの切替、電源キーを無効にし、ワークスペースを1つ、Dockを空にする。
-元に戻すには、表示ユーザーとして上の各スキーマに`gsettings reset-recursively <schema>`を、
-固定キーに`gsettings reset <schema> <key>`を実行する（`org.gnome.desktop.lockdown`の
-`disable-command-line`／`disable-log-out`／`disable-user-switching`、`org.gnome.mutter`の
-`overlay-key`／`dynamic-workspaces`、`org.gnome.desktop.wm.preferences`の`num-workspaces`、
-`org.gnome.desktop.interface`の`enable-hot-corners`、`org.gnome.shell`の`favorite-apps`、
-`org.gnome.shell.extensions.dash-to-dock`の`hot-keys`、`org.gnome.desktop.a11y.keyboard`の`enable`、
-`org.gnome.settings-daemon.plugins.power`の`power-button-action`）。
+元に戻すには`sudo bash scripts/kiosk-disable.sh`を実行する（`scripts/kiosk-lockdown.sh`の`kiosk_unlock`が、
+ロックダウンで設定したキーをすべて既定値に戻す。キーの一覧は同ファイルにある）。
 
 **起動ごとの入力機器ベースライン。** ブート後にディスプレイが最初に起動したとき、その時点の入力機器
 （`/sys/class/input/inputN`）を`/run/usb-sentinel-control/input-baseline`に記録する。後から現れた入力機器は
@@ -360,7 +373,7 @@ allow with-interface match-all { 09:*:* }
    ディスプレイが再起動してもロックは残る（ベースラインは`/run`）。
 5. 再起動後、ボタンは「モード: 検査のみ」で、モードファイルは消えている。
 6. 1回の誤入力がログアウトと再起動を越えて`~/.local/state/usb-sentinel-display/erase-strikes`に残る。
-7. インストーラ実行後、Super、Super+1〜9、Shift+Super+1、Ctrl+Super+1、Super+A/S/V、Super+Page Down、
+7. `kiosk-enable.sh`の実行後、Super、Super+1〜9、Shift+Super+1、Ctrl+Super+1、Super+A/S/V、Super+Page Down、
    Ctrl+Alt+矢印、Shift+Ctrl+Alt+矢印、Alt+F1、Alt+F2、Alt+Space、Alt+Tab、Alt+Esc、Alt+F4、Ctrl+Alt+T、
    Ctrl+Alt+Del、Ctrl+Alt+Tab、Print、電源キーで画面に変化がない。Ctrl+Alt+F3ではテキストコンソールが開く。
    `gsettings list-recursively org.gnome.desktop.wm.keybindings`は空リストだけを返す。
@@ -418,6 +431,7 @@ backendが書くSQLite索引（`/var/lib/usb-sentinel/db/inspections.sqlite`）�
   ディレクトリ（`2770`）も同じグループで読める。
 - `fonts-noto-cjk`を導入する。
 - `frontend/deploy/usb-sentinel-display.desktop`をXDG autostart（`~/.config/autostart/`）に登録する。
+  `install-all.sh`は`Hidden=true`付きで書き、`kiosk-enable.sh`がその行を外す。
 
 ## 結果の持ち出し（air gap越し）
 

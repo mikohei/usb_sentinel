@@ -1,6 +1,9 @@
 # Replace <user> and the project path, then copy to ~/.config/autostart/.
+# Output goes to ~/.local/state/usb-sentinel-display/autostart.log so a crash at login
+# can be read from a text console. Append "Hidden=true" to disable the entry.
 [Desktop Entry]
 Type=Application
 Name=USB Sentinel Display
-Exec=/home/<user>/.local/bin/uv run --offline --frozen --no-sync --project /home/<user>/usb_sentinel/frontend usb-sentinel-display run --kiosk
+Exec=sh -c 'mkdir -p "$HOME/.local/state/usb-sentinel-display" && exec /home/<user>/.local/bin/uv run --offline --frozen --no-sync --project /home/<user>/usb_sentinel/frontend usb-sentinel-display run --kiosk >>"$HOME/.local/state/usb-sentinel-display/autostart.log" 2>&1'
 X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5

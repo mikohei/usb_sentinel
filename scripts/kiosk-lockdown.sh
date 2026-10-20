@@ -6,14 +6,14 @@
 # user. This file clears every string-list shortcut key of the GNOME keybinding schemas, except
 # the password-protected console switch (Ctrl+Alt+F1..F12), and fixes a few settings.
 #
-# Functions only: install-all.sh and backend/tests source this file. It needs the caller's
-# `warn` function. Every function takes the gsettings command (a function name such as
-# gsettings_user) as its first argument so tests can pass a fake. bash 3.2 only: no mapfile,
-# no associative arrays, no `readonly -a`.
+# Functions only: install-all.sh, kiosk-enable.sh, kiosk-disable.sh and backend/tests source
+# this file. It needs the caller's `warn` function. Every gsettings function takes the gsettings
+# command (a function name such as gsettings_user) as its first argument so tests can pass a
+# fake. bash 3.2 only: no mapfile, no associative arrays, no `readonly -a`.
 #
-# Undo as the display user: `gsettings reset-recursively <schema>` for each schema in
-# KIOSK_CLEAR_SCHEMAS and KIOSK_DOCK_SCHEMA, and `gsettings reset <schema> <key>` for each fixed
-# setting in kiosk_lockdown.
+# Undo with kiosk_unlock (scripts/kiosk-disable.sh): it resets exactly the keys kiosk_lockdown
+# sets. The XDG autostart entry is toggled with kiosk_autostart_hide / kiosk_autostart_show
+# (append or remove a `Hidden=true` line).
 
 # Keybinding schemas whose string-list keys are all cleared (except kiosk_keep_key).
 KIOSK_CLEAR_SCHEMAS="org.gnome.desktop.wm.keybindings org.gnome.shell.keybindings
@@ -101,4 +101,89 @@ kiosk_lockdown() {
     done
     kiosk_clear_schema "${gs}" "${KIOSK_DOCK_SCHEMA}" "${KIOSK_DOCK_KEYS}"
     echo 'GNOME: kiosk lockdown done (see README "Hardening against BadUSB")'
+}
+
+# kiosk_reset <gs> <schema> <key>: reset one key to its default; warn on failure, never fail.
+kiosk_reset() {
+    local gs="$1" schema="$2" key="$3"
+    if ! "${gs}" reset "${schema}" "${key}" </dev/null 2>/dev/null; then
+        warn "gsettings: could not reset ${schema} ${key}"
+    fi
+    return 0
+}
+
+# kiosk_reset_schema <gs> <schema>: reset every key of the schema to its default.
+# On org.gnome.mutter.wayland.keybindings this also touches switch-to-session-N, which
+# kiosk_lockdown left at default, so the reset is a no-op for them.
+kiosk_reset_schema() {
+    local gs="$1" schema="$2"
+    if ! "${gs}" reset-recursively "${schema}" </dev/null 2>/dev/null; then
+        warn "gsettings: schema ${schema} not found (skipped)"
+        return 0
+    fi
+    echo "GNOME: ${schema}: reset to defaults"
+    return 0
+}
+
+# kiosk_reset_dock_keys <gs>: reset only the dock keys matching KIOSK_DOCK_KEYS (the ones
+# kiosk_clear_schema touched). No reset-recursively here: appearance keys must stay.
+kiosk_reset_dock_keys() {
+    local gs="$1" listing line s key value
+    if ! listing="$("${gs}" list-recursively "${KIOSK_DOCK_SCHEMA}" </dev/null 2>/dev/null)"; then
+        warn "gsettings: schema ${KIOSK_DOCK_SCHEMA} not found (skipped)"
+        return 0
+    fi
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] || continue
+        read -r s key value <<< "${line}"
+        [[ "${s}" == "${KIOSK_DOCK_SCHEMA}" ]] || continue
+        [[ "${key}" =~ ${KIOSK_DOCK_KEYS} ]] || continue
+        kiosk_reset "${gs}" "${KIOSK_DOCK_SCHEMA}" "${key}"
+    done <<< "${listing}"
+    return 0
+}
+
+# kiosk_unlock <gs>: undo kiosk_lockdown. Same order: fixed settings, the keybinding schemas,
+# then the dock hot keys. Keep this list in step with kiosk_lockdown (tests compare them).
+kiosk_unlock() {
+    local gs="$1" schema
+    kiosk_reset "${gs}" org.gnome.desktop.lockdown disable-command-line
+    kiosk_reset "${gs}" org.gnome.desktop.lockdown disable-log-out
+    kiosk_reset "${gs}" org.gnome.desktop.lockdown disable-user-switching
+    kiosk_reset "${gs}" org.gnome.mutter overlay-key
+    kiosk_reset "${gs}" org.gnome.mutter dynamic-workspaces
+    kiosk_reset "${gs}" org.gnome.desktop.wm.preferences num-workspaces
+    kiosk_reset "${gs}" org.gnome.desktop.interface enable-hot-corners
+    kiosk_reset "${gs}" org.gnome.shell favorite-apps
+    kiosk_reset "${gs}" "${KIOSK_DOCK_SCHEMA}" hot-keys
+    kiosk_reset "${gs}" org.gnome.desktop.a11y.keyboard enable
+    kiosk_reset "${gs}" org.gnome.settings-daemon.plugins.power power-button-action
+    for schema in ${KIOSK_CLEAR_SCHEMAS}; do
+        kiosk_reset_schema "${gs}" "${schema}"
+    done
+    kiosk_reset_dock_keys "${gs}"
+    echo 'GNOME: kiosk lockdown undone'
+}
+
+# kiosk_autostart_hide <file>: append Hidden=true to the autostart entry (idempotent).
+kiosk_autostart_hide() {
+    local file="$1"
+    if [[ ! -f "${file}" ]]; then
+        warn "autostart entry ${file} missing"
+        return 0
+    fi
+    grep -q '^Hidden=true$' "${file}" || printf 'Hidden=true\n' >> "${file}"
+    echo "autostart: disabled (Hidden=true) ${file}"
+}
+
+# kiosk_autostart_show <file>: remove every Hidden= line from the autostart entry.
+# `sed -i.bak` works with both GNU and BSD sed.
+kiosk_autostart_show() {
+    local file="$1"
+    if [[ ! -f "${file}" ]]; then
+        warn "autostart entry ${file} missing"
+        return 0
+    fi
+    sed -i.bak '/^Hidden=/d' "${file}" && rm -f "${file}.bak"
+    echo "autostart: enabled ${file}"
 }

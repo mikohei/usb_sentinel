@@ -1,8 +1,10 @@
 """Behaviour of scripts/kiosk-lockdown.sh against a fake gsettings.
 
 The fake answers `list-recursively <schema>` from fixture files in tmp_path (exit 1 when the
-fixture is absent), records every `set` call in a file, fails `set` for keys listed in a `fail`
-fixture, and in one variant drains its stdin first. The shell runs with `set -euo pipefail`
+fixture is absent), records every `set`, `reset` and `reset-recursively` call in a file (the
+last one also fails when the fixture is absent), fails `set` for keys listed in a `fail`
+fixture, and in one variant drains its stdin first. kiosk_unlock and the autostart helpers are
+covered in test_kiosk_unlock.py. The shell runs with `set -euo pipefail`
 like install-all.sh, using the system bash (3.2 on macOS).
 """
 
@@ -40,6 +42,13 @@ fake_gs() {
                 return 1
             fi
             ;;
+        reset)
+            printf 'reset %s %s\\n' "$2" "$3" >> "${RECORD}"
+            ;;
+        reset-recursively)
+            printf 'reset-recursively %s\\n' "$2" >> "${RECORD}"
+            [[ -f "${FIXTURES}/$2" ]] || return 1
+            ;;
     esac
     return 0
 }
@@ -60,6 +69,8 @@ FIXED_SETTINGS = [
     "set org.gnome.desktop.a11y.keyboard enable false",
     "set org.gnome.settings-daemon.plugins.power power-button-action 'nothing'",
 ]
+# The same rows as `reset <schema> <key>` lines (what kiosk_unlock must record).
+FIXED_RESETS = [line.replace("set ", "reset ", 1).rsplit(" ", 1)[0] for line in FIXED_SETTINGS]
 
 
 class Fake:
@@ -96,7 +107,7 @@ class Fake:
         return subprocess.run(argv, capture_output=True, text=True, check=False, env=env)
 
     def sets(self) -> list[str]:
-        """Recorded set calls."""
+        """Recorded set / reset / reset-recursively calls."""
         return self.record.read_text().splitlines()
 
 

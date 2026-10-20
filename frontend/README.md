@@ -37,7 +37,7 @@ y320 +--------+----------------------------+
 
 ## Display setup
 
-These steps assume Ubuntu Desktop (Pi 4, GNOME). Perform all of them by hand; no script in this project runs them. The backend Docker setup (the root `README.md`) must already be installed.
+These steps assume Ubuntu Desktop (Pi 4, GNOME). `scripts/install-all.sh` performs steps 3-8 and 10 (with the autostart entry disabled); steps 1, 2 and 9 are always manual, and `scripts/kiosk-enable.sh` is the final step. The backend Docker setup (the root `README.md`) must already be installed.
 
 1. **Fix the resolution at 480x320.** At resolutions higher than 480x320, the LCD downscales the image and the QR code blurs. Ubuntu on the Pi 4 runs on the KMS driver, so the setting takes effect in three separate layers. The resolution of the GNOME session is decided by mutter, so use (c) as the main setting and use (b) alongside it for the console.
    - (a) `/boot/firmware/config.txt` (firmware layer. It probably has no effect under KMS. Remove it if it does nothing.)
@@ -113,11 +113,13 @@ These steps assume Ubuntu Desktop (Pi 4, GNOME). Perform all of them by hand; no
     sed "s|<user>|$USER|g" deploy/usb-sentinel-display.desktop > ~/.config/autostart/usb-sentinel-display.desktop
     ```
     If you placed the project somewhere other than `/home/<user>/usb_sentinel`, also fix the `--project` path.
-11. **Check operation.** Start the app manually, plug in a USB drive and check the display, then reboot.
+    `install-all.sh` writes this file and appends `Hidden=true`, so nothing starts at login until `sudo bash ../scripts/kiosk-enable.sh` removes that line. The entry waits 5 seconds (`X-GNOME-Autostart-Delay=5`) and writes the app's output to `~/.local/state/usb-sentinel-display/autostart.log`.
+11. **Check operation, then arm the kiosk.** Start the app manually, plug in a USB drive and check the display.
     ```bash
     uv run usb-sentinel-display run --windowed
     ```
-    Press `Ctrl+Q` to quit. After the reboot, the autostarted full-screen app shows four tiles.
+    Press `Ctrl+Q` to quit. Then run `sudo bash ../scripts/kiosk-enable.sh` and reboot; the autostarted full-screen app shows four tiles.
+    In `--kiosk` mode there is no `Ctrl+Q`. Recover from the text console (Ctrl+Alt+F3) or SSH with `pkill -f usb-sentinel-display`, or undo autostart and the lockdown with `sudo bash scripts/kiosk-disable.sh`.
 
 ## Port calibration
 
@@ -320,6 +322,8 @@ The inspection-mode toggle raises the SQLite schema to `user_version` 2 (`mode` 
 
 ## Troubleshooting
 
+When the app does not appear after login, read `~/.local/state/usb-sentinel-display/autostart.log` first (the autostart entry redirects the app's output there). If the file is missing, the entry still has `Hidden=true`: run `sudo bash scripts/kiosk-enable.sh`.
+
 The cause and remedy for each message on the info strip.
 
 | Message | Cause | Remedy |
@@ -330,7 +334,7 @@ The cause and remedy for each message on the info strip.
 | No permission to read sysfs | `sys_block` is not readable | Check the directory permissions |
 | A message starting with `journalctl -u usb-sentinel-docker@sdX.service` | A disk is present, but the inspection unit is not running and there is no result | Use `journalctl -u usb-sentinel-docker@sdX.service` to see whether the inspection was refused (exit code 2) or failed to start. With automount enabled, the inspection is refused (step 5) |
 | Broken | `result.json` has been unreadable for 10 seconds or more | Check the contents with `cat result.json`. If the backend is still writing, wait. Reload with `F5` |
-| Internal error: <exception name> | An exception occurred during an update. The previous display is kept | Look at the stack trace in standard error (`journalctl --user -b` for autostart) |
+| Internal error: <exception name> | An exception occurred during an update. The previous display is kept | Look at the stack trace in standard error (`~/.local/state/usb-sentinel-display/autostart.log` for autostart) |
 | Internal error persists; check stderr | The same exception occurred for 30 seconds in a row | Same as above |
 | Resolution WxH (expected 480x320) | The resolution is not fixed at 480x320 | Step 1 of "Display setup" |
 | +N more | 5 or more disks are connected | Only the first 4 are shown as tiles |

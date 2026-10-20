@@ -37,7 +37,7 @@ y320 +--------+----------------------------+
 
 ## ディスプレイの設置
 
-Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手作業で行い、本プロジェクトのスクリプトからは実行しない。backendのDocker構成（ルートの`README.ja.md`）を導入済みであること。
+Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/install-all.sh`が手順3〜8と10を行う（自動起動の項目は無効の状態で書く）。手順1、2、9は常に手作業で、最後に`scripts/kiosk-enable.sh`を実行する。backendのDocker構成（ルートの`README.ja.md`）を導入済みであること。
 
 1. **解像度を480x320に固定する。** 480x320より高い解像度はLCD側で縮小されてQRが滲む。Ubuntu on Pi 4はKMSドライバで動くため、効く層が3つに分かれる。GNOMEセッションの解像度を決めるのはmutterなので(c)を主にし、(b)をコンソール用に併用する。
    - (a) `/boot/firmware/config.txt`（ファームウェア層。KMSでは効かない可能性が高い。効かなければ消す）
@@ -113,11 +113,13 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手
     sed "s|<user>|$USER|g" deploy/usb-sentinel-display.desktop > ~/.config/autostart/usb-sentinel-display.desktop
     ```
     プロジェクトを`/home/<user>/usb_sentinel`以外に置いた場合は`--project`のパスも直す。
-11. **動作を確認する。** 手動で起動し、USBを挿して表示を確かめてから再起動する。
+    `install-all.sh`はこのファイルを書いたあと`Hidden=true`を追記する。`sudo bash ../scripts/kiosk-enable.sh`がその行を外すまで、ログイン時に何も起動しない。項目は5秒待ってから起動し（`X-GNOME-Autostart-Delay=5`）、アプリの出力を`~/.local/state/usb-sentinel-display/autostart.log`に書く。
+11. **動作を確認し、キオスクを有効にする。** 手動で起動し、USBを挿して表示を確かめる。
     ```bash
     uv run usb-sentinel-display run --windowed
     ```
-    `Ctrl+Q`で終了する。再起動後は自動起動した全画面に4つのタイルが出る。
+    `Ctrl+Q`で終了する。次に`sudo bash ../scripts/kiosk-enable.sh`を実行して再起動する。自動起動した全画面に4つのタイルが出る。
+    `--kiosk`では`Ctrl+Q`が使えない。復旧はテキストコンソール（Ctrl+Alt+F3）またはSSHから`pkill -f usb-sentinel-display`で行う。自動起動とロックダウンを戻すには`sudo bash scripts/kiosk-disable.sh`を実行する。
 
 ## ポートのキャリブレーション
 
@@ -320,6 +322,8 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 
 ## トラブルシュート
 
+ログイン後にアプリが出ないときは、まず`~/.local/state/usb-sentinel-display/autostart.log`を読む（自動起動の項目がアプリの出力をここに書く）。ファイルが無ければ項目に`Hidden=true`が残っている。`sudo bash scripts/kiosk-enable.sh`を実行する。
+
 情報ストリップの文言ごとの原因と対処。
 
 | 文言 | 原因 | 対処 |
@@ -330,7 +334,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 | sysfsを読む権限がない | `sys_block`が読めない | ディレクトリの権限を確認する |
 | `journalctl -u usb-sentinel-docker@sdX.service`で始まる案内 | ディスクはあるが検査ユニットが動いておらず結果も無い | `journalctl -u usb-sentinel-docker@sdX.service`で検査拒否（終了コード2）か起動失敗かを見る。自動マウントが有効だと拒否される（手順5） |
 | 結果破損 | `result.json`が10秒以上読めない | `cat result.json`で内容を確認する。backendが書き込み中なら待つ。`F5`で再読み込み |
-| 内部エラー: <例外名> | 更新処理で例外が出た。前回の表示は保持される | 標準エラー出力（自動起動なら`journalctl --user -b`）のスタックトレースを見る |
+| 内部エラー: <例外名> | 更新処理で例外が出た。前回の表示は保持される | 標準エラー出力（自動起動なら`~/.local/state/usb-sentinel-display/autostart.log`）のスタックトレースを見る |
 | 内部エラーが継続中。標準エラー出力を確認 | 同じ例外が30秒連続した | 同上 |
 | 画面解像度WxH（480x320を想定） | 解像度が480x320に固定されていない | 「ディスプレイの設置」手順1 |
 | 他N台 | 5台以上接続している | タイルは先頭4台だけ表示する |

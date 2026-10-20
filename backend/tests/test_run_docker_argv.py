@@ -205,6 +205,16 @@ def test_main_calls_docker_once_via_argv() -> None:
     assert docker_lines == ['exec docker "${argv[@]}"']
 
 
+def test_unit_removes_leftover_container_before_start() -> None:
+    """A container created but never started (USB pulled during docker run) is not removed by
+    --rm and keeps the name taken; the unit removes it before the next run."""
+    unit = SCRIPT.parents[1] / "deploy" / "usb-sentinel-docker@.service"
+    lines = unit.read_text().splitlines()
+    assert lines.index("ExecStartPre=-/usr/bin/docker rm -f usb-sentinel-%i") < lines.index(
+        "ExecStart=/opt/usb-sentinel/scripts/run-docker.sh /dev/%i"
+    )
+
+
 def test_mode_ttl_constant_on_its_own_line() -> None:
     """The frontend test parses this exact line to keep HOST_MODE_TTL_S in sync."""
     assert "\nreadonly MODE_TTL_S=20\n" in SCRIPT.read_text()

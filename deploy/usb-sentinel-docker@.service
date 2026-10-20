@@ -8,6 +8,9 @@ After=dev-%i.device docker.service
 Type=oneshot
 User=root
 EnvironmentFile=-/etc/usb-sentinel/docker.env
+# USB removed during docker run can leave a created-but-never-started container that --rm
+# does not remove; it would keep the name taken and fail every later run (exit 125).
+ExecStartPre=-/usr/bin/docker rm -f usb-sentinel-%i
 ExecStart=/opt/usb-sentinel/scripts/run-docker.sh /dev/%i
 # When USB is removed, stop the container as well as the attached Docker CLI.
 ExecStopPost=-/usr/bin/docker stop -t 10 usb-sentinel-%i

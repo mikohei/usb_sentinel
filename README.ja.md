@@ -126,6 +126,7 @@ scripts/
   install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、ClamAV DB。自動起動は無効の状態で書く）
   kiosk-enable.sh          最終手順。自動起動を有効にし、GNOMEのロックダウンを適用する
   kiosk-disable.sh         復旧用。自動起動を無効にし、アプリを止め、ロックダウンを戻す
+  ssh-access.sh            保守用の鍵認証SSH（任意。install-all.shがINSTALL_SSH=1のときに読み込む）
   install-docker.sh        Docker構成の導入（install-all.shから呼ばれる。単独でも使える）
   run-docker.sh            USBごとに検査コンテナを起動
 README.md                  プロジェクト全体の説明と導入手順
@@ -202,8 +203,27 @@ uvの公式インストーラは取得後にSHA-256を表示して実行前に�
 `kiosk-enable.sh`は`~/.config/monitors.xml`（X11では`xrandr`）に480x320が無いと実行を拒む。
 `KIOSK_FORCE=1`でこの確認を省略できる。
 
+#### 保守用SSH（任意）
+
+3.5インチの画面は文字が読みにくく、キオスクを有効化するとアプリが画面を覆う。
+デバッグは有線LAN経由でノートPCから行うほうが楽である。`install-all.sh`は既定ではSSHサーバを入れない。
+`INSTALL_SSH=1`と公開鍵を指定したときだけ導入する。
+
+```bash
+sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
+# または
+sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY_FILE=/path/to/id_ed25519.pub bash scripts/install-all.sh
+```
+
+この手順は`openssh-server`を導入し、`/etc/ssh/sshd_config.d/90-usb-sentinel.conf`を書く
+（公開鍵認証のみ。パスワードとrootのログインは不可。`AllowUsers`はsudoを実行したユーザーに限り、表示ユーザーは含めない）。
+`sshd -t`で設定を検証してからサービスを有効にし、ufwが有効な場合だけ22/tcpを許可する。
+鍵が無ければスクリプトは停止する。パスワード認証には切り替えない。
+終了時にLANのIPアドレスと`ssh <admin>@<ip>`のコマンドを表示する。
+LANを外したあともsshdは有効のまま残るが、到達できないため害はない。止めるには`sudo systemctl disable --now ssh`を実行する。
+
 **復旧。** 有効化後はアプリがすべてのウィンドウからフォーカスを奪い、GNOMEのショートカットも残らない。
-復旧するには、Ctrl+Alt+F3でテキストコンソールに入る（またはSSH）。
+復旧するには、Ctrl+Alt+F3でテキストコンソールに入る。上記のSSHを有効にしていれば、LANをつないで`ssh <admin>@<ip>`でも入れる。
 `pkill -f usb-sentinel-display`でアプリを止め、`sudo bash scripts/kiosk-disable.sh`で自動起動とロックダウンを戻す。
 Ctrl+Alt+F1でデスクトップに戻る。ログイン時の異常終了は`~/.local/state/usb-sentinel-display/autostart.log`に残る。
 手順1〜3は`install-all.sh`が内部で行う内容の説明で、個別にやり直すときに使う。

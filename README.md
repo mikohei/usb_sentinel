@@ -126,6 +126,7 @@ scripts/
   install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, ClamAV DB; autostart is written disabled)
   kiosk-enable.sh          Final step: enables autostart and applies the GNOME lockdown
   kiosk-disable.sh         Recovery: disables autostart, stops the app, resets the lockdown
+  ssh-access.sh            Opt-in key-only SSH for maintenance (sourced by install-all.sh, INSTALL_SSH=1)
   install-docker.sh        Docker setup (called from install-all.sh; can also be used alone)
   run-docker.sh            Starts an inspection container per USB drive
 README.md                  Overview and setup of the whole project
@@ -203,8 +204,28 @@ enabling the capacity and speed inspections (which erase the sample) are not aut
 `kiosk-enable.sh` refuses to arm the kiosk unless `~/.config/monitors.xml` (or `xrandr` on X11)
 shows 480x320; `KIOSK_FORCE=1` overrides that check.
 
+#### SSH for maintenance (optional)
+
+The 3.5-inch panel is hard to read and the armed kiosk covers the screen, so debugging is
+easier from a laptop over the wired LAN. `install-all.sh` does not install an SSH server by
+default; opt in with `INSTALL_SSH=1` and your public key:
+
+```bash
+sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
+# or
+sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY_FILE=/path/to/id_ed25519.pub bash scripts/install-all.sh
+```
+
+The step installs `openssh-server`, writes `/etc/ssh/sshd_config.d/90-usb-sentinel.conf`
+(public key only, no password or root login, `AllowUsers` limited to the user running sudo, not
+the display user), checks it with `sshd -t`, enables the service and opens 22/tcp in ufw only when
+ufw is already active. Without a key the script stops; it never falls back to password login. At
+the end it prints the LAN addresses and the `ssh <admin>@<ip>` command. sshd stays enabled after
+the LAN is unplugged, which is harmless; `sudo systemctl disable --now ssh` turns it off.
+
 **Recovery.** Once armed, the app takes focus back from every window and GNOME has no shortcuts
-left. Press Ctrl+Alt+F3 for the text console (or use SSH), log in, then run
+left. Press Ctrl+Alt+F3 for the text console, or, when SSH was enabled above, plug in the LAN and
+log in with `ssh <admin>@<ip>`; then run
 `pkill -f usb-sentinel-display` to stop the app and `sudo bash scripts/kiosk-disable.sh` to turn
 autostart off and reset the lockdown. Ctrl+Alt+F1 returns to the desktop. A crash at login is
 logged in `~/.local/state/usb-sentinel-display/autostart.log`.

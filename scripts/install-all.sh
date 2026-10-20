@@ -9,6 +9,8 @@
 #   sudo bash scripts/install-all.sh                 # display user = the sudo caller
 #   sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
 #   sudo INSTALL_YES=1 bash scripts/install-all.sh   # answer every prompt with yes
+#   sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
+#                                                    # opt-in key-only SSH for the sudo caller
 #   sudo bash scripts/kiosk-enable.sh                # final step, after the manual steps
 #   sudo bash scripts/kiosk-disable.sh               # undo from a text console
 #
@@ -25,9 +27,14 @@
 #      sleep/lock off, display.toml, XDG autostart entry written DISABLED
 #      (Hidden=true)
 #      Kiosk lockdown and autostart are armed later by scripts/kiosk-enable.sh
-#   7. ClamAV signature database (freshclam inside the container)
-#   8. Offline self-check (selftest with --network none, uv run --offline)
-#   9. Remaining manual steps and the "before unplugging the LAN" checklist
+#   7. SSH maintenance access, only with INSTALL_SSH=1 (default: nothing is
+#      installed): openssh-server, key-only login for the sudo caller
+#      (SSH_AUTHORIZED_KEY or SSH_AUTHORIZED_KEY_FILE required; no password
+#      fallback), drop-in /etc/ssh/sshd_config.d/90-usb-sentinel.conf, ufw rule
+#      only when ufw is already active. See scripts/ssh-access.sh
+#   8. ClamAV signature database (freshclam inside the container)
+#   9. Offline self-check (selftest with --network none, uv run --offline)
+#  10. Remaining manual steps and the "before unplugging the LAN" checklist
 #
 # What it leaves to the operator (printed at the end):
 #   - Fixing the display resolution to 480x320 (GNOME monitors.xml)
@@ -41,6 +48,9 @@ set -euo pipefail
 readonly REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly DISPLAY_USER="${DISPLAY_USER:-${SUDO_USER:-}}"
 readonly INSTALL_YES="${INSTALL_YES:-0}"
+readonly INSTALL_SSH="${INSTALL_SSH:-0}"
+# Admin user allowed to log in over SSH: the sudo caller, never the display (kiosk) user.
+readonly SSH_ADMIN_USER="${SSH_ADMIN_USER:-${SUDO_USER:-}}"
 readonly UV_VERSION_PIN="${UV_VERSION_PIN:-}"   # e.g. 0.11.7; empty = latest
 readonly IMAGE="${USB_SENTINEL_IMAGE:-usb-sentinel:local}"
 readonly CLAMAV_DB_DIR="/var/lib/clamav"
@@ -66,7 +76,7 @@ run_as_user() {
 }
 
 # ---------------------------------------------------------------- 1. preflight
-log "1/9 Preflight checks"
+log "1/10 Preflight checks"
 [[ ${EUID} -eq 0 ]] || die "run with sudo"
 [[ "$(uname -s)" == Linux ]] || die "run on Linux (Ubuntu)"
 [[ -n "${DISPLAY_USER}" ]] || die "cannot determine the display user; set DISPLAY_USER=<user>"
@@ -87,7 +97,7 @@ echo "display user: ${DISPLAY_USER} (${USER_HOME})"
 echo "repository:   ${REPO_DIR}"
 
 # ---------------------------------------------------------------- 2. apt
-log "2/9 Installing apt packages"
+log "2/10 Installing apt packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 # docker.io: inspection container. fonts-noto-cjk: Japanese UI text.
@@ -97,7 +107,7 @@ apt-get install -y --no-install-recommends \
 systemctl enable --now docker.service
 
 # ---------------------------------------------------------------- 3. uv
-log "3/9 Installing uv into the display user's ~/.local/bin"
+log "3/10 Installing uv into the display user's ~/.local/bin"
 readonly UV_BIN="${USER_HOME}/.local/bin/uv"
 if [[ -x "${UV_BIN}" ]]; then
     echo "uv already present: $("${UV_BIN}" --version)"
@@ -126,11 +136,11 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. backend
-log "4/9 backend (Docker image, udev, systemd, result directories)"
+log "4/10 backend (Docker image, udev, systemd, result directories)"
 USB_SENTINEL_IMAGE="${IMAGE}" bash "${REPO_DIR}/scripts/install-docker.sh"
 
 # ---------------------------------------------------------------- 5. frontend
-log "5/9 Syncing frontend dependencies (the app starts with --offline from now on)"
+log "5/10 Syncing frontend dependencies (the app starts with --offline from now on)"
 run_as_user "${UV_BIN}" sync --frozen --project "${REPO_DIR}/frontend"
 if run_as_user "${UV_BIN}" run --offline --frozen --no-sync --project "${REPO_DIR}/frontend" \
         python -c "import tkinter" 2>/dev/null; then
@@ -141,7 +151,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 6. display user
-log "6/9 Configuring the display user ${DISPLAY_USER}"
+log "6/10 Configuring the display user ${DISPLAY_USER}"
 
 # Group membership for reading the result directory and the SQLite index.
 usermod -aG usb-sentinel "${DISPLAY_USER}"
@@ -221,8 +231,19 @@ kiosk_autostart_hide "${DESKTOP_FILE}"
 echo "autostart: ${DESKTOP_FILE} (disabled until kiosk-enable.sh)"
 grep '^Exec=' "${DESKTOP_FILE}"
 
-# ---------------------------------------------------------------- 7. ClamAV DB
-log "7/9 Fetching the ClamAV signature database (cannot be updated once isolated)"
+# ---------------------------------------------------------------- 7. SSH (opt-in)
+log "7/10 SSH maintenance access (INSTALL_SSH=${INSTALL_SSH})"
+source "${REPO_DIR}/scripts/ssh-access.sh"
+if [[ "${INSTALL_SSH}" == 1 ]]; then
+    [[ "${SSH_ADMIN_USER}" != "${DISPLAY_USER}" ]] \
+        || warn "SSH admin user equals the display user ${DISPLAY_USER}; prefer a separate admin account"
+    ssh_setup "${SSH_ADMIN_USER}" "$(getent passwd "${SSH_ADMIN_USER}" | cut -d: -f6)"
+else
+    echo "skipped (set INSTALL_SSH=1 with SSH_AUTHORIZED_KEY=... to enable key-only SSH)"
+fi
+
+# ---------------------------------------------------------------- 8. ClamAV DB
+log "8/10 Fetching the ClamAV signature database (cannot be updated once isolated)"
 if confirm "Run freshclam now to update ${CLAMAV_DB_DIR}? (takes a few minutes)"; then
     docker run --rm --entrypoint freshclam \
         --mount "type=bind,src=${CLAMAV_DB_DIR},dst=/var/lib/clamav" \
@@ -231,8 +252,8 @@ else
     warn "signature database not fetched; run README section '2. ClamAV definition DB' before isolating"
 fi
 
-# ---------------------------------------------------------------- 8. self-check
-log "8/9 Verifying that everything works offline"
+# ---------------------------------------------------------------- 9. self-check
+log "9/10 Verifying that everything works offline"
 set +e
 docker run --rm --network none \
     --mount "type=bind,src=${CLAMAV_DB_DIR},dst=/var/lib/clamav,readonly" \
@@ -251,8 +272,13 @@ else
     die "frontend does not start with --offline; check that uv sync --frozen completed"
 fi
 
-# ---------------------------------------------------------------- 9. next steps
-log "9/9 Installation complete. Remaining manual steps and pre-isolation checklist"
+# --------------------------------------------------------------- 10. next steps
+log "10/10 Installation complete. Remaining manual steps and pre-isolation checklist"
+if [[ "${INSTALL_SSH}" == 1 ]]; then
+    SSH_RECOVERY_HINT="SSH as ${SSH_ADMIN_USER} (enabled in step 7/10; works while the LAN is plugged in)"
+else
+    SSH_RECOVERY_HINT="SSH (not installed; re-run with INSTALL_SSH=1 SSH_AUTHORIZED_KEY=... to add it)"
+fi
 cat <<EOF
 
 [Manual steps]
@@ -280,14 +306,14 @@ cat <<EOF
     every shortcut except Ctrl+Alt+F1..F12 is cleared, the dock is emptied).
     Once armed, the app covers the whole screen, hides the cursor and takes focus back
     from every other window. The only ways out are:
-      - Ctrl+Alt+F3 (text console, password) or SSH, then
+      - Ctrl+Alt+F3 (text console, password) or ${SSH_RECOVERY_HINT}, then
           pkill -f usb-sentinel-display                      stop the app until the next login
           sudo bash ${REPO_DIR}/scripts/kiosk-disable.sh     undo autostart and lockdown
     GDM autologin stays on in both states (${GDM_CONF}; remove the two AutomaticLogin
     lines to turn it off).
 
 [Checklist before unplugging the LAN]
- [ ] backend selftest exited 0 (see step 8/9 above)
+ [ ] backend selftest exited 0 (see step 9/10 above)
  [ ] After kiosk-enable.sh and a reboot the full-screen display shows four tiles
  [ ] A disposable USB stick shows "Scanning" and then a verdict
  [ ] result.json appears under /var/lib/usb-sentinel/results/

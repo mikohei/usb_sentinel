@@ -42,6 +42,7 @@ def _ordered(text: str, *needles: str) -> None:
         "kiosk-enable.sh",
         "kiosk-disable.sh",
         "run-docker.sh",
+        "ssh-access.sh",
     ],
 )
 def test_scripts_parse(name: str) -> None:

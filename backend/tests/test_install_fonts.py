@@ -7,7 +7,7 @@ from pathlib import Path
 from tests.test_install_kiosk import LOG, run_install_all_to_end
 
 CONSOLE = 'ACTIVE_CONSOLES="/dev/tty[1-6]"\nCHARMAP="UTF-8"\nFONTFACE="Fixed"\nFONTSIZE="8x16"\n'
-FC_CACHE = {"fc-cache": LOG.format(name="fc-cache") + "\nexit 0"}
+FC_CACHE: dict[str, str] = {"fc-cache": LOG.format(name="fc-cache") + "\nexit 0"}
 
 
 def test_apt_installs_fontconfig_console_setup_and_runs_fc_cache(tmp_path: Path) -> None:

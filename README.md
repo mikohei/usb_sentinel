@@ -13,6 +13,108 @@ Previously, inspectors ran H2testw, CrystalDiskMark, BitDefender, and similar to
 | Speed | fio |
 | OS | Ubuntu Linux |
 
+## For operators
+
+This section collects what an operator needs day to day. Details are linked.
+
+### 1. Install or update
+
+Connect the LAN, then run in a terminal on the device:
+
+```bash
+cd ~/usb_sentinel && git pull && sudo INSTALL_YES=1 bash scripts/install-all.sh && sudo reboot
+```
+
+Running it again is safe. An armed kiosk stays armed, and an old frontend venv is rebuilt.
+Optional settings go before `bash`, for example `sudo INSTALL_YES=1 INSTALL_KIOSK=0 bash ...`.
+
+| Setting | Effect |
+|---|---|
+| `INSTALL_SSH=1` | Key-only SSH for maintenance. Password login over SSH is turned off. See [SSH for maintenance](#ssh-for-maintenance-optional) |
+| `INSTALL_ALLOW_ERASE=0` | Scan-only station. "Scan + erase" cannot be used |
+| `INSTALL_KIOSK=0` | Do not start the app full screen at login. See [Opting out of arming](#opting-out-of-arming) |
+| `INSTALL_PORTS=0` | Do not write the Raspberry Pi 4 port table |
+| `INSTALL_VIDEO_HINT=1` | Add the 480x320 boot hint. See [Screen size](#screen-size) |
+
+### 2. Port map (Raspberry Pi 4)
+
+On a Raspberry Pi 4 the installer writes this table into `~/.config/usb-sentinel/display.toml`.
+Positions are seen facing the USB ports. It was measured with a USB 2.0 stick on a Pi 4 Model B
+Rev 1.5; the `2-x` paths (USB 3.0 sticks) are not verified yet.
+
+| Position | Colour | sysfs paths | Tile |
+|---|---|---|---|
+| Left top | Black (USB 2.0) | `1-1.3` | P1 |
+| Right top | Blue (USB 3.0) | `1-1.1`, `2-1` | P2 |
+| Left bottom | Black (USB 2.0) | `1-1.4` | P3 |
+| Right bottom | Blue (USB 3.0) | `1-1.2`, `2-2` | P4 |
+
+On other hardware, measure the ports with `calibrate`. See
+[Optional: port calibration](#optional-port-calibration).
+
+### 3. Daily use
+
+Plug in a USB drive. The inspection starts by itself and the tile shows the verdict.
+
+| Key | Action |
+|---|---|
+| `1`-`4` | Select a tile |
+| Arrow keys | Previous or next tile |
+| `M` | Switch between "Scan only" and "Scan + erase" ("Scan + erase" asks for a 4-digit code) |
+| `Q` | Switch the QR code (normal / detail) |
+| `L` | Switch the language (日本語 / English) |
+| `F5` | Reload the results |
+
+Plug the keyboard in before power-on. A keyboard plugged in later locks erase mode until the
+next reboot (a guard against BadUSB devices).
+
+| Verdict | Screen (Japanese) | Meaning |
+|---|---|---|
+| No Defect | 異常なし | Every check passed, including capacity and speed |
+| No Defect (Scan Only) | 異常なし（検査のみ） | Malware and the other checks passed; capacity and speed were not tested (scan only) |
+| Malware Detected | マルウェア検知 | ClamAV found malware |
+| Counterfeit Suspected | 偽装疑い | The capacity looks faked |
+| Spec Mismatch | 仕様不一致 | Capacity or speed is too low |
+| Defective | 不良 | Data gets corrupted |
+| Inconclusive | 判定不能 | A check failed to run or was skipped for another reason |
+
+See [Verdict classification](#verdict-classification) for the rules.
+
+### 4. Maintenance access
+
+- From another PC on the LAN: `ssh amzn@<host>.local`. For password login install the server with
+  `sudo apt-get install -y openssh-server`. For key login run `ssh-copy-id amzn@<host>.local`
+  from the PC, or use `INSTALL_SSH=1`.
+- On the device: Ctrl+Alt+F3 opens the text console (large font). Ctrl+Alt+F1 returns.
+
+### 5. Recovery
+
+```bash
+pkill -f usb-sentinel-display                    # stop the app until the next login
+sudo bash ~/usb_sentinel/scripts/kiosk-disable.sh  # turn the kiosk off
+sudo bash ~/usb_sentinel/scripts/kiosk-enable.sh   # turn it on again (then reboot)
+```
+
+The app log at login is `~/.local/state/usb-sentinel-display/autostart.log`. To see why the last
+result was Inconclusive, list its steps:
+
+```bash
+latest=$(ls -td /var/lib/usb-sentinel/results/*/ | head -n 1)
+python3 -c "import json,sys; r=json.load(open(sys.argv[1])); print(r['verdict']); [print(s['name'], s['status'], s.get('summary','')) for s in r['steps']]" "${latest}result.json"
+```
+
+See [Recovery](#recovery) for details.
+
+### 6. ClamAV update
+
+Whenever the LAN is connected, update the virus definitions:
+
+```bash
+sudo bash ~/usb_sentinel/scripts/update-clamav.sh
+```
+
+See [2. Prepare the ClamAV definition DB](#2-prepare-the-clamav-definition-db).
+
 ## Inspection sequence
 
 ```
@@ -241,7 +343,8 @@ once. The console cannot show Japanese, so the locale is unchanged. Use
 
 #### Optional: port calibration
 
-Uncalibrated ports show `P?` with the kernel name and keep working. To give them names, log in over
+On a Raspberry Pi 4 the installer writes the port table (see [Port map](#2-port-map-raspberry-pi-4));
+this step is only for other hardware. Uncalibrated ports show `P?` with the kernel name and keep working. To give them names, log in over
 SSH or press Ctrl+Alt+F3 for the text console, run `usb-sentinel-display calibrate` (the exact
 command is printed at the end of the install) and write the `[[ports]]` table into
 `~/.config/usb-sentinel/display.toml`; the app reads it at its next start. See

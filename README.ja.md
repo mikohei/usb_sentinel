@@ -13,6 +13,105 @@ USBドライブを挿すだけで検査が自動実行される、Linux向けの
 | 速度 | fio |
 | OS | Ubuntu Linux |
 
+## 運用者向け
+
+日々の運用に必要なことをまとめた。詳しい説明は各節へのリンクを参照する。
+
+### 1. 導入と更新
+
+LANをつなぎ、端末で次を実行する。
+
+```bash
+cd ~/usb_sentinel && git pull && sudo INSTALL_YES=1 bash scripts/install-all.sh && sudo reboot
+```
+
+何度実行してもよい。有効にしたキオスクは有効のまま残り、古い表示アプリの環境は作り直される。
+追加の設定は`bash`の前に書く（例: `sudo INSTALL_YES=1 INSTALL_KIOSK=0 bash ...`）。
+
+| 設定 | 効果 |
+|---|---|
+| `INSTALL_SSH=1` | 保守用に鍵だけでログインできるSSHを入れる。SSHのパスワードログインは使えなくなる。「保守用SSH（任意）」を参照 |
+| `INSTALL_ALLOW_ERASE=0` | 検査のみの端末にする。「検査＋消去」は使えない |
+| `INSTALL_KIOSK=0` | ログイン時にアプリを全画面で起動しない。「キオスクを有効化しない場合」を参照 |
+| `INSTALL_PORTS=0` | Raspberry Pi 4のポート表を書かない |
+| `INSTALL_VIDEO_HINT=1` | 起動時の画面を480x320にするヒントを足す。「画面サイズ」を参照 |
+
+### 2. ポートの配置（Raspberry Pi 4）
+
+Raspberry Pi 4では、導入スクリプトが次の表を`~/.config/usb-sentinel/display.toml`に書く。
+位置はUSBポートを正面に見たときのものである。Pi 4 Model B Rev 1.5とUSB 2.0のメモリで測った。
+`2-x`の経路（USB 3.0のメモリ）はまだ確かめていない。
+
+| 位置 | 色 | sysfsの経路 | タイル |
+|---|---|---|---|
+| 左上 | 黒（USB 2.0） | `1-1.3` | P1 |
+| 右上 | 青（USB 3.0） | `1-1.1`、`2-1` | P2 |
+| 左下 | 黒（USB 2.0） | `1-1.4` | P3 |
+| 右下 | 青（USB 3.0） | `1-1.2`、`2-2` | P4 |
+
+ほかの機種では`calibrate`でポートを測る。「任意: ポートのキャリブレーション」を参照。
+
+### 3. 日々の使い方
+
+USBメモリを挿すと検査が自動で始まり、タイルに判定が出る。
+
+| キー | 操作 |
+|---|---|
+| `1`〜`4` | タイルを選ぶ |
+| 矢印キー | 前後のタイルに移る |
+| `M` | 「検査のみ」と「検査＋消去」を切り替える（「検査＋消去」は4桁のコードを入れる） |
+| `Q` | QRコードを切り替える（通常／詳細） |
+| `L` | 言語を切り替える（日本語／English） |
+| `F5` | 結果を読み直す |
+
+キーボードは電源を入れる前に挿す。あとから挿すと、再起動まで消去モードにできない（不正なUSB機器への対策）。
+
+| 判定 | 画面の表示 | 意味 |
+|---|---|---|
+| No Defect | 異常なし | 容量と速度を含め、すべての検査に合格した |
+| No Defect (Scan Only) | 異常なし（検査のみ） | ウイルス検査などに合格した。容量と速度は検査のみのため調べていない |
+| Malware Detected | マルウェア検知 | ClamAVがマルウェアを見つけた |
+| Counterfeit Suspected | 偽装疑い | 容量を偽っている疑いがある |
+| Spec Mismatch | 仕様不一致 | 容量か速度が足りない |
+| Defective | 不良 | データが壊れる |
+| Inconclusive | 判定不能 | 検査を実行できなかった。または別の理由で飛ばした |
+
+判定の決まりは「判定分類」を参照。
+
+### 4. 保守のための接続
+
+- 同じLANのPCから: `ssh amzn@<ホスト名>.local`。パスワードで入るなら端末で`sudo apt-get install -y openssh-server`を実行する。
+  鍵で入るならPCから`ssh-copy-id amzn@<ホスト名>.local`を実行するか、`INSTALL_SSH=1`を使う。
+- 端末の前で: Ctrl+Alt+F3でテキストコンソール（大きな文字）に入る。Ctrl+Alt+F1で戻る。
+
+### 5. 困ったとき
+
+```bash
+pkill -f usb-sentinel-display                    # 次のログインまでアプリを止める
+sudo bash ~/usb_sentinel/scripts/kiosk-disable.sh  # キオスクを止める
+sudo bash ~/usb_sentinel/scripts/kiosk-enable.sh   # キオスクを戻す（そのあと再起動）
+```
+
+ログイン時のアプリのログは`~/.local/state/usb-sentinel-display/autostart.log`にある。
+最後の結果が判定不能になった理由は、各ステップの結果で分かる。
+
+```bash
+latest=$(ls -td /var/lib/usb-sentinel/results/*/ | head -n 1)
+python3 -c "import json,sys; r=json.load(open(sys.argv[1])); print(r['verdict']); [print(s['name'], s['status'], s.get('summary','')) for s in r['steps']]" "${latest}result.json"
+```
+
+詳しくは「復旧」を参照。
+
+### 6. ウイルス定義の更新
+
+LANをつないだときは、毎回ウイルス定義を更新する。
+
+```bash
+sudo bash ~/usb_sentinel/scripts/update-clamav.sh
+```
+
+「2. ClamAV定義DBの準備」を参照。
+
 ## 検査シーケンス
 
 ```
@@ -237,6 +336,7 @@ ldd "$so" | grep libXft; grep -c XftDrawString "$so"
 
 #### 任意: ポートのキャリブレーション
 
+Raspberry Pi 4では導入スクリプトがポート表を書く（「2. ポートの配置」を参照）。この手順はほかの機種だけで行う。
 校正していないポートは`P?`とカーネル名で表示され、そのまま使える。ポート名を付けるには、
 SSHでログインするか、Ctrl+Alt+F3でテキストコンソールに入る。`usb-sentinel-display calibrate`を実行し
 （正確なコマンドは導入の最後に表示される）、`~/.config/usb-sentinel/display.toml`に`[[ports]]`を書く。

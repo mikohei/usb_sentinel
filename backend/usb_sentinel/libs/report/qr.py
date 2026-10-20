@@ -149,6 +149,7 @@ def build_payload(result: InspectionResult) -> str:
     payload: dict[str, Any] = {
         "v": 3,
         "verdict": result.verdict,
+        "mode": result.mode,
         "serial": result.device.serial,
         "kernel_name": result.device.kernel_name,
         "port_path": result.device.port_path,

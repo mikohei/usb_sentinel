@@ -1,19 +1,28 @@
 """Launch the App in a --windowed style and take a screenshot after a fixed delay (plan.md D16).
 
 Usage: uv run python scripts/dev-screenshot.py --fixtures OUT --scene a|b|c --select N --out PNG
+       [--mode-scene none|scan_only|confirm|full|locked|lockout] [--code 3142]
 systemctl is replaced with a fake runner that reports only the sdc unit as activating.
-If screencapture fails, each Canvas is dumped to PostScript instead.
+XDG_STATE_HOME is pointed at OUT/state so the language and strike files of the fixtures are
+used. If screencapture fails, each Canvas (and the code dialog when shown) is dumped to
+PostScript instead.
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
 
-from usb_sentinel_display.libs.config import load_config
-from usb_sentinel_display.libs.ui.app import App, AppOptions
-from usb_sentinel_display.libs.units import SHOW_ARGV, CommandOutput
+# Sibling helper module (scripts/ is not a package).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from dev_mode_scenes import DEFAULT_CODE, SCENES, code_indices, run_scene  # noqa: E402
+
+from usb_sentinel_display.libs.config import load_config  # noqa: E402
+from usb_sentinel_display.libs.ui.app import App, AppOptions  # noqa: E402
+from usb_sentinel_display.libs.units import SHOW_ARGV, CommandOutput  # noqa: E402
 
 DEFAULT_FIXTURES = Path("/tmp/usb-sentinel-fixtures")  # noqa: S108 -- default input location, development machines only
 INSPECTING_KERNELS = frozenset({"sdc"})
@@ -69,7 +78,20 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=0,
         help="0 = summary QR, 1 to 3 = page of the detail QR",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--mode-scene",
+        choices=SCENES,
+        default="none",
+        help="what the operator did on the mode button before the shot (default none)",
+    )
+    parser.add_argument(
+        "--code",
+        default=DEFAULT_CODE,
+        help="fixed 4-digit confirmation code of 1-4 shown by the dialog (default 3142)",
+    )
+    args = parser.parse_args(argv)
+    code_indices(args.code)  # validate early; the App would raise later otherwise
+    return args
 
 
 def shoot(app: App, out: Path) -> None:
@@ -91,9 +113,16 @@ def shoot(app: App, out: Path) -> None:
         right = Path(f"{out}.right.ps")
         app.left_canvas.postscript(file=str(left), colormode="color")
         app.right_canvas.postscript(file=str(right), colormode="color")
+        saved = [str(left), str(right)]
+        confirm = app.mode_ui.confirm
+        if confirm.visible:
+            # The code dialog is a third canvas that covers both; dump it too.
+            dialog = Path(f"{out}.dialog.ps")
+            confirm.canvas.postscript(file=str(dialog), colormode="color")
+            saved.append(str(dialog))
         print(
             f"screencapture failed (exit code {code}, {size} bytes);"
-            f" saved {left} and {right} instead",
+            f" saved {', '.join(saved)} instead",
             file=sys.stderr,
         )
     else:
@@ -111,13 +140,18 @@ def unlink_fixture(fixtures: Path, kernel: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     """Entry point."""
     args = parse_args(argv)
+    # Language and strike files live in the fixtures, not in the developer's ~/.local/state.
+    os.environ["XDG_STATE_HOME"] = str(args.fixtures / "state")
     config = load_config(args.fixtures / "display.toml")
     config = replace(
         config,
         results_dir=args.results_dir or args.fixtures / "results",
         sys_block=args.sys_block or args.fixtures / "sys_block",
     )
-    app = App(config, AppOptions(windowed=True, kiosk=False), runner=ShowRunner())
+    code = args.code
+    app = App(
+        config, AppOptions(windowed=True, kiosk=False), runner=ShowRunner(), make_code=lambda: code
+    )
     # Pin the window position so it is not clipped at the screen edge.
     app.root.geometry(f"{args.geometry or '480x320'}{WINDOW_POSITION}")
     if args.language is not None:
@@ -134,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.unlink:
         app.root.after(args.after_ms // 2, unlink_fixture, args.fixtures, args.unlink)
+    # after(0) runs inside mainloop, that is after run()'s first tick.
+    app.root.after(0, run_scene, app, args.mode_scene, args.code)
     app.root.after(args.after_ms, finish)
     app.run()
     return 0

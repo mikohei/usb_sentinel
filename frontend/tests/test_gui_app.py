@@ -83,20 +83,20 @@ class TestApp:
             app.root.destroy()
 
     def test_language_button_saves_state(self, state_home: Path) -> None:
-        """Clicking the left canvas at (80, 290) sets ja and saves it under XDG_STATE_HOME."""
+        """Clicking the left canvas at (80, 272) sets ja and saves it under XDG_STATE_HOME."""
         app = make_app(FakeMonitor(Snapshot(scene_a_slots(), 0, None, None, 4)))
         try:
             assert app.language == "en"
             app.tick()
             app.root.update()
-            app.left_canvas.event_generate("<Button-1>", x=80, y=290)
+            app.left_canvas.event_generate("<Button-1>", x=80, y=272)
             assert app.language == "ja"
             saved = state_home / "usb-sentinel-display" / "language"
             assert saved.read_text(encoding="utf-8") == "ja\n"
-            app.left_canvas.event_generate("<Button-1>", x=20, y=290)
+            app.left_canvas.event_generate("<Button-1>", x=20, y=272)
             assert app.language == "ja"
             assert app.selected == 3
-            app.left_canvas.event_generate("<Button-1>", x=140, y=290)
+            app.left_canvas.event_generate("<Button-1>", x=140, y=272)
             assert app.selected == 0
         finally:
             app.root.destroy()
@@ -142,3 +142,23 @@ class TestStrip:
             == "P1 Detail 1/3 ◀▶ page d:0123456789ab"
         )
         assert strip_text(Snapshot(slots, overflow=1), 0, template, None, "en", 0) == "+1 more"
+
+    def test_mode_notice_priority(self) -> None:
+        """A mode notice loses to the resolution warning and internal error, beats the rest."""
+        slots = scene_a_slots()
+        template = "usb-sentinel-docker@{kernel}.service"
+
+        def en(snapshot: Snapshot, resolution: tuple[int, int] | None, notice: str | None) -> str:
+            return strip_text(snapshot, 0, template, resolution, "en", 0, mode_notice=notice)
+
+        busy = "Inserted drives may still be erased; remove them"
+        assert en(Snapshot(slots), (640, 480), "erase_off_busy").startswith("Resolution")
+        assert en(Snapshot(slots, error="E"), None, "erase_off_busy") == "Internal error: E"
+        assert en(Snapshot(slots, notice="sysfs_missing"), None, "erase_off_busy") == busy
+        assert en(Snapshot(slots, overflow=2), None, "erase_off_busy") == busy
+        assert en(Snapshot(slots), None, "wrong_code") == "Wrong code; erase mode stays off"
+        assert en(Snapshot(slots), None, None) == "P1 ABC12345… d:0123456789abcdef"
+        assert (
+            strip_text(Snapshot(slots), 0, template, None, "ja", 0, mode_notice="locked_cooldown")
+            == "コード誤り。60秒後に再試行"
+        )

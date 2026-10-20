@@ -9,7 +9,7 @@ if [[ ${EUID} -ne 0 || "$(uname -s)" != Linux ]]; then
     echo "error: run with sudo on the Ubuntu host" >&2
     exit 1
 fi
-for command in docker udevadm systemctl lsblk; do
+for command in docker udevadm systemctl lsblk systemd-tmpfiles; do
     command -v "${command}" >/dev/null || { echo "error: missing ${command}" >&2; exit 1; }
 done
 systemctl enable --now docker.service
@@ -19,6 +19,10 @@ install -d -m 0755 "${APP_DIR}/scripts" /etc/usb-sentinel /var/lib/clamav
 # The display user reads results via the usb-sentinel group.
 # install -d also re-applies the mode and group on re-run.
 getent group usb-sentinel >/dev/null || groupadd --system usb-sentinel
+# Control directory for the display's inspection-mode file: tmpfs, root:usb-sentinel 2770,
+# recreated empty at every boot (a missing file means scan only).
+install -m 0644 "${REPO_DIR}/deploy/usb-sentinel.tmpfiles.conf" /etc/tmpfiles.d/usb-sentinel.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/usb-sentinel.conf
 install -d -m 0750 -g usb-sentinel /var/lib/usb-sentinel/results
 install -d -m 2770 -g usb-sentinel /var/lib/usb-sentinel/db
 install -m 0755 "${REPO_DIR}/scripts/run-docker.sh" "${APP_DIR}/scripts/run-docker.sh"
@@ -30,10 +34,11 @@ fi
 if [[ ! -f /etc/usb-sentinel/docker.env ]]; then
     cat > /etc/usb-sentinel/docker.env <<EOF
 USB_SENTINEL_IMAGE=${IMAGE}
-# USB device access mode passed to docker --device: ro (default) or rw.
+# Host ceiling for USB device access passed to docker --device: ro (default) or rw.
 # rw lets the capacity (f3) and speed (fio) checks ERASE the drive contents.
 # The device becomes writable only when this is rw AND config.toml has
-# allow_destructive = true. Either one alone keeps the device read-only.
+# allow_destructive = true AND the display is switched to "Scan + erase" when the
+# drive is inserted. Any one of the three missing keeps the device read-only.
 USB_SENTINEL_DEVICE_ACCESS=ro
 EOF
     chmod 0644 /etc/usb-sentinel/docker.env
@@ -48,3 +53,4 @@ systemctl daemon-reload
 udevadm control --reload
 echo "Display users need: sudo usermod -aG usb-sentinel <user> (then log in again)."
 echo "Installed. Update ClamAV DB using the README steps, then insert a USB disk."
+echo "Erasing checks run only when the display's mode button is set to \"Scan + erase\"."

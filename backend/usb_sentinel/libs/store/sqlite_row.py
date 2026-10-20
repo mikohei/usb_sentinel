@@ -90,6 +90,7 @@ def row_from_result(result: InspectionResult, digest: str | None) -> dict[str, A
         "state": "completed",
         "verdict": result.verdict.value,
         "verdict_code": VERDICT_CODES[result.verdict],
+        "mode": result.mode.value,
         "serial": device.serial,
         "kernel_name": device.kernel_name,
         "port_path": device.port_path,

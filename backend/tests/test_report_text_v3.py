@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from tests.test_report import _clean_malware_step, _result
 from tests.test_report_v3 import _error_capacity_step, _full_result, _skipped_speed_step
-from usb_sentinel.libs import StepStatus, Verdict, render_text
+from usb_sentinel.libs import InspectionMode, StepStatus, Verdict, render_text
 
 
 class TestTextV3:
@@ -72,3 +72,14 @@ class TestTextV3:
             "Device: /dev/sda (ABC123456789)",
             "Advertised capacity: 32.00 GB",
         ]
+
+    def test_fourth_line_is_mode(self) -> None:
+        """The mode comes right after the three legacy lines and reflects result.mode."""
+        result = _full_result()
+        lines = render_text(result).splitlines()
+        assert lines[3] == "Mode: scan_only"
+
+        result.mode = InspectionMode.FULL
+        lines = render_text(result).splitlines()
+        assert lines[3] == "Mode: full"
+        assert lines[4] == "Link speed: 5000Mbps"

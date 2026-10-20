@@ -23,12 +23,16 @@ y128 +--------+      320x296（白地）        |
      | P3タイル|                            |
 y192 +--------+                            |
      | P4タイル|                            |
-y256 +--+---+-+----------------------------+
-     | ◀|言語|▶| 情報ストリップ320x24         |
-y320 +--+---+-+----------------------------+
+y256 +--+---+-+                            |
+     | ◀|言語|▶|                            |
+y288 +--+---+-+                            |
+     | モード  |                            |
+y296 |        +----------------------------+
+     |        | 情報ストリップ320x24         |
+y320 +--------+----------------------------+
 ```
 
-- 左160pxに4ポートのタイル（各160x64）と、◀（x0〜53）・言語（x53〜107）・▶（x107〜160）の3ボタン。タイルは1行目にポート名と判定、2行目にシリアル、3行目に状態と時刻を出す。選択中のタイルには白い枠が付く。言語ボタンには切替先の名前（英語表示中は「日本語」、日本語表示中は「EN」）が出る。
+- 左160pxに4ポートのタイル（各160x64）と、32px幅のボタン行が2段。上段（y256〜288）は◀（x0〜53）・言語（x53〜107）・▶（x107〜160）、下段（y288〜320）は検査モードを示すボタン1つ（「モード: 検査のみ」「モード: 検査＋消去」「検査のみ（消去不可）」「消去を停止中…」）。タイルは1行目にポート名と判定、2行目にシリアル、3行目に状態と時刻を出す。完了したタイルの2行目右端にはタグ（`検査のみ`＝スキャンだけ、`消去済`＝容量か速度の検査で書き込んだ）が付き、シリアルはその分短くなる。選択中のタイルには白い枠が付く。言語ボタンには切替先の名前（英語表示中は「日本語」、日本語表示中は「EN」）が出る。
 - 右320pxに選択中ポートのQRコード（白地、最大294px）。通常QRと詳細QR（3枚）をタップで切り替える。その下の情報ストリップにポート名、シリアル先頭、ダイジェスト先頭16桁（詳細QR中は「詳細n/3」と12桁）、または警告文を出す。
 
 ## ディスプレイの設置
@@ -164,6 +168,9 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。すべて手
 | `font_family` | 文字列 | `Noto Sans CJK JP` | 無ければ警告を出してTkの既定フォントを使う |
 | `language` | 文字列 | `en` | 起動時の画面の言語（`en`／`ja`）。画面の言語ボタンかキー`L`で切り替えた言語は状態ファイル（「操作」節）に記録され、設定より優先される。それ以外の値は起動エラー |
 | `sqlite_path` | 文字列 | `/var/lib/usb-sentinel/db/inspections.sqlite` | backendのSQLite索引。読み取り専用で開く。空文字`""`で無効化し、結果ディレクトリの走査だけにする。無い・開けないときは自動で走査にフォールバックする（「SQLite索引の読み取り」節） |
+| `control_dir` | 文字列 | `/run/usb-sentinel-control` | `run-docker.sh`が挿入ごとに読む検査モードファイルの置き場所。状態ディレクトリ以外でアプリが書く唯一の場所。絶対パスで、`results_dir`と`sqlite_path`のディレクトリの外にあること。`""`で切替を無効にする（ボタンは「検査のみ（消去不可）」） |
+| `host_config_dir` | 文字列 | `/etc/usb-sentinel` | backendの`config.toml`と`docker.env`があるディレクトリ。管理者が消去を許しているか（`allow_destructive = true`と`USB_SENTINEL_DEVICE_ACCESS=rw`）を読むだけ。そうでなければボタンはロックされる |
+| `sys_class_input` | 文字列 | `/sys/class/input` | 入力機器のsysfs一覧。ブート後の最初の起動でその時点の機器を記録し、後から現れた機器は再起動まで消去モードをロックする |
 | `[[ports]]` | `label`文字列、`paths`文字列配列 | 空 | 出現順にタイル1〜4。`label`は1〜4文字の印字可能ASCII。`label`重複、`paths`重複、5件以上は起動エラー |
 
 型違いや未知のキーは起動時に`Configuration error: ...`を標準エラーに出して終了コード1で止まる。
@@ -186,9 +193,14 @@ uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /pa
 | 言語切替 | 左下中央のボタン（切替先の言語名を表示） | `L` |
 | 詳細QRと通常QRの切替 | QR領域（右側）をタップ | `Q`。通常QR→詳細QRの1枚目、詳細QR中→通常QR |
 | 強制再読み込み | なし | `F5`。読み込み済みの`result.json`のキャッシュと「結果破損」の記録を捨て、次の更新で全部読み直す |
+| 検査モードの切替 | モードボタン（左下の最下段）をタップ | `M`。検査のみからはコードのダイアログが開く。「検査＋消去」からはすぐに検査のみへ戻る |
+| コード入力（ダイアログ中） | `1`〜`4`の4つのボタンをタップ | `1`〜`4`（テンキーでも可）。ダイアログに`コード: 3 1 4 2`のように出る数字を順に入れる |
+| ダイアログを閉じる | 右上の「やめる」をタップ | `Esc`。誤入力に数えずに閉じる |
 | 終了 | なし | `Ctrl+Q`（`--kiosk`では無効） |
 
 タッチはマウスのクリックとして届くので、タッチが動かない環境でもキーボード（USBテンキーでも可）だけで全操作ができる。QRのモード（通常／詳細の何枚目か）はポートを切り替えても保たれる。
+
+コードのダイアログが開いている間、他のキーとタップ（ポート選択、矢印、`L`、`Q`、`F5`）は無視される。コードがそろわないまま30秒たつとダイアログは自動で閉じる。コードは試行ごとにランダムで画面にしか出ないため、打鍵しかできない機器（BadUSBのキーボード）では消去モードにできない。消去モードにするには、ホストが消去を許していること（`host_config_dir`）、`control_dir`が使えること、表示ユーザーが`usb-sentinel`グループに入っていること（追加後は再ログイン）、ブート後に入力機器が増えていないこと（意図してキーボードを挿したら再起動）、累計の誤入力が3回未満であることが必要である。試行は毎回、コードを表示する前に言語ファイルの隣の`$XDG_STATE_HOME/usb-sentinel-display/erase-strikes`に記録され、管理者が`rm`で消す。モードは`control_dir/mode`に`<mode> <epoch>`として書き、5秒ごとに打刻を更新する。起動時と終了時に検査のみへ戻し、前回の状態の復元や結果からの推定はしない。「検査＋消去」の間に挿したドライブは抜くまでそのモードのままである。
 
 言語は切り替えるたびに状態ファイルに記録され、次回の起動では設定ファイルの`language`より優先される。記録先は`$XDG_STATE_HOME/usb-sentinel-display/language`、`XDG_STATE_HOME`が無ければ`~/.local/state/usb-sentinel-display/language`である。書けないときは標準エラーに警告を1回出すだけで、表示は切り替わる。結果ディレクトリには何も書かない。
 
@@ -282,7 +294,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 
 **何を読むか。** 接続中のディスクの接続時刻以降に始まった行（`started_at`の下限、プレースホルダ付きのSELECT 1文）を候補にする。行ごとに`results_dir/<inspection_id>/result.json`を従来どおり読み、SHA-256を再計算して`result_digest`と比べる。一致すれば完了結果、不一致なら即「結果破損」にする。`state='started'`で`result.json`がまだ無い行は「検査中」か「結果なし」の材料にする（「表示の意味」の状態表）。`inspection_id`は結果ディレクトリ名の形式（`<timestamp>-<serial>`）を通ったものだけを使い、`output_dir`列は使わない。
 
-**どう開くか。** `file:...?mode=ro`のURIで接続し、`PRAGMA query_only = ON`と`PRAGMA busy_timeout = 1000`を設定する。SQLはSELECTだけで、DBには書かない。`PRAGMA user_version`が想定（`1`）より大きければ読まない。
+**どう開くか。** `file:...?mode=ro`のURIで接続し、`PRAGMA query_only = ON`と`PRAGMA busy_timeout = 1000`を設定する。SQLはSELECTだけで、DBには書かない。`PRAGMA user_version`が想定（`2`）より大きければ読まない。版2で`mode`列（`scan_only`／`full`。更新前の行はNULL）が増えたが、frontendは読まない。タイルのタグは`result.json`から作る。
 
 **フォールバック。** 次の場合は索引を使わず、従来の結果ディレクトリの走査に切り替える。表示は止まらず、情報ストリップに理由を出す。
 
@@ -290,7 +302,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 |---|---|
 | SQLite索引が無いため結果ディレクトリを走査／No SQLite index; scanning results dir | `sqlite_path`のファイルが無い、または`user_version`が0の空のDB |
 | SQLite索引を開けないため結果ディレクトリを走査／SQLite index unreadable; scanning results dir | 接続・PRAGMA・SELECTのいずれかが失敗した。壊れたファイル、テーブル無し、権限なし、WALの`-shm`を作れないなど |
-| SQLite索引が新しい形式のため結果ディレクトリを走査／SQLite index schema is newer; scanning results dir | `user_version`が`1`より大きい。frontendを更新する |
+| SQLite索引が新しい形式のため結果ディレクトリを走査／SQLite index schema is newer; scanning results dir | `user_version`が`2`より大きい。frontendを更新する |
 
 結果ディレクトリやsysfsの文言（「結果ディレクトリが見つからない」など）があるときはそちらが優先され、SQLiteの文言は出ない。
 
@@ -303,6 +315,8 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 ## backendとの同時配備
 
 `Counterfeit Suspected`の判定、詳細QR（`v:3`）の数値、SQLite索引はbackend第2期が書く。frontendもbackendと同時に第2期へ更新する。古いfrontendのまま新しいbackendを動かすと、`Counterfeit Suspected`は判定コード`?`・ラベル「判定不明」になり、SQLite索引は読まれない。逆に新しいfrontendと古いbackendでは、詳細QRの数値が`null`になり、SQLite索引が無い旨の文言が情報ストリップに出続ける（`sqlite_path = ""`で消せる）。
+
+検査モード切替でSQLiteのスキーマは`user_version` 2（`mode`列）になり、`result.json`に`mode`、詳細QRの1枚目に`md`が増えた。backend、`scripts/run-docker.sh`、`scripts/install-docker.sh`（`/run/usb-sentinel-control`のtmpfiles設定）、frontendは同時に更新する。古いfrontendと新しいbackendでは`user_version` 2を拒否して結果ディレクトリの走査にフォールバックする（「SQLite索引が新しい形式」）。新しいfrontendと古いbackendではタイルにタグが出ず、`md`は`null`になり、モードボタンはホストに効かない。
 
 ## トラブルシュート
 
@@ -329,6 +343,21 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 | 文言 | 原因 | 対処 |
 |---|---|---|
 | Failed to save language: <パス> (<例外>) | 言語の記録先（`$XDG_STATE_HOME/usb-sentinel-display/language`か`~/.local/state/…`）に書けない。表示の切替自体は行われ、警告は1回だけ出る | ディレクトリの権限を確認する。記録しなくても起動時は設定ファイルの`language`で動く |
+| Could not record erase-mode attempt: <理由> | 言語ファイルの隣の誤入力ファイルに書けない。消去モードはロックされたまま（「誤入力回数を記録できないため消去不可」） | `~/.local/state/usb-sentinel-display/`の権限を確認する |
+
+モードボタンの文言（押した後5秒間、情報ストリップに出る）。
+
+| 文言 | 原因 | 対処 |
+|---|---|---|
+| この機器では消去が無効（管理者設定） | `host_config_dir`の`allow_destructive = true`と`USB_SENTINEL_DEVICE_ACCESS=rw`がそろっていない | ルートREADME「3. USBを挿して実行確認」 |
+| /etc/usb-sentinelの設定を読めない | `config.toml`か`docker.env`が無いか読めない | `host_config_dir`とファイルのモード（0644）を確認する |
+| モード制御を使えない（グループ、再ログイン） | `control_dir`が無い、シンボリックリンク、または書けない | `/run/usb-sentinel-control`（`root:usb-sentinel 2770`。`install-docker.sh`が作る）と、表示ユーザーがグループに入って再ログインしたことを確認する |
+| モード切替は無効（control_dir） | `control_dir = ""` | 意図どおり。有効にするにはキーを設定する |
+| 新しい入力機器を検出。再起動まで消去不可 | このブートの最初の起動より後に入力機器が現れた | 抜いて再起動する |
+| 入力機器を監視できないため消去不可 | `sys_class_input`を列挙できない | 設定と`/sys/class/input`が読めることを確認する |
+| コード誤り。60秒後に再試行／コード誤り3回。管理者の解除まで消去不可 | コードの誤入力。累計3回 | 待つ。または`rm ~/.local/state/usb-sentinel-display/erase-strikes`して再起動する |
+| 消去を解除できない。20秒以内に自動解除 | モードファイルを書き換えられなかった | ホストは20秒で`full`を採用しなくなる。`control_dir`を確認する |
+| 挿入済みのドライブは消去されうる。抜いてください | 検査中のドライブがあるまま消去モードを解除した | ドライブを抜けば検査は止まる |
 
 タイルの表示に関するもの。
 
@@ -364,7 +393,9 @@ uv run python -m usb_sentinel_display --help
 偽のsysfsツリーとサンプル結果を作り、ウィンドウ表示で確認する。
 
 ```bash
-# 偽ツリーとサンプル結果を/tmp/usb-sentinel-fixturesに作る（--scene a|b）
+# 偽ツリーとサンプル結果を/tmp/usb-sentinel-fixturesに作る（--scene a|b|c）。
+# モードボタン用にcontrol/、host/（上限オン）、input/input0/、state/も作る。
+# --ceiling offでボタンをロック、--strikes 3で誤入力回数を先に入れる。
 uv run python scripts/make-fixtures.py /tmp/usb-sentinel-fixtures --scene a
 
 # ウィンドウで起動する
@@ -372,9 +403,12 @@ uv run usb-sentinel-display --config /tmp/usb-sentinel-fixtures/display.toml run
 
 # 12秒後にスクリーンショットを撮る（macOSのscreencaptureを使う）
 uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --scene a --select 1 --out /tmp/scene-a.png
+
+# モードのシーン: --mode-scene none|scan_only|confirm|full|locked|lockout。--code 3142でダイアログのコードを固定する。
+uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --mode-scene confirm --out /tmp/confirm.png
 ```
 
-シーンAは4台（異常なし、マルウェア検知、検査中、結果破損）、シーンBは2台（仕様不一致、不良）とP3・P4の未接続である。`dev-screenshot.py`は`systemctl`の出力を偽装して「検査中」を出す。`--geometry 640x400`で解像度警告、`--results-dir /nonexistent`で「結果ディレクトリが見つからない」を確認できる。`make-fixtures.py`が書く`display.toml`は`sqlite_path = ""`で索引を無効にしているので、開発機でSQLiteの文言は出ない。
+シーンAは4台（異常なし、マルウェア検知、検査中、結果破損）、シーンBは2台（仕様不一致、不良）とP3・P4の未接続である。`dev-screenshot.py`は`systemctl`の出力を偽装して「検査中」を出し、`XDG_STATE_HOME`を`<fixtures>/state`に向け、同じディレクトリの`scripts/fixtures_mode.py`と`scripts/dev_mode_scenes.py`を使う。Retina画面では`screencapture`が960x640で書くので、`sips -z 320 480 <png>`で縮める。`--geometry 640x400`で解像度警告、`--results-dir /nonexistent`で「結果ディレクトリが見つからない」を確認できる。`make-fixtures.py`が書く`display.toml`は`sqlite_path = ""`で索引を無効にしているので、開発機でSQLiteの文言は出ない。
 
 ## 実機確認項目
 
@@ -395,3 +429,4 @@ uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --
 13. 詳細QRの3枚（最大QRバージョン8、285px）がLCD上で読めること。
 14. Noto Sans CJK JPで判定ラベルがタイル幅に収まること。`uv run pytest -q -m gui -k verdict_labels_fit_tile`を実機で1回走らせる。開発機の計測では「マルウェア検知」（141px、上限144px）の余裕が最も少ない。
 15. `usb-sentinel`グループの表示ユーザーで`inspections.sqlite`が`mode=ro`で開け、情報ストリップにSQLiteの文言が出ないこと。出る場合は`/var/lib/usb-sentinel/db`の権限（`2770`）を確認する。
+16. モードボタンとコードのダイアログ（18px太字のコード、104x108pxのボタン4つ）がパネルで読めてタップできること。日本語の文言がNoto Sans CJK JPで収まること。ディスプレイが書くモードファイルを`run-docker.sh`が受け付けること（`journalctl`に`notice: display requested full inspection`が出る）。ルートREADME「Raspberry Piでの確認項目」も参照。

@@ -44,9 +44,10 @@ uv run python -m usb_sentinel --help
 - `libs/runner.py`: subprocessの呼び出し。argvはリストで固定し、文字列の結合でコマンドを組まない。
 - `libs/mounter.py`: マウントは`ro,noexec,nosuid,nodev`で行う。このオプションを外さない。
 - `libs/device.py`: USBバス経由・リムーバブル・ルートディスクでない・容量が非ゼロ、を満たさないデバイスを拒否する安全ガード。条件を緩めない。
-- `libs/orchestrator.py`: マルウェア検知時は破壊的検査に進まない（ハッシュ台帳はclamscan実行後なら作る。clamscanが実行されていなければ台帳も作らない）。破壊的検査（f3、fio）に進む条件`permitted`の式を緩めない。
+- `libs/orchestrator.py`: マルウェア検知時は破壊的検査に進まない（ハッシュ台帳はclamscan実行後なら作る。clamscanが実行されていなければ台帳も作らない）。破壊的検査（f3、fio）に進む条件`permitted`の式を緩めない。ゲートは`allow_destructive`に加えて`mode is InspectionMode.FULL`を要求する（有効モードは`mode if config.allow_destructive else SCAN_ONLY`）。`scan_only`なら容量・速度はSKIPPED「Inspection mode is scan_only」。CLIの`--mode`の既定は`scan_only`で、消去には`--mode full`が要る。
+- `scripts/run-docker.sh`（ホスト側。backendのテスト`test_run_docker*.py`が検証する）: docker argvは`plan_docker_argv`→`docker_argv`だけが組み、`--device ...:rw`は`--mode full`と必ず対で、docker.envが`rw`・config.tomlの`allow_destructive = true`・ディスプレイのモードファイルが20秒以内の`full`の3条件がそろったときだけ出る。それ以外は`:r`と`--mode scan_only`。モードファイル（`/run/usb-sentinel-control/mode`）の検査は`inspection_mode`の10項目（所有者・グループ・権限・サイズ・正規表現・鮮度）で、失敗はすべて`scan_only`に落とす。コンテナには制御ディレクトリを渡さない。
 - `libs/hashing.py`: `ro,noexec,nosuid,nodev`マウントの内側で、clamscanがスキャンを実行した後にのみ動く。バイト列を読むだけで内容を解釈しない。時間上限の`Budget`を外さない。
-- `libs/store/`: SQLiteへの記録は検査の成否に影響させない。例外を外へ出さず、理由文字列を返して検査を続ける。
+- `libs/store/`: SQLiteへの記録は検査の成否に影響させない。例外を外へ出さず、理由文字列を返して検査を続ける。スキーマは`user_version` 2（`ALTER_TABLE_V2`で`mode TEXT`列を追加。移行は`BEGIN IMMEDIATE`の中で行う）。版を上げたらfrontendの`tests/test_store.py`の文字列コピーと`EXPECTED_SCHEMA_VERSION`も更新し、同時に配備する。
 - `libs/steps/capacity_fs.py`: rwマウントは`noexec,nosuid,nodev`を外さない。`-w`は容量検査専用で、`mounter.py`に持ち込まない。mount成功後は例外経路でも`.h2w`削除→umountの順で必ず後片付けする。`mount -w`と`umount`に`timeout_s`を渡さないのは`mounter.py`と同方針の意図的な判断で、タイムアウトを付けるなら`timed_out`をマウント状態不明として扱い必ずumountを試みる形にしないとカーネル側で成功したmountが残る。
 - `libs/steps/speed.py`: `run()`冒頭の`is_mounted`確認は自衛であり、orchestratorのゲートの代替ではない。読み取りfioの`--readonly`を外さない。
 
@@ -59,7 +60,8 @@ usb_sentinel/
     __init__.py          公開API
     cli.py               inspect / selftest、終了コード定義
     config.py            /etc/usb-sentinel/config.tomlの読み込み
-    models.py            デバイス情報・ステップ結果・判定（Verdict）
+    models.py            デバイス情報・ステップ結果・判定（Verdict）・検査モード（InspectionMode: scan_only / full。
+                         result.jsonの`mode`、file QR、result.txtの`Mode:`行、SQLiteの`mode`列に出る）
     runner.py            外部コマンド実行とFakeRunner
     device.py            デバイス識別と安全ガード
     mounter.py           read-onlyマウント
@@ -74,13 +76,17 @@ usb_sentinel/
                          capacity_judge（±7%帯・偽装疑い・申告容量の非破壊チェック）、
                          speed_fio（fioのargvとパーサ）、speed_judge（参照値・重大度・警告文）
     report/              result.json、result.txt、result-qr.png（v:3）
-    store/               SQLiteへの記録（schema、sqlite_row、sqlite_store、NullStore）
+    store/               SQLiteへの記録（schema、sqlite_row、sqlite_store、NullStore）。user_version 2
 tests/                   FakeRunnerで外部コマンドをモックしたテスト
                          （300行を超えたテストはtest_report_v3.py／test_report_qr_shrink.py／
                          test_report_text_v3.py／test_speed_reference.py／test_speed_errors.py／
                          test_orchestrator_destructive.py／test_orchestrator_wiring.py／
                          test_store_record.py／test_store_row.py／test_reason_codes.py／
-                         test_malware_step.pyに分け、材料は元のファイルからimportする）
+                         test_malware_step.pyに分け、材料は元のファイルからimportする。
+                         検査モード切替: test_orchestrator_mode.py（allow_destructive×mode×malwareの行列）、
+                         test_run_docker.py／test_run_docker_argv.py（bash関数を`bash -c 'source "$1"; shift; "$@"'`で
+                         呼ぶ。macOS bash 3.2で動く）、test_install_scripts.py（bash -nと配線）、
+                         test_kiosk_lockdown.py（gsettingsを偽の関数で差し替える））
 ```
 
 - 新しいモジュールは`libs/`配下に置く。`usb_sentinel/`直下に増やさない。

@@ -52,10 +52,12 @@ def strip_text(
     resolution: tuple[int, int] | None,
     lang: str,
     qr_mode: int,
+    mode_notice: str | None = None,
 ) -> str:
     """Pick the info strip text by priority.
 
-    Priority: resolution warning > internal error > notice > "N others" + journalctl hint > normal.
+    Priority: resolution warning > internal error > mode notice > notice > "N others" +
+    journalctl hint > normal.
 
     Args:
         snapshot: Contents of the latest tick.
@@ -64,6 +66,7 @@ def strip_text(
         resolution: Measured size if not 480x320. None means no warning.
         lang: 'en' or 'ja'.
         qr_mode: 0 for normal QR, 1-3 for detail QR pages.
+        mode_notice: ModeView.notice (an i18n key without the "notice.mode." prefix) or None.
     """
     if resolution is not None:
         width, height = resolution
@@ -72,6 +75,8 @@ def strip_text(
         if snapshot.error_repeated:
             return text(lang, "internal_error_repeated")
         return text(lang, "internal_error", name=snapshot.error)
+    if mode_notice is not None:
+        return text(lang, "notice.mode." + mode_notice)
     if snapshot.notice is not None:
         return text(lang, "notice." + snapshot.notice)
     slot = snapshot.slots[selected] if selected < len(snapshot.slots) else None

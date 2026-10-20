@@ -12,6 +12,7 @@ from usb_sentinel_display.libs.sysfs import (
     SysfsMissingError,
     SysfsPermissionError,
     boot_time,
+    list_input_devices,
     list_usb_disks,
     sanitize_text,
 )
@@ -179,6 +180,48 @@ class TestListUsbDisks:
                 pytest.skip("chmod 0 does not deny access here")
             with pytest.raises(SysfsPermissionError):
                 list_usb_disks(root, fallback_time=fixed_fallback)
+        finally:
+            root.chmod(0o700)
+
+
+class TestListInputDevices:
+    def test_input_names_only(self, tmp_path: Path) -> None:
+        """Only inputN names are returned; event3, mouse0, input and inputX are ignored."""
+        for name in ("input0", "input12", "input999999", "event3", "mouse0", "input", "inputX"):
+            (tmp_path / name).mkdir()
+        (tmp_path / "input7").write_text("")  # a plain file still counts: names only
+        assert list_input_devices(tmp_path) == frozenset(
+            {"input0", "input12", "input999999", "input7"}
+        )
+
+    def test_seven_digits_ignored(self, tmp_path: Path) -> None:
+        """More than 6 digits does not match the pattern."""
+        (tmp_path / "input1234567").mkdir()
+        assert list_input_devices(tmp_path) == frozenset()
+
+    def test_empty_dir(self, tmp_path: Path) -> None:
+        assert list_input_devices(tmp_path) == frozenset()
+
+    def test_missing_dir_is_none(self, tmp_path: Path) -> None:
+        assert list_input_devices(tmp_path / "none") is None
+
+    def test_file_in_place_of_dir_is_none(self, tmp_path: Path) -> None:
+        path = tmp_path / "file"
+        path.write_text("x")
+        assert list_input_devices(path) is None
+
+    def test_unreadable_dir_is_none(self, tmp_path: Path) -> None:
+        root = tmp_path / "locked"
+        root.mkdir()
+        root.chmod(0)
+        try:
+            try:
+                os.scandir(root).close()
+            except PermissionError:
+                pass
+            else:
+                pytest.skip("chmod 0 does not deny access here")
+            assert list_input_devices(root) is None
         finally:
             root.chmod(0o700)
 

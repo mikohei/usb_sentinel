@@ -43,6 +43,7 @@ It goes in `result-qr.png` in the results directory (`<timestamp>-<serial>/`). A
 |---|---|---|---|
 | `v` | int | — | `1`→`3` |
 | `verdict` | str | `verdict` (the verdict name as a string; Section 6.1) | — |
+| `mode` | str | `mode`: `scan_only` / `full`, the mode this inspection ran in after the host ceiling (Section 6.9). Never cut by the shrinking rules | Added (inspection-mode toggle) |
 | `serial` | str | `device.serial` | — |
 | `kernel_name` | str | `device.kernel_name` (such as `sda`) | Added |
 | `port_path` | str \| null | `device.port_path` (such as `1-1.3`) | Added |
@@ -154,6 +155,9 @@ The frontend shows these as the pages after the normal QR. As in the medicine no
 | `e` | int | `elapsed_s` rounded to whole seconds | 6 |
 | `m` | int | Number of malware detections | 4 |
 | `dv` | int \| null | ClamAV DB version (`db_version` as an integer; `null` on failure) | 6 |
+| `md` | str \| null | Inspection mode (Section 6.9): `s` = `scan_only`, `f` = `full`, `null` when `result.json` has no `mode` (written before the toggle) | 1 |
+
+Byte budget of code 1: with the header, a 32-character serial, `k`, six-digit `e`, four-digit `m` and six-digit `dv`, the worst case was 137 bytes; `md` adds `,"md":"s"` (10 bytes), so the worst case is now 147 bytes, still under the 150-byte limit without cutting `s`.
 
 ### 5.3 Code 2 (capacity and device)
 
@@ -335,6 +339,16 @@ The form is `<step abbreviation>:<reason>`. The order follows the order of `step
 
 Example: an inspection with `nominal_bytes` set, `allow_destructive = false`, and an advertised capacity in excess gives `["c:over", "c:skipped", "s:skipped"]`.
 
+### 6.9 Inspection mode (`md`, `mode`)
+
+| `md` | `mode` (`result.json`, file QR, SQLite) | Meaning |
+|---|---|---|
+| `s` | `scan_only` | ClamAV scan and hash inventory only; capacity and speed `SKIPPED` ("Inspection mode is scan_only"); the drive keeps its data |
+| `f` | `full` | The host allowed erasing and the display was in "Scan + erase" when the drive was inserted; capacity and speed ran (or failed for another reason) |
+| `null` | absent | `result.json` written before the toggle existed |
+
+The mode is the effective one after the host ceiling (`allow_destructive = false` forces `scan_only`), so `f` means the destructive steps were reachable, not that they wrote.
+
 ## 7. Mapping to `result.json`
 
 The rows are arranged by the keys of the detail QR. `…details` is the `details` of the relevant step in `steps[]`.
@@ -350,6 +364,7 @@ The rows are arranged by the keys of the detail QR. `…details` is the `details
 | Serial | `s`, `k` | `s`, `k` | `serial`, `kernel_name` | `device.serial`, `device.kernel_name` | `serial`, `kernel_name` | — |
 | Port path | — | — | `port_path` | `device.port_path` | `port_path` | — |
 | Verdict | `r` | `r` | `verdict` | `verdict` | `verdict`, `verdict_code` | — |
+| Inspection mode | `md` (1 character) | — | `mode` | `mode` | `mode` | — |
 | Step states | — | `st` | `steps` | `steps[].status` | `step_*` | — |
 | Malware detection count | `m` | `n` | `malware_count` | `len(steps[malware].details.detections)` | `malware_count` | Count |
 | ClamAV DB version | `dv` | — | `clamav_db` | `…details.database.db_version` | `clamav_db_version` | — |
@@ -377,7 +392,7 @@ The rows are arranged by the keys of the detail QR. `…details` is the `details
 
 ## 8. Mapping to SQLite (on the Pi)
 
-For each inspection, the backend writes one row to the `inspections` table of `/var/lib/usb-sentinel/db/inspections.sqlite`. It inserts the row with `state = 'started'` at the start, and after writing `result.json` it fills in all columns and updates the row to `state = 'completed'`. `result.json` is the source of truth, and the DB is an index for listing and searching. The schema version is managed with `PRAGMA user_version` (currently `1`), and later versions only add columns (no deletions or renames).
+For each inspection, the backend writes one row to the `inspections` table of `/var/lib/usb-sentinel/db/inspections.sqlite`. It inserts the row with `state = 'started'` at the start, and after writing `result.json` it fills in all columns and updates the row to `state = 'completed'`. `result.json` is the source of truth, and the DB is an index for listing and searching. The schema version is managed with `PRAGMA user_version` (currently `2`), and later versions only add columns (no deletions or renames). Version 2 adds the `mode` column with `ALTER TABLE inspections ADD COLUMN mode TEXT`; the migration runs inside `BEGIN IMMEDIATE` so two containers opening the DB at once do not both apply it.
 
 ### 8.1 Columns
 
@@ -386,6 +401,7 @@ For each inspection, the backend writes one row to the `inspections` table of `/
 | `inspection_id` | TEXT primary key | The results directory name (`<timestamp>-<serial>`) |
 | `state` | TEXT | `started` / `completed` |
 | `verdict`, `verdict_code` | TEXT | The verdict name and its 1-character code (filled in on completion; NULL on a started row) |
+| `mode` | TEXT | `scan_only` / `full` (Section 6.9). Set on the started row already. NULL for rows written before `user_version` 2 |
 | `serial`, `kernel_name`, `port_path`, `vendor`, `model` | TEXT | `device.*` of `result.json` |
 | `started_at` | TEXT | ISO 8601 (UTC) |
 | `started_compact` | TEXT | `YYYYmmddTHHMMSSZ` (same as `t` of the normal and detail QR) |
@@ -476,6 +492,9 @@ Confirm that the carried-out result has not been tampered with.
 | Normal QR v:2 | Screen | Phase 2. Added `C` (Counterfeit Suspected) to `r`. The format is unchanged |
 | Detail QR v:3 | Screen | New in phase 2. Fixed at 3 codes |
 | SQLite `user_version` 1 | `inspections.sqlite` | New in phase 2 |
+| File QR v:3 | `result-qr.png` | Inspection-mode toggle. Added `mode` (`scan_only` / `full`) after `verdict`. `v` stays `3` |
+| Detail QR v:3 code 1 | Screen | Inspection-mode toggle. Added `md` (`s` / `f` / `null`) after `dv`; worst case 147 bytes |
+| SQLite `user_version` 2 | `inspections.sqlite` | Inspection-mode toggle. Column `mode`. Deploy the backend and the frontend together: an old frontend refuses `user_version` 2 and falls back to scanning the results directory |
 
 - The reader app branches on `v` and should also be able to read file QR v:1 (results directories from before phase 2 remain). v:1 may not have the `truncated` key; if it is absent, interpret it as `false`.
 - When keys are added to file QR v:3 in the future, the meaning of existing keys will not change. The reader app ignores unknown keys and treats a missing known key as `null`.

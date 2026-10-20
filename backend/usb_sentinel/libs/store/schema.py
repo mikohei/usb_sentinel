@@ -4,9 +4,13 @@ Column names correspond to QR payload keys. Capacity is in bytes, speed in MB/s,
 ISO 8601 (UTC), matching the units and formats of result.json. The version is managed with
 PRAGMA user_version; later versions use only ALTER TABLE ... ADD COLUMN (columns are never
 dropped or renamed).
+
+v2 adds `mode` (inspection mode: 'scan_only' or 'full'; NULL on rows written by v1). CREATE_TABLE
+stays the v1 statement; a fresh DB runs migration 1 then 2.
 """
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+ALTER_TABLE_V2 = "ALTER TABLE inspections ADD COLUMN mode TEXT"
 
 CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS inspections (
@@ -73,4 +77,7 @@ CREATE_INDEXES: tuple[str, ...] = (
 
 # (version, SQL statements to upgrade to that version). Applied in order to DBs whose
 # user_version is lower.
-MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = ((1, (CREATE_TABLE, *CREATE_INDEXES)),)
+MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
+    (1, (CREATE_TABLE, *CREATE_INDEXES)),
+    (2, (ALTER_TABLE_V2,)),
+)

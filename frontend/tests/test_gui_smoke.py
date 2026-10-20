@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from usb_sentinel_display.libs.config import DisplayConfig, PortMapping
+from usb_sentinel_display.libs.mode_view import ModeState, ModeView
 from usb_sentinel_display.libs.models import (
     VERDICT_CODES,
     AttachedDisk,
@@ -25,6 +26,8 @@ from usb_sentinel_display.libs.ui.tiles import TEXT_X, TilesView, serial_text, t
 pytestmark = pytest.mark.gui
 
 NOW = 1_750_000_000.0
+# Mode button in its enabled scan-only state (what TilesView.render needs at minimum).
+SCAN_ONLY_VIEW = ModeView(ModeState.SCAN_ONLY, None, None, None, 0)
 # Input that makes detail QR page 2 127 bytes (v8) (same as TYPICAL_DETAIL in test_qr_payload).
 DETAIL = ResultDetail(
     elapsed_s=312.5,
@@ -140,7 +143,7 @@ def state_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def make_app(monitor: FakeMonitor, language: str = "en") -> App:
     """Build App windowed. Skip if tk.Tk() cannot be created."""
     try:
-        return App(
+        app = App(
             DisplayConfig(
                 ports=tuple(PortMapping(f"P{i}", (f"1-1.{i}",)) for i in range(1, 5)),
                 language=language,
@@ -152,6 +155,8 @@ def make_app(monitor: FakeMonitor, language: str = "en") -> App:
         )
     except tk.TclError as exc:
         pytest.skip(f"cannot create tk.Tk(): {exc}")
+    app.root.update()  # see the root fixture: never destroy a root that handled no events
+    return app
 
 
 @pytest.fixture
@@ -161,6 +166,9 @@ def root() -> Iterator[tk.Tk]:
         window = tk.Tk()
     except tk.TclError as exc:
         pytest.skip(f"cannot create tk.Tk(): {exc}")
+    # macOS Tk: a root destroyed before it ever processed events makes a later event_generate()
+    # in the same process segfault, so let every root handle its first events.
+    window.update()
     yield window
     with contextlib.suppress(tk.TclError):
         window.destroy()
@@ -208,16 +216,18 @@ class TestTilesView:
     ) -> None:
         """No errors: Malware (un)selected, fallback, removed, empty, 2 lines, both languages."""
         canvas = tk.Canvas(root, width=160, height=320)
-        view = TilesView(canvas, fonts, lambda _i: None, lambda _d: None, lambda: None, rows)
+        view = TilesView(
+            canvas, fonts, lambda _i: None, lambda _d: None, lambda: None, lambda: None, rows
+        )
         slots = scene_a_slots()
         slots[2] = Slot(
             2, "P3", SlotState.WAITING, disk("sdc", "9-9", "FALLBACK12345"), None, None, True
         )
         slots[3] = Slot(3, "P4", SlotState.REMOVED, None, summary("Defective"), None, False)
         for blink in (True, False):
-            view.render(slots, selected, blink, 2, NOW, lang)
+            view.render(slots, selected, blink, 2, NOW, lang, SCAN_ONLY_VIEW)
         empty = [Slot(i, f"P{i + 1}", SlotState.EMPTY, None, None, None, False) for i in range(4)]
-        view.render(empty, 0, False, 1, NOW, lang)
+        view.render(empty, 0, False, 1, NOW, lang, SCAN_ONLY_VIEW)
 
     def test_verdict_labels_fit_tile(self, fonts: Fonts) -> None:
         """All verdict labels (incl. unknown), both langs, fit tile width (160-8x2) with "P1 "."""
@@ -272,11 +282,16 @@ class TestKeys:
 
             def toggle_qr_mode(self) -> None: ...
 
+            def toggle_mode(self) -> None: ...
+
+            def cancel_dialog(self) -> None: ...
+
         bind_keys(root, Target(), kiosk=True)
         bound = set(root.bind())
         for name in ("KP_1", "KP_2", "KP_3", "KP_4", "KP_Left", "KP_Right", "KP_Up", "KP_Down"):
             assert f"<Key-{name}>" in bound
         # Tk lists one-char keysyms as "l", not "<Key-l>".
-        for name in ("l", "L", "q", "Q"):
+        for name in ("l", "L", "q", "Q", "m", "M"):
             assert name in bound
+        assert "<Key-Escape>" in bound
         assert "<Control-Key-q>" not in bound

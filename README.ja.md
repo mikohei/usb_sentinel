@@ -31,7 +31,7 @@ Step 7  判定分類（No Defect / Counterfeit Suspected / Spec Mismatch / Defec
 
 - ClamAVを最初に走らせる。ClamAVがスキャンを実行した後は、結果（検知・エラー・タイムアウト）にかかわらずハッシュ台帳を作成する（照合用の証跡）。ClamAVがファイルを開いていない状態（clamscan不在、定義DBなし）では台帳も作らない。破壊的検査（f3 / fio）へは絶対に進まない。タイムアウトやスキャン失敗（終了コード2）の後に作る台帳は、ClamAVが開いていないファイルも`ro,noexec,nosuid,nodev`の下でバイト列として読むだけで、実行も解釈もしない。
 - read-onlyマウント。スキャンとハッシュ計算のためのマウントは`ro,noexec,nosuid,nodev`で行い、感染ファイルがホスト側で実行される余地を残さない。
-- 破壊的検査は多重にブロックする。マルウェアがFAILまたはERROR、`allow_destructive = false`、マウントが残っている、のいずれかであれば書き込みを行わない。
+- 破壊的検査は多重にブロックする。マルウェアがFAILまたはERROR、`allow_destructive = false`、検査モードが`scan_only`（挿入時にディスプレイのモードボタンが「検査＋消去」になっていなかった）、マウントが残っている、のいずれかであれば書き込みを行わない。ホスト側も、`USB_SENTINEL_DEVICE_ACCESS=rw`、`allow_destructive = true`、ディスプレイのモード`full`の3つがそろわない限りデバイスを読み取り専用で渡す。
 - 「検知なし」を「クリーン」と混同しない。clamscanの終了コードが0/1以外、タイムアウト、読み取り不能ファイルの混在、ファイルシステム不在は全てERRORとして扱う。未実装ステップが残る限り`No Defect`とは判定しない。
 - 安全ガード。USBバス経由・リムーバブル・ルートディスクでない・容量が非ゼロ、を満たさないデバイスは検査開始前に拒否する（終了コード2）。
 
@@ -256,11 +256,29 @@ mountのため`SYS_ADMIN`、ファイル読み取りのため`DAC_OVERRIDE`を�
 コンテナのAppArmor制限を解除する。マウントはコンテナの名前空間内で行う。
 `--privileged`やDockerソケットのコンテナ共有は使わない。
 
-破壊的検査（容量・速度）を有効にするには、`/etc/usb-sentinel/docker.env`で
-`USB_SENTINEL_DEVICE_ACCESS=rw`、`config.toml`で`allow_destructive = true`の両方を設定する。
-どちらか一方だけではデバイスは読み取り専用のまま渡される。`allow_destructive = false`なら
-両ステップは`SKIPPED`、`docker.env`だけ`ro`のままなら`ERROR`（権限不足）になり、
-いずれも総合判定は`Inconclusive`になる。`rw`にすると検体の内容は消去される。
+破壊的検査（容量・速度）は、ドライブを挿した時点で次の3条件がそろっているときだけ動く。
+
+1. `/etc/usb-sentinel/docker.env`の`USB_SENTINEL_DEVICE_ACCESS=rw`（コンテナにデバイスを`:rw`で渡す）
+2. `/etc/usb-sentinel/config.toml`の`allow_destructive = true`（この機器は消去して「よい」）
+3. ディスプレイ左下のモードボタンが「検査＋消去」になっている。切り替えるとダイアログに4桁のコードが出るので、
+   30秒以内にキー`1`〜`4`か画面のボタンで入力する。コードは画面にしか出ないため、キーボードだけでは消去モードにできない。
+
+前の2つは管理者が決める上限、3つ目は操作者がセッションごとに選ぶ。`run-docker.sh`は挿入時に
+ディスプレイのモードファイル（`/run/usb-sentinel-control/mode`）を1回読み、3条件がそろったときだけ
+`--mode full`と`:rw`をそろえて渡す。それ以外はデバイスを読み取り専用のまま渡し、コンテナは`--mode scan_only`で動く。
+`allow_destructive = false`のとき、またはディスプレイが検査のみのときは、容量・速度の両ステップが`SKIPPED`になる
+（後者の理由は`Inspection mode is scan_only`）。挙動の変更点として、`allow_destructive = true`で`docker.env`が
+`ro`のままの場合も、従来の`ERROR`（権限不足）ではなく`SKIPPED`「Inspection mode is scan_only」になる
+（ホストは`rw`なしに`full`を要求しない）。いずれも総合判定は`Inconclusive`である。手動実行
+（`usb-sentinel inspect`）で消去するには`--mode full`を付ける（既定は`scan_only`）。
+
+モードは挿入時に固定される。ディスプレイを検査のみに戻しても、すでに消去モードで走っている検査は止まらず、
+ストリップに「挿入済みのドライブは消去されうる。抜いてください」と出る。ディスプレイの起動ごと、
+再起動ごとにモードは検査のみへ戻る（`/run`はtmpfsで、ホストは打刻が20秒以内の`full`だけを採用する）。
+`display.toml`で`control_dir = ""`にして切替を無効にしたときは、ディスプレイを再起動してから20秒待ってドライブを挿す。
+モードは`result.json`（`mode`）、`result.txt`（`Mode:`行）、ファイル用QR、SQLite索引（`mode`列、`user_version` 2）に
+書かれる。古いfrontendは`user_version` 2を拒否して結果ディレクトリの走査にフォールバックするため、
+backendとfrontendは同時に更新する（[doc/qr-payload.ja.md](doc/qr-payload.ja.md)参照）。
 
 `scripts/install-docker.sh`は再導入時に既存の`docker.env`を保持するため、以前の導入で
 作られた`docker.env`に`USB_SENTINEL_DEVICE_ACCESS`は含まれない（`run-docker.sh`は
@@ -279,7 +297,74 @@ grep allow_destructive /etc/usb-sentinel/config.toml
 ```
 
 元に戻すには`docker.env`の値を`ro`にするか、`allow_destructive = false`にする。
-どちらか一方で読み取り専用に戻る。
+どちらか一方で読み取り専用に戻り、ディスプレイのボタンは「検査のみ（消去不可）」になる。
+
+### BadUSB対策（ハードニング）
+
+キーボードを装うUSB機器（BadUSB）はキオスクに向けて打鍵できる。次の3つの対策で被害を限定するが、
+いずれもエアギャップの代わりにはならない。
+
+**GNOMEのロックダウン（`scripts/install-all.sh`が導入）。** `scripts/kiosk-lockdown.sh`は
+`org.gnome.desktop.wm.keybindings`、`org.gnome.shell.keybindings`、`org.gnome.mutter.keybindings`、
+`org.gnome.mutter.wayland.keybindings`、`org.gnome.settings-daemon.plugins.media-keys`の全ショートカットを
+`switch-to-session-1..12`（Ctrl+Alt+F1〜F12。パスワード付きのテキストコンソールで、管理者の入口として残す）を
+除いて空にし、Ubuntu Dockのホットキーも消す。さらに実行ダイアログ、ログアウト、ユーザー切替、Superキー単押し、
+ホットコーナー、アクセシビリティの切替、電源キーを無効にし、ワークスペースを1つ、Dockを空にする。
+元に戻すには、表示ユーザーとして上の各スキーマに`gsettings reset-recursively <schema>`を、
+固定キーに`gsettings reset <schema> <key>`を実行する（`org.gnome.desktop.lockdown`の
+`disable-command-line`／`disable-log-out`／`disable-user-switching`、`org.gnome.mutter`の
+`overlay-key`／`dynamic-workspaces`、`org.gnome.desktop.wm.preferences`の`num-workspaces`、
+`org.gnome.desktop.interface`の`enable-hot-corners`、`org.gnome.shell`の`favorite-apps`、
+`org.gnome.shell.extensions.dash-to-dock`の`hot-keys`、`org.gnome.desktop.a11y.keyboard`の`enable`、
+`org.gnome.settings-daemon.plugins.power`の`power-button-action`）。
+
+**起動ごとの入力機器ベースライン。** ブート後にディスプレイが最初に起動したとき、その時点の入力機器
+（`/sys/class/input/inputN`）を`/run/usb-sentinel-control/input-baseline`に記録する。後から現れた入力機器は
+消去モードをロックし（「新しい入力機器を検出。再起動まで消去不可」）、オンなら解除する。
+機器はその機器自身のキーボードとタッチパネルだけを付けた状態で起動する。意図してキーボードを挿したときは、
+再起動すればロックが解ける。
+
+**誤入力の上限。** 消去モードにする試みは、コードを表示する前に
+`~/.local/state/usb-sentinel-display/erase-strikes`へ記録する。累計3回コードを間違えると消去モードは
+ロックされたままになる（「コード誤り3回。管理者の解除まで消去不可」）。解除するには、表示ユーザーとして
+`rm ~/.local/state/usb-sentinel-display/erase-strikes`を実行してディスプレイを再起動する。
+1回の誤入力でも60秒のクールダウンが入る。
+
+**任意: usbguard（スクリプトは実行しない）。** ストレージとHIDを兼ねる複合機器をカーネルで遮断するには、
+機器自身のキーボードとタッチパネルを付けた状態でusbguardを導入する。
+
+```bash
+sudo apt install usbguard
+sudo sh -c 'usbguard generate-policy > /etc/usbguard/rules.conf'   # 現在接続中の機器
+# 追記してからusbguardを再起動する:
+allow with-interface match-all { 08:*:* }
+allow with-interface match-all { 09:*:* }
+```
+
+`match-all`は「機器の全インターフェースが列挙した集合に含まれる」という意味で（マスストレージ`08`、ハブ`09`）、
+キーボードのインターフェースも持つドライブは遮断される。他のクラスを持つドライブ（付加機能のあるカードリーダーなど）も
+遮断される。演算子名は、使っているUbuntuの`man usbguard-rules.conf`で確かめる。
+
+**残るリスク。** ロックダウンをすり抜けてキオスクの外に出たキーボードは表示ユーザーとして動き、
+`docker`グループを通じてroot相当になる。このリスクはモード切替がなくても存在する。完全な対策はusbguardである。
+
+#### Raspberry Piでの確認項目
+
+実機でしか確かめられない項目。
+
+1. ブート後に`/run/usb-sentinel-control`が`root:usb-sentinel 2770`で存在し（systemd-tmpfiles）、
+   表示ユーザーのセッションでグループが有効である（`id`）。
+2. 上限が有効でディスプレイが検査のみのとき、挿したドライブのデータが残り、容量・速度が`SKIPPED`、タイルに`検査のみ`タグが出る。
+3. コード入力後、問題のない使い捨てドライブが消去され、タイルに`消去済`が出る。詳細QRの1枚目に`md: "f"`が入る。
+4. ブート後に2台目のUSBキーボードを挿すと消去モードがロックされ、オンなら解除される。ログアウトして自動ログインで
+   ディスプレイが再起動してもロックは残る（ベースラインは`/run`）。
+5. 再起動後、ボタンは「モード: 検査のみ」で、モードファイルは消えている。
+6. 1回の誤入力がログアウトと再起動を越えて`~/.local/state/usb-sentinel-display/erase-strikes`に残る。
+7. インストーラ実行後、Super、Super+1〜9、Shift+Super+1、Ctrl+Super+1、Super+A/S/V、Super+Page Down、
+   Ctrl+Alt+矢印、Shift+Ctrl+Alt+矢印、Alt+F1、Alt+F2、Alt+Space、Alt+Tab、Alt+Esc、Alt+F4、Ctrl+Alt+T、
+   Ctrl+Alt+Del、Ctrl+Alt+Tab、Print、電源キーで画面に変化がない。Ctrl+Alt+F3ではテキストコンソールが開く。
+   `gsettings list-recursively org.gnome.desktop.wm.keybindings`は空リストだけを返す。
+8. 消去モードでドライブを検査中に検査のみへ戻すと「挿入済みのドライブは消去されうる。抜いてください」が出る。
 
 ### 更新・停止
 

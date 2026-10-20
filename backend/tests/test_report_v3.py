@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 
 from tests.test_report import _clean_malware_step, _result
-from usb_sentinel.libs import InspectionResult, StepResult, StepStatus, Verdict
+from usb_sentinel.libs import InspectionMode, InspectionResult, StepResult, StepStatus, Verdict
 from usb_sentinel.libs.report.qr import MAX_PAYLOAD_BYTES, build_payload
 
 V3_KEYS = {
     "v",
     "verdict",
+    "mode",
     "serial",
     "kernel_name",
     "port_path",
@@ -151,6 +152,21 @@ class TestQrPayloadV3:
 
         assert set(payload) == V3_KEYS
         assert payload["v"] == 3
+
+    def test_mode_defaults_to_scan_only_right_after_verdict(self) -> None:
+        text = build_payload(_full_result())
+        payload = json.loads(text)
+
+        assert payload["mode"] == "scan_only"
+        assert list(payload)[:3] == ["v", "verdict", "mode"]
+
+    def test_mode_full_is_written(self) -> None:
+        result = _full_result()
+        result.mode = InspectionMode.FULL
+
+        payload = json.loads(build_payload(result))
+
+        assert payload["mode"] == "full"
 
     def test_device_and_timing_fields(self) -> None:
         result = _full_result()

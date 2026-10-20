@@ -1,112 +1,54 @@
 import tkinter as tk
 from collections.abc import Callable
-from datetime import UTC, datetime
 
+from ..mode_view import ModeView
 from ..models import Slot, SlotState
+from ..result_file import drive_tag
 from . import theme
-from .i18n import language_button_label, state_label, text, verdict_label
+from .i18n import language_button_label, text
 from .theme import (
     ARROW_BTN_W,
     BLINK_BORDER,
     BORDER,
     LANG_BTN_X0,
     LANG_BTN_X1,
+    MODE_ROW_H,
+    MODE_ROW_Y0,
+    NAV_ROW_H,
+    NAV_ROW_Y0,
+    TAG_RIGHT_X,
     TILE_COUNT,
     TILE_H,
     TILE_W,
     Fonts,
 )
+from .tiles_text import (  # noqa: F401 -- re-exported for callers of the old module path
+    FALLBACK_HEAD,
+    FALLBACK_HEAD_2ROWS,
+    SERIAL_HEAD,
+    SERIAL_MAX,
+    TWO_ROW_HEAD,
+    finished_hhmm,
+    fit_text,
+    hit_target,
+    is_malware,
+    local_hhmm,
+    mode_button,
+    serial_text,
+    status_text,
+    tag_key,
+    tile_color,
+    title_text,
+    truncate,
+)
 
-# Serial display limit (design doc 1.2).
-SERIAL_MAX = 14
-SERIAL_HEAD = 13
-FALLBACK_HEAD = 9
-FALLBACK_HEAD_2ROWS = 5
-TWO_ROW_HEAD = 10
 TEXT_X = 8
-
-
-def local_hhmm(ts: float) -> str:
-    """Turn epoch seconds into local-time HH:MM."""
-    return datetime.fromtimestamp(ts, tz=UTC).astimezone().strftime("%H:%M")
-
-
-def finished_hhmm(finished_at: str, fallback_ts: float) -> str:
-    """Turn finished_at (ISO 8601) into HH:MM. Use fallback_ts if unparsable."""
-    try:
-        parsed = datetime.fromisoformat(finished_at)
-    except ValueError:
-        return local_hhmm(fallback_ts)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone().strftime("%H:%M")
-
-
-def truncate(text: str, head: int) -> str:
-    """Beyond head chars, return head chars plus an ellipsis."""
-    return text if len(text) <= head else text[:head] + "…"
-
-
-def serial_text(slot: Slot, rows: int) -> str:
-    """Serial shown on line 2. With fallback, add the kernel name (design doc 1.2)."""
-    serial = ""
-    if slot.result is not None:
-        serial = slot.result.serial
-    elif slot.disk is not None:
-        serial = slot.disk.serial
-    kernel_name = slot.disk.kernel_name if slot.disk is not None else slot.retained_kernel
-    if slot.fallback and kernel_name is not None:
-        head = FALLBACK_HEAD_2ROWS if rows == 2 else FALLBACK_HEAD
-        return f"{truncate(serial, head)} {kernel_name}"
-    if rows == 2:
-        return truncate(serial, TWO_ROW_HEAD)
-    return serial if len(serial) <= SERIAL_MAX else serial[:SERIAL_HEAD] + "…"
-
-
-def status_text(slot: Slot, now: float, dots: int, lang: str) -> str:
-    """State text and time on line 3. While inspecting, elapsed minutes and dots ellipses."""
-    state = slot.state
-    if state is SlotState.EMPTY:
-        return ""
-    if state is SlotState.INSPECTING and slot.disk is not None:
-        minutes = int(max(0.0, now - slot.disk.attached_at)) // 60
-        return text(lang, "inspecting_minutes", minutes=minutes, dots="…" * dots)
-    if state in (SlotState.DONE, SlotState.REMOVED) and slot.result is not None:
-        key = "done_at" if state is SlotState.DONE else "removed_at"
-        return text(lang, key, time=finished_hhmm(slot.result.finished_at, slot.result.mtime))
-    word = state_label(lang, state)
-    if slot.disk is not None:
-        return text(lang, "state_at", word=word, time=local_hhmm(slot.disk.attached_at))
-    return word
-
-
-def title_text(slot: Slot, lang: str) -> str:
-    """Port name and verdict on line 1 (state text when there is no verdict)."""
-    label = text(lang, "fallback_label") if slot.fallback else slot.label
-    if slot.state in (SlotState.DONE, SlotState.REMOVED) and slot.result is not None:
-        return f"{label} {verdict_label(lang, slot.result.verdict)}"
-    return f"{label} {state_label(lang, slot.state)}"
-
-
-def tile_color(slot: Slot) -> str:
-    """Tile background color. Done uses the verdict color; removed a darkened verdict color."""
-    if slot.state in (SlotState.DONE, SlotState.REMOVED) and slot.result is not None:
-        color = theme.verdict_color(slot.result.verdict)
-        return theme.darken(color) if slot.state is SlotState.REMOVED else color
-    return theme.STATE_COLORS.get(slot.state, theme.COLORS["no_result"])
-
-
-def is_malware(slot: Slot) -> bool:
-    """Whether it should blink (a connected Malware Detected)."""
-    return (
-        slot.state is SlotState.DONE
-        and slot.result is not None
-        and slot.result.verdict == "Malware Detected"
-    )
+# Gap between the shortened serial and the drive tag on line 2.
+TAG_GAP = 6
 
 
 class TilesView:
-    """Draw the 4 tiles in the left 160 px and the prev/language/next buttons."""
+    """Draw the 4 tiles in the left 160 px, the prev/language/next row and the mode button."""
 
     def __init__(
         self,
@@ -115,6 +57,7 @@ class TilesView:
         on_select: Callable[[int], None],
         on_step: Callable[[int], None],
         on_language: Callable[[], None],
+        on_mode: Callable[[], None],
         rows: int,
     ) -> None:
         """Take the target and callbacks, and bind tap detection.
@@ -125,6 +68,7 @@ class TilesView:
             on_select: Function called when a tile is tapped (slot index).
             on_step: Function called when prev/next is tapped (-1/+1).
             on_language: Function called when the language button is tapped.
+            on_mode: Function called when the mode button is tapped.
             rows: Lines per tile (2 or 3, decided by theme.row_layout()).
         """
         self.canvas = canvas
@@ -132,6 +76,7 @@ class TilesView:
         self.on_select = on_select
         self.on_step = on_step
         self.on_language = on_language
+        self.on_mode = on_mode
         self.rows = rows
         self._lang = "en"
         self._line_h = (fonts.verdict.metrics("linespace"), fonts.body.metrics("linespace"))
@@ -139,15 +84,17 @@ class TilesView:
 
     def _on_click(self, event: tk.Event) -> None:
         """Map a tap to a tile or button. App decides what prev/next mean (port or page)."""
-        index = int(event.y) // TILE_H
-        if index < TILE_COUNT:
+        target, index = hit_target(int(event.x), int(event.y))
+        if target == "tile":
             self.on_select(index)
-        elif int(event.x) < ARROW_BTN_W:
+        elif target == "prev":
             self.on_step(-1)
-        elif int(event.x) < LANG_BTN_X1:
+        elif target == "language":
             self.on_language()
-        else:
+        elif target == "next":
             self.on_step(1)
+        else:
+            self.on_mode()
 
     def _frame(self, y0: int, outer: str, inner: str | None, background: str) -> None:
         """Paint the 4 px outer frame and, if needed, a 2 px inner frame."""
@@ -163,6 +110,15 @@ class TilesView:
         canvas.create_rectangle(
             pad, y0 + pad, TILE_W - pad, y0 + TILE_H - pad, fill=background, width=0
         )
+
+    def _tag(self, slot: Slot) -> str | None:
+        """Drive tag text for line 2 (3-line layout, DONE/REMOVED with a known mode), else None."""
+        if self.rows != 3 or slot.result is None:
+            return None
+        if slot.state not in (SlotState.DONE, SlotState.REMOVED):
+            return None
+        key = tag_key(drive_tag(slot.result))
+        return text(self._lang, key) if key is not None else None
 
     def _tile(self, slot: Slot, selected: bool, blink_on: bool, now: float, dots: int) -> None:
         """Draw one tile."""
@@ -190,17 +146,23 @@ class TilesView:
             line = f"{serial} {status}".strip()
             canvas.create_text(TEXT_X, y, text=line, anchor="nw", fill=color, font=self.fonts.body)
             return
+        tag = self._tag(slot)
+        if tag is not None:
+            measure = self.fonts.body.measure
+            serial = fit_text(serial, TILE_W - TEXT_X * 2 - measure(tag) - TAG_GAP, measure)
+            canvas.create_text(
+                TAG_RIGHT_X, y, text=tag, anchor="ne", fill=color, font=self.fonts.body
+            )
         canvas.create_text(TEXT_X, y, text=serial, anchor="nw", fill=color, font=self.fonts.body)
         y += body_h
         canvas.create_text(TEXT_X, y, text=status, anchor="nw", fill=color, font=self.fonts.body)
 
-    def _buttons(self, lang: str) -> None:
-        """Draw the prev/language/next buttons. The language button shows the target in 14 px."""
+    def _buttons(self, lang: str, mode: ModeView) -> None:
+        """Draw the prev/language/next row, the separator and the mode button (design 3.5)."""
         canvas = self.canvas
-        y0 = TILE_H * TILE_COUNT
-        cy = y0 + theme.BTN_H // 2
+        cy = NAV_ROW_Y0 + NAV_ROW_H // 2
         canvas.create_rectangle(
-            0, y0, TILE_W, y0 + theme.BTN_H, fill=theme.COLORS["button"], width=0
+            0, NAV_ROW_Y0, TILE_W, NAV_ROW_Y0 + NAV_ROW_H, fill=theme.COLORS["button"], width=0
         )
         for x, arrow in ((ARROW_BTN_W // 2, "◀"), ((LANG_BTN_X1 + TILE_W) // 2, "▶")):
             canvas.create_text(x, cy, text=arrow, fill=theme.COLORS["text"], font=self.fonts.arrow)
@@ -211,11 +173,36 @@ class TilesView:
             fill=theme.COLORS["text"],
             font=self.fonts.body,
         )
+        key, background, foreground = mode_button(mode)
+        canvas.create_rectangle(
+            0,
+            MODE_ROW_Y0,
+            TILE_W,
+            MODE_ROW_Y0 + MODE_ROW_H,
+            fill=theme.COLORS[background],
+            width=0,
+        )
+        canvas.create_line(0, MODE_ROW_Y0, TILE_W, MODE_ROW_Y0, fill=theme.COLORS["separator"])
+        canvas.create_text(
+            TILE_W // 2,
+            MODE_ROW_Y0 + MODE_ROW_H // 2,
+            text=text(lang, key),
+            fill=theme.COLORS[foreground],
+            font=self.fonts.body,
+            tags="mode_label",
+        )
 
     def render(
-        self, slots: list[Slot], selected: int, blink_on: bool, dots: int, now: float, lang: str
+        self,
+        slots: list[Slot],
+        selected: int,
+        blink_on: bool,
+        dots: int,
+        now: float,
+        lang: str,
+        mode: ModeView,
     ) -> None:
-        """Redraw all 4 tiles and the button row.
+        """Redraw all 4 tiles, the navigation row and the mode button.
 
         Args:
             slots: Slot list (4 items).
@@ -224,9 +211,10 @@ class TilesView:
             dots: Number of ellipses after "inspecting".
             now: Current time (used to compute elapsed minutes).
             lang: 'en' or 'ja'.
+            mode: Current inspection-mode view (button text and colour).
         """
         self._lang = lang
         self.canvas.delete("all")
         for slot in slots[:TILE_COUNT]:
             self._tile(slot, slot.index == selected, blink_on, now, dots)
-        self._buttons(lang)
+        self._buttons(lang, mode)

@@ -77,6 +77,8 @@ class ResultSummary:
     malware_count: int
     digest: str
     detail: ResultDetail = field(default_factory=ResultDetail)
+    # Inspection mode recorded by the backend ("scan_only" or "full"); None for older results.
+    mode: str | None = None
 
 
 @dataclass(frozen=True)

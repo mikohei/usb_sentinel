@@ -64,7 +64,7 @@ WORST_DETAIL = ResultDetail(
 )
 
 PAGE_KEYS = {
-    1: ["t", "s", "r", "e", "m", "dv"],
+    1: ["t", "s", "r", "e", "m", "dv", "md"],
     2: ["cn", "ca", "cx", "ck", "co", "cl", "ls", "dc", "hn"],
     3: ["sr", "sw", "tr", "tw", "sb", "sv", "db", "hd"],
 }
@@ -123,6 +123,7 @@ class TestDetailPages:
         assert one["e"] == 312
         assert one["m"] == 0
         assert one["dv"] == 27650
+        assert one["md"] is None
         assert two == {
             "v": 3,
             "p": "2/3",
@@ -170,7 +171,7 @@ class TestDetailPages:
         data = check(text)
         assert data["k"] == 1
         assert data["s"] == "sdabc"
-        assert list(data) == ["v", "p", "d", "t", "s", "k", "r", "e", "m", "dv"]
+        assert list(data) == ["v", "p", "d", "t", "s", "k", "r", "e", "m", "dv", "md"]
 
     def test_worst_case_page2(self) -> None:
         """Page 2 worst case (three 5 TB values, ck=C, co=1, cl=0.9999, ls=20000, hn=999999)."""
@@ -197,7 +198,7 @@ class TestDetailPages:
         pages = build_detail_pages(summary())
         one, two, three = (check(text) for text in pages)
         assert "k" not in one
-        assert one["e"] is None and one["dv"] is None
+        assert one["e"] is None and one["dv"] is None and one["md"] is None
         assert one["m"] == 0
         assert two["cn"] is None and two["ca"] is None and two["cx"] is None
         assert two["ck"] == "?"

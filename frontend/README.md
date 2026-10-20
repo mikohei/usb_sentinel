@@ -23,12 +23,16 @@ y128 +--------+      320x296 (white)       |
      | P3 tile|                            |
 y192 +--------+                            |
      | P4 tile|                            |
-y256 +--+---+-+----------------------------+
-     | ◀|Lang|▶| Info strip 320x24          |
-y320 +--+---+-+----------------------------+
+y256 +--+---+-+                            |
+     | ◀|Lang|▶|                            |
+y288 +--+---+-+                            |
+     | Mode   |                            |
+y296 |        +----------------------------+
+     |        | Info strip 320x24          |
+y320 +--------+----------------------------+
 ```
 
-- The left 160px holds four port tiles (160x64 each) and three buttons: ◀ (x0 to 53), language (x53 to 107), and ▶ (x107 to 160). Each tile shows the port name and verdict on line 1, the serial on line 2, and the state and time on line 3. The selected tile has a white border. The language button shows the name of the language to switch to ("EN" while Japanese is shown; the word for "Japanese" written in Japanese while English is shown).
+- The left 160px holds four port tiles (160x64 each) and two 32 px rows of buttons. The navigation row (y256 to 288) has ◀ (x0 to 53), language (x53 to 107), and ▶ (x107 to 160); the mode row (y288 to 320) is one button that shows the inspection mode ("Mode: Scan only", "Mode: Scan + erase", "Scan only (locked)" or "Stopping erase…"). Each tile shows the port name and verdict on line 1, the serial on line 2, and the state and time on line 3. On a finished tile, line 2 also carries a right-aligned tag: `Scan` (the drive was only scanned) or `Erased` (the capacity or speed check wrote to it); the serial is shortened to make room. The selected tile has a white border. The language button shows the name of the language to switch to ("EN" while Japanese is shown; the word for "Japanese" written in Japanese while English is shown).
 - The right 320px shows the QR code of the selected port (white background, up to 294px). Tapping switches between the normal QR and the detail QR (3 codes). The info strip below it shows the port name, the first part of the serial, the first 16 digits of the digest (while a detail QR is shown, "Detail n/3" and 12 digits), or a warning message.
 
 ## Display setup
@@ -164,6 +168,9 @@ Place it at `~/.config/usb-sentinel/display.toml`. Without it, the app runs with
 | `font_family` | string | `Noto Sans CJK JP` | If it is missing, the app prints a warning and uses Tk's default font |
 | `language` | string | `en` | The language of the screen at startup (`en`/`ja`). A language chosen with the on-screen language button or the `L` key is recorded in the state file (the "Controls" section) and takes precedence over this setting. Any other value is a startup error |
 | `sqlite_path` | string | `/var/lib/usb-sentinel/db/inspections.sqlite` | The backend's SQLite index. Opened read-only. The empty string `""` disables it and uses only the results directory scan. If the file is missing or cannot be opened, the app falls back to the scan automatically (the "Reading the SQLite index" section) |
+| `control_dir` | string | `/run/usb-sentinel-control` | Directory of the inspection-mode file read by `run-docker.sh` at each insertion. The only place outside the state directory the app writes to. Must be absolute and outside `results_dir` and the `sqlite_path` directory. `""` disables switching (the button shows "Scan only (locked)") |
+| `host_config_dir` | string | `/etc/usb-sentinel` | Directory with the backend `config.toml` and `docker.env`. Read only, to learn whether the administrator allows erasing (`allow_destructive = true` and `USB_SENTINEL_DEVICE_ACCESS=rw`). Otherwise the button is locked |
+| `sys_class_input` | string | `/sys/class/input` | sysfs list of input devices. The first start after boot records the devices present; a new one locks erase mode until reboot |
 | `[[ports]]` | `label` string, `paths` string array | empty | Tiles 1 to 4 in order of appearance. `label` is 1 to 4 printable ASCII characters. A duplicate `label`, a duplicate `paths` entry, or 5 or more entries is a startup error |
 
 A wrong type or an unknown key makes the app print `Configuration error: ...` to standard error at startup and stop with exit code 1.
@@ -186,9 +193,14 @@ The options of `calibrate` are `--sys-block` and `--interval` (the check interva
 | Switch language | The button at the bottom center left (shows the name of the language to switch to) | `L` |
 | Switch between detail QR and normal QR | Tap the QR area (right side) | `Q`. From the normal QR to the first detail QR; from a detail QR back to the normal QR |
 | Force reload | None | `F5`. Discards the cache of loaded `result.json` files and the "Broken" records, and reads everything again on the next update |
+| Toggle the inspection mode | Tap the mode button (bottom left, lowest row) | `M`. From scan only it opens the code dialog; from "Scan + erase" it returns to scan only at once |
+| Enter the code (dialog open) | Tap the four buttons `1` to `4` | `1` to `4` (the numeric keypad also works). The dialog shows `Code: 3 1 4 2`-style digits; enter them in order |
+| Cancel the dialog | Tap "Cancel" (top right) | `Esc`. Closes the dialog without counting a wrong code |
 | Quit | None | `Ctrl+Q` (disabled with `--kiosk`) |
 
 Touch arrives as a mouse click, so even where touch does not work, every operation can be done from the keyboard alone (a USB numeric keypad also works). The QR mode (normal, or which of the detail codes) is kept when you switch ports.
+
+While the code dialog is open, every other key and tap (port selection, arrows, `L`, `Q`, `F5`) is ignored. The dialog closes by itself after 30 s without a complete code. The code is random per attempt and shown only on the screen, so a device that only types (a BadUSB keyboard) cannot turn erase mode on. Erase mode needs the host to allow erasing (`host_config_dir`), a usable `control_dir`, a display user in the `usb-sentinel` group (log in again after adding it), no input device added since boot (reboot after plugging a keyboard on purpose) and fewer than 3 wrong codes in total. Every attempt is counted in the strike file `$XDG_STATE_HOME/usb-sentinel-display/erase-strikes` (next to the language file) before the code is shown; the administrator clears it with `rm`. The mode is written to `control_dir/mode` as `<mode> <epoch>` with a heartbeat every 5 s; it is reset to scan only at every start and exit and never restored from the previous run or derived from results. Drives inserted while the button showed "Scan + erase" keep that mode until they are removed.
 
 Each time you switch the language, it is recorded in the state file, and at the next startup it takes precedence over `language` in the configuration file. The file is `$XDG_STATE_HOME/usb-sentinel-display/language`, or `~/.local/state/usb-sentinel-display/language` if `XDG_STATE_HOME` is not set. If it cannot be written, the app prints one warning to standard error and the display still switches. Nothing is written to the results directory.
 
@@ -282,7 +294,7 @@ The backend phase 2 writes one row per inspection to the `inspections` table of 
 
 **What it reads.** Candidates are the rows that started after the connection time of the connected disk (a lower bound on `started_at`, one SELECT statement with placeholders). For each row, the app reads `results_dir/<inspection_id>/result.json` as before, recomputes the SHA-256, and compares it with `result_digest`. A match gives a completed result; a mismatch immediately gives "Broken". A row with `state='started'` whose `result.json` does not exist yet is used to decide between "Scanning" and "No result" (the state table in "Meaning of the display"). Only an `inspection_id` that passes the results directory name format (`<timestamp>-<serial>`) is used, and the `output_dir` column is not used.
 
-**How it opens the DB.** It connects with a `file:...?mode=ro` URI and sets `PRAGMA query_only = ON` and `PRAGMA busy_timeout = 1000`. The only SQL is SELECT, and it never writes to the DB. If `PRAGMA user_version` is greater than the expected value (`1`), it does not read the DB.
+**How it opens the DB.** It connects with a `file:...?mode=ro` URI and sets `PRAGMA query_only = ON` and `PRAGMA busy_timeout = 1000`. The only SQL is SELECT, and it never writes to the DB. If `PRAGMA user_version` is greater than the expected value (`2`), it does not read the DB. Version 2 added the `mode` column (`scan_only` / `full`; NULL on rows written before the upgrade); the frontend does not read it, the tile tag comes from `result.json`.
 
 **Fallback.** In the following cases the app does not use the index and switches to the results directory scan as before. The display does not stop, and the info strip shows the reason.
 
@@ -290,7 +302,7 @@ The backend phase 2 writes one row per inspection to the `inspections` table of 
 |---|---|
 | The Japanese text meaning "No SQLite index; scanning results dir" / No SQLite index; scanning results dir | The file at `sqlite_path` is missing, or the DB is empty with `user_version` 0 |
 | The Japanese text meaning "SQLite index unreadable; scanning results dir" / SQLite index unreadable; scanning results dir | The connection, a PRAGMA, or the SELECT failed. For example a corrupted file, a missing table, no permission, or being unable to create the WAL `-shm` file |
-| The Japanese text meaning "SQLite index schema is newer; scanning results dir" / SQLite index schema is newer; scanning results dir | `user_version` is greater than `1`. Update the frontend |
+| The Japanese text meaning "SQLite index schema is newer; scanning results dir" / SQLite index schema is newer; scanning results dir | `user_version` is greater than `2`. Update the frontend |
 
 When a message about the results directory or sysfs is present (such as "Results directory not found"), that message takes priority and the SQLite message is not shown.
 
@@ -303,6 +315,8 @@ When a message about the results directory or sysfs is present (such as "Results
 ## Deploying together with the backend
 
 The `Counterfeit Suspected` verdict, the numbers in the detail QR (`v:3`), and the SQLite index are written by backend phase 2. Update the frontend to phase 2 at the same time as the backend. If an old frontend runs against a new backend, `Counterfeit Suspected` gets the verdict code `?` and the label "Unknown", and the SQLite index is not read. Conversely, with a new frontend and an old backend, the numbers in the detail QR become `null`, and the info strip keeps showing the message that there is no SQLite index (`sqlite_path = ""` removes it).
+
+The inspection-mode toggle raises the SQLite schema to `user_version` 2 (`mode` column) and adds `mode` to `result.json` and `md` to detail QR page 1. Update the backend, `scripts/run-docker.sh`, `scripts/install-docker.sh` (tmpfiles entry for `/run/usb-sentinel-control`) and the frontend together: an old frontend against the new backend rejects `user_version` 2 and falls back to scanning the results directory ("SQLite index schema is newer"); a new frontend against an old backend shows no tag on the tiles and `md: null`, and the mode button has no effect on the host.
 
 ## Troubleshooting
 
@@ -329,6 +343,21 @@ Messages that appear only on standard error. Each line starts with a level and a
 | Message | Cause | Remedy |
 |---|---|---|
 | Failed to save language: <path> (<exception>) | The language record location (`$XDG_STATE_HOME/usb-sentinel-display/language` or `~/.local/state/…`) cannot be written. The display still switches, and the warning appears only once | Check the directory permissions. Even without the record, the app starts with `language` from the configuration file |
+| Could not record erase-mode attempt: <reason> | The strike file next to the language file cannot be written. Erase mode stays locked ("Cannot use the wrong-code count; erase locked") | Check the permissions of `~/.local/state/usb-sentinel-display/` |
+
+Messages of the mode button (shown in the info strip for 5 s after pressing it).
+
+| Message | Cause | Remedy |
+|---|---|---|
+| Erasing is off on this host (admin settings) | `allow_destructive = true` and `USB_SENTINEL_DEVICE_ACCESS=rw` are not both set in `host_config_dir` | Root README, "3. Plug in a USB drive" |
+| Cannot read /etc/usb-sentinel settings | `config.toml` or `docker.env` is missing or unreadable | Check `host_config_dir` and the file modes (0644) |
+| Mode control dir unusable (group, re-login) | `control_dir` is missing, a symlink, or not writable | Check `/run/usb-sentinel-control` (`root:usb-sentinel 2770`, created by `install-docker.sh`) and that the display user is in the group and has logged in again |
+| Mode switching off (control_dir is empty) | `control_dir = ""` | Intended; set the key to re-enable |
+| New input device seen; reboot to allow erase | An input device appeared after the first start of this boot | Unplug it and reboot |
+| Cannot watch input devices; erase locked | `sys_class_input` cannot be listed | Check the setting and that `/sys/class/input` is readable |
+| Wrong code; try again in 60 s / 3 wrong codes; admin must reset to allow erase | A wrong code; three wrong codes in total | Wait; or `rm ~/.local/state/usb-sentinel-display/erase-strikes` and restart |
+| Could not turn erase off; it stops within 20 s | The mode file could not be rewritten | The host stops honouring `full` after 20 s; check `control_dir` |
+| Inserted drives may still be erased; remove them | Erase mode was turned off while a drive was still being inspected | Remove the drives to stop their inspection |
 
 Problems with the tile display.
 
@@ -364,7 +393,9 @@ Every command must exit with code 0. ty exits with code 1 even for a single warn
 Create a fake sysfs tree and sample results, and check the screen in a window.
 
 ```bash
-# Create a fake tree and sample results in /tmp/usb-sentinel-fixtures (--scene a|b)
+# Create a fake tree and sample results in /tmp/usb-sentinel-fixtures (--scene a|b|c).
+# Also creates control/, host/ (ceiling on), input/input0/ and state/ for the mode button;
+# --ceiling off locks the button, --strikes 3 pre-fills the wrong-code count.
 uv run python scripts/make-fixtures.py /tmp/usb-sentinel-fixtures --scene a
 
 # Start in a window
@@ -372,9 +403,12 @@ uv run usb-sentinel-display --config /tmp/usb-sentinel-fixtures/display.toml run
 
 # Take a screenshot after 12 seconds (uses macOS screencapture)
 uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --scene a --select 1 --out /tmp/scene-a.png
+
+# Mode scenes: --mode-scene none|scan_only|confirm|full|locked|lockout, --code 3142 fixes the dialog code.
+uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --mode-scene confirm --out /tmp/confirm.png
 ```
 
-Scene A has four disks (No Defect, Malware Detected, scanning, broken result), and scene B has two disks (Spec Mismatch, Defective) with P3 and P4 not connected. `dev-screenshot.py` fakes the output of `systemctl` to show "Scanning". With `--geometry 640x400` you can check the resolution warning, and with `--results-dir /nonexistent` you can check "Results directory not found". The `display.toml` written by `make-fixtures.py` disables the index with `sqlite_path = ""`, so no SQLite message appears on a development machine.
+Scene A has four disks (No Defect, Malware Detected, scanning, broken result), and scene B has two disks (Spec Mismatch, Defective) with P3 and P4 not connected. `dev-screenshot.py` fakes the output of `systemctl` to show "Scanning", points `XDG_STATE_HOME` at `<fixtures>/state` and uses the sibling modules `scripts/fixtures_mode.py` and `scripts/dev_mode_scenes.py`. On a Retina screen `screencapture` writes 960x640; shrink with `sips -z 320 480 <png>`. With `--geometry 640x400` you can check the resolution warning, and with `--results-dir /nonexistent` you can check "Results directory not found". The `display.toml` written by `make-fixtures.py` disables the index with `sqlite_path = ""`, so no SQLite message appears on a development machine.
 
 ## On-device checks
 
@@ -395,3 +429,4 @@ Items that cannot be checked on the development machine (macOS) and must be veri
 13. The three detail QR codes (maximum QR version 8, 285px) are readable on the LCD.
 14. The verdict labels fit the tile width in Noto Sans CJK JP. Run `uv run pytest -q -m gui -k verdict_labels_fit_tile` once on the device. In measurements on the development machine, the Japanese label for Malware Detected (141px, limit 144px) has the least margin.
 15. With a display user in the `usb-sentinel` group, `inspections.sqlite` opens with `mode=ro` and the info strip shows no SQLite message. If it does, check the permissions (`2770`) of `/var/lib/usb-sentinel/db`.
+16. The mode button and the code dialog (18 px bold code, four 104x108 px buttons) are readable and tappable on the panel; the Japanese strings fit with Noto Sans CJK JP. The mode file written by the display is accepted by `run-docker.sh` (`journalctl` shows `notice: display requested full inspection`). See the root README, "Checks on the Raspberry Pi".

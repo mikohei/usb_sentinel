@@ -1,8 +1,11 @@
 """Development script that builds a fake sysfs tree and sample results (plan.md D15).
 
-Usage: uv run python scripts/make-fixtures.py [OUT] --scene a|b|c
-Creates sys_block/, devices/..., results/ and display.toml under OUT (default
-/tmp/usb-sentinel-fixtures). Files with the same name are overwritten; nothing is deleted.
+Usage: uv run python scripts/make-fixtures.py [OUT] --scene a|b|c [--ceiling on|off]
+       [--strikes N]
+Creates sys_block/, devices/..., results/, control/, host/, input/, state/ and display.toml
+under OUT (default /tmp/usb-sentinel-fixtures). Files with the same name are overwritten;
+nothing is deleted. --ceiling off makes the host forbid erasing (mode button locked);
+--strikes N pre-fills the wrong-code count (3 locks erase mode).
 """
 
 import argparse
@@ -14,6 +17,11 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+# Sibling helper module (scripts/ is not a package).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from fixtures_mode import write_mode_fixtures  # noqa: E402
 
 DEFAULT_OUT = Path("/tmp/usb-sentinel-fixtures")  # noqa: S108 -- default output location, development machines only
 PCIE = "devices/platform/scb/fd500000.pcie/pci0000:00/0000:00:00.0/0000:01:00.0"
@@ -88,6 +96,7 @@ poll_interval_s = 1.0
 # of the info strip.
 sqlite_path = ""
 
+{mode_keys}
 [[ports]]
 label = "P1"
 paths = ["1-1.1", "2-1"]
@@ -236,8 +245,8 @@ def write_result(results: Path, device: Device, now: float) -> None:
     print(f"{device.kernel} {device.port_path} {name} d:{digest[:16]}")
 
 
-def build(out: Path, scene: str) -> None:
-    """Build the full fixture set for the scene under OUT."""
+def build(out: Path, scene: str, *, ceiling: bool = True, strikes: int | None = None) -> None:
+    """Build the full fixture set for the scene under OUT (see write_mode_fixtures)."""
     now = time.time()
     sys_block = out / "sys_block"
     results = out / "results"
@@ -260,8 +269,10 @@ def build(out: Path, scene: str) -> None:
     for entry in sys_block.iterdir():
         if entry.is_symlink() and entry.name not in wanted:
             entry.unlink()
+    mode_paths = write_mode_fixtures(out, ceiling=ceiling, strikes=strikes)
     (out / "display.toml").write_text(
-        DISPLAY_TOML.format(results=results, sys_block=sys_block), encoding="utf-8"
+        DISPLAY_TOML.format(results=results, sys_block=sys_block, mode_keys=mode_paths.toml()),
+        encoding="utf-8",
     )
     print(f"fixtures: {out}")
 
@@ -271,8 +282,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("out", nargs="?", type=Path, default=DEFAULT_OUT, help="output directory")
     parser.add_argument("--scene", choices=sorted(SCENES), default="a", help="scene")
+    parser.add_argument(
+        "--ceiling",
+        choices=["on", "off"],
+        default="on",
+        help="whether host/config.toml and host/docker.env allow erasing (default on)",
+    )
+    parser.add_argument(
+        "--strikes",
+        type=int,
+        default=None,
+        help="wrong-code count to write to state/usb-sentinel-display/erase-strikes",
+    )
     args = parser.parse_args(argv)
-    build(args.out, args.scene)
+    build(args.out, args.scene, ceiling=args.ceiling == "on", strikes=args.strikes)
     return 0
 
 

@@ -31,7 +31,7 @@ Step 7  Classify the verdict (No Defect / Counterfeit Suspected / Spec Mismatch 
 
 - ClamAV runs first. Once ClamAV has run the scan, the hash inventory is created regardless of the result (detection, error, or timeout), as evidence for later comparison. If ClamAV has not opened any file (clamscan is missing, or there is no definition DB), no inventory is created either. The tool never proceeds to the destructive inspections (f3 / fio). An inventory created after a timeout or a scan failure (exit code 2) only reads the bytes of files that ClamAV did not open, under `ro,noexec,nosuid,nodev`; it neither executes nor interprets them.
 - Read-only mount. The mount for scanning and hash computation uses `ro,noexec,nosuid,nodev`, leaving no room for an infected file to run on the host.
-- Destructive inspections are blocked in several ways. No write is made if any of the following holds: malware is FAIL or ERROR, `allow_destructive = false`, or a mount remains.
+- Destructive inspections are blocked in several ways. No write is made if any of the following holds: malware is FAIL or ERROR, `allow_destructive = false`, the inspection mode is `scan_only` (the display's mode button was not switched to "Scan + erase" when the drive was inserted), or a mount remains. The host side passes the device read-only unless all of `USB_SENTINEL_DEVICE_ACCESS=rw`, `allow_destructive = true` and the display mode `full` hold.
 - "No detection" is not confused with "clean". A clamscan exit code other than 0/1, a timeout, a mix of unreadable files, and a missing filesystem are all treated as ERROR. While any step remains unimplemented, the verdict is never `No Defect`.
 - Safety guard. A device that does not satisfy all of the following is refused before the inspection starts (exit code 2): it is on the USB bus, it is removable, it is not the root disk, and its capacity is non-zero.
 
@@ -256,11 +256,37 @@ for the USB check. Only the results directory is writable on the host.
 and the container's AppArmor restriction is lifted. Mounting takes place inside the container's namespace.
 `--privileged` and sharing the Docker socket with the container are not used.
 
-To enable the destructive inspections (capacity and speed), set both
-`USB_SENTINEL_DEVICE_ACCESS=rw` in `/etc/usb-sentinel/docker.env` and `allow_destructive = true` in `config.toml`.
-If only one of them is set, the device is still passed read-only. With `allow_destructive = false`,
-both steps are `SKIPPED`; if only `docker.env` stays at `ro`, they are `ERROR` (insufficient permission),
-and in both cases the overall verdict is `Inconclusive`. Setting `rw` erases the contents of the sample.
+Destructive inspections (capacity and speed) run only when three conditions hold at the
+moment the drive is inserted:
+
+1. `USB_SENTINEL_DEVICE_ACCESS=rw` in `/etc/usb-sentinel/docker.env` (the container gets the
+   device with `:rw`);
+2. `allow_destructive = true` in `/etc/usb-sentinel/config.toml` (this host MAY erase);
+3. the display's mode button (bottom left) shows "Scan + erase". Switching it on opens a
+   dialog that shows a 4-digit code; enter it with keys `1`-`4` or the on-screen buttons
+   within 30 s. The code is shown only on the screen, so a keyboard alone cannot turn erase
+   mode on.
+
+The first two are the administrator's ceiling, the third is the operator's choice per
+session. `run-docker.sh` reads the display's mode file (`/run/usb-sentinel-control/mode`) once
+at insertion and passes `--mode full` together with `:rw` only when all three hold; otherwise
+the device stays read-only and the container runs `--mode scan_only`. With `allow_destructive
+= false`, or with the display in scan only, the capacity and speed steps are `SKIPPED`
+(reason `Inspection mode is scan_only` in the second case). Behaviour change: with
+`allow_destructive = true` and `docker.env` still `ro`, the steps are now also `SKIPPED`
+"Inspection mode is scan_only" instead of `ERROR` (insufficient permission), because the host
+never requests `full` without `rw`. In every case the verdict is `Inconclusive`. A manual run
+(`usb-sentinel inspect`) erases only with `--mode full` (default `scan_only`).
+
+The mode is fixed when a drive is inserted. Switching the display back to scan only does not
+stop an inspection already running in erase mode; the strip says "Inserted drives may still be
+erased; remove them". Every start of the display and every boot reset the mode to scan only
+(`/run` is a tmpfs, and the host honours `full` only while the stamp is at most 20 s old). If
+you disable switching with `control_dir = ""` in `display.toml`, wait 20 s after restarting the
+display before inserting a drive. The mode is written to `result.json` (`mode`), `result.txt`
+(`Mode:` line), the file QR and the SQLite index (`mode` column, `user_version` 2); update the
+backend and the frontend together, because an old frontend rejects `user_version` 2 and falls
+back to scanning the results directory (see [doc/qr-payload.md](doc/qr-payload.md)).
 
 `scripts/install-docker.sh` keeps the existing `docker.env` on reinstall, so a `docker.env`
 created by an earlier installation does not contain `USB_SENTINEL_DEVICE_ACCESS` (`run-docker.sh` treats
@@ -279,7 +305,83 @@ grep allow_destructive /etc/usb-sentinel/config.toml
 ```
 
 To revert, set the value in `docker.env` to `ro` or set `allow_destructive = false`.
-Either one alone returns the device to read-only.
+Either one alone returns the device to read-only, and the display's button becomes
+"Scan only (locked)".
+
+### Hardening against BadUSB
+
+A USB device that presents itself as a keyboard (BadUSB) could type at the kiosk. Three
+measures limit what it can do; none of them replaces the air gap.
+
+**GNOME lockdown (installed by `scripts/install-all.sh`).** `scripts/kiosk-lockdown.sh` clears
+every shortcut in `org.gnome.desktop.wm.keybindings`, `org.gnome.shell.keybindings`,
+`org.gnome.mutter.keybindings`, `org.gnome.mutter.wayland.keybindings` and
+`org.gnome.settings-daemon.plugins.media-keys` except `switch-to-session-1..12`
+(Ctrl+Alt+F1..F12, the password-protected text console that stays the administrator's way in),
+clears the Ubuntu Dock hot keys, disables the run dialog, logout, user switching, the bare
+Super key, hot corners, the accessibility toggles and the power key, and leaves one workspace
+and an empty dock. To undo it, as the display user run `gsettings reset-recursively <schema>`
+for each schema above and `gsettings reset <schema> <key>` for the fixed keys
+(`org.gnome.desktop.lockdown` `disable-command-line`/`disable-log-out`/`disable-user-switching`,
+`org.gnome.mutter` `overlay-key`/`dynamic-workspaces`, `org.gnome.desktop.wm.preferences`
+`num-workspaces`, `org.gnome.desktop.interface` `enable-hot-corners`, `org.gnome.shell`
+`favorite-apps`, `org.gnome.shell.extensions.dash-to-dock` `hot-keys`,
+`org.gnome.desktop.a11y.keyboard` `enable`, `org.gnome.settings-daemon.plugins.power`
+`power-button-action`).
+
+**Per-boot input baseline.** The first start of the display after boot records the input
+devices present (`/sys/class/input/inputN`) in `/run/usb-sentinel-control/input-baseline`. Any
+input device that appears later locks erase mode ("New input device seen; reboot to allow
+erase") and turns it off if it was on. Start the station with only its own keyboard and touch
+panel attached; if you plug in a keyboard on purpose, reboot to unlock erase mode.
+
+**Strike limit.** Every attempt to turn erase mode on is charged to
+`~/.local/state/usb-sentinel-display/erase-strikes` before the code is shown. After 3 wrong
+codes in total, erase mode stays locked ("3 wrong codes; admin must reset to allow erase").
+To reset it, as the display user run `rm ~/.local/state/usb-sentinel-display/erase-strikes`
+and restart the display. One wrong code also starts a 60 s cooldown.
+
+**Optional: usbguard (not run by any script).** To block composite devices (storage plus HID)
+at the kernel level, install usbguard with the station's own keyboard and touch panel attached:
+
+```bash
+sudo apt install usbguard
+sudo sh -c 'usbguard generate-policy > /etc/usbguard/rules.conf'   # devices attached now
+# append, then restart usbguard:
+allow with-interface match-all { 08:*:* }
+allow with-interface match-all { 09:*:* }
+```
+
+`match-all` means every interface of the device must be in the listed set (mass storage `08`,
+hub `09`), so a drive that also exposes a keyboard interface is blocked; drives exposing other
+interface classes (card readers with extra functions, for example) are blocked too. Check the
+operator name against `man usbguard-rules.conf` of the Ubuntu release you run.
+
+**Residual risk.** A keyboard that still finds a way out of the kiosk window acts as the display
+user, who is root-equivalent through the `docker` group. This risk exists without the mode
+toggle as well; usbguard is the complete fix.
+
+#### Checks on the Raspberry Pi
+
+Items that only the real station can confirm:
+
+1. `/run/usb-sentinel-control` exists after boot as `root:usb-sentinel 2770` (systemd-tmpfiles)
+   and the display user's session has the group active (`id`).
+2. With the ceiling on and the display in scan only, an inserted drive keeps its data, the
+   capacity and speed steps are `SKIPPED` and the tile shows the `Scan` tag.
+3. After entering the code, a clean disposable drive is erased and its tile shows `Erased`;
+   the detail QR page 1 contains `md: "f"`.
+4. A second USB keyboard plugged in after boot locks erase mode and turns it off; logging out
+   and letting autologin restart the display keeps the lock (baseline in `/run`).
+5. After a reboot the button shows "Mode: Scan only" and the mode file is gone.
+6. One wrong code survives a logout and a reboot in `~/.local/state/usb-sentinel-display/erase-strikes`.
+7. After the installer ran, Super, Super+1..9, Shift+Super+1, Ctrl+Super+1, Super+A/S/V,
+   Super+Page Down, Ctrl+Alt+arrows, Shift+Ctrl+Alt+arrows, Alt+F1, Alt+F2, Alt+Space,
+   Alt+Tab, Alt+Esc, Alt+F4, Ctrl+Alt+T, Ctrl+Alt+Del, Ctrl+Alt+Tab, Print and the power key do
+   nothing visible; Ctrl+Alt+F3 still opens the text console;
+   `gsettings list-recursively org.gnome.desktop.wm.keybindings` shows only empty lists.
+8. With erase mode on and a drive being scanned, switching back shows "Inserted drives may
+   still be erased; remove them".
 
 ### Updating and stopping
 

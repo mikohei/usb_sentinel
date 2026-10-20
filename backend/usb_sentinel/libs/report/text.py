@@ -1,7 +1,8 @@
 """result.txt / console output.
 
 The order and number of the first three lines (verdict, device, advertised capacity) and the
-format of the step lines (`[ OK ] step: summary`) must not change. Headings are in English.
+format of the step lines (`[ OK ] step: summary`) must not change. The fourth line is the
+inspection mode (`Mode: scan_only` / `Mode: full`). Headings are in English.
 Items added in phase 2 are read with `details.get()`, and the whole line is omitted when the
 value is absent (design doc section 6.1).
 """
@@ -25,12 +26,14 @@ def _gb(size: int) -> str:
 
 
 def _header_lines(result: InspectionResult) -> list[str]:
-    """The verdict, device, and advertised capacity lines, plus extra lines when values exist."""
+    """The verdict, device, advertised capacity and mode lines, plus extra lines when values
+    exist."""
     size = result.device.advertised_bytes
     lines = [
         f"Verdict: {result.verdict}",
         f"Device: {result.device.path} ({result.device.serial})",
         f"Advertised capacity: {_gb(size) if size else 'unknown'}",
+        f"Mode: {result.mode}",
     ]
     if result.device.link_speed_mbps is not None:
         lines.append(f"Link speed: {result.device.link_speed_mbps}Mbps")

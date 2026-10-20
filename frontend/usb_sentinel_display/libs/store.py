@@ -11,8 +11,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-# Highest readable schema version. Kept equal to backend schema.SCHEMA_VERSION by hand.
-EXPECTED_SCHEMA_VERSION = 1
+# Highest readable schema version. Mirrors backend schema.SCHEMA_VERSION (2: v1 plus a `mode`
+# column that this reader does not query; the mode comes from result.json).
+EXPECTED_SCHEMA_VERSION = 2
 
 # Info strip notice keys (text is "notice." + key in ui/i18n.py).
 NOTICE_DB_MISSING = "db_missing"

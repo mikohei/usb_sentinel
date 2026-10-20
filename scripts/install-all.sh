@@ -18,7 +18,9 @@
 #   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs)
 #   5. frontend: uv sync --frozen and a tkinter import check
 #   6. Display user: usb-sentinel group, GDM autologin, GNOME automount off,
-#      sleep/lock off, display.toml, XDG autostart entry
+#      sleep/lock off, GNOME kiosk lockdown (scripts/kiosk-lockdown.sh clears
+#      every keyboard shortcut except Ctrl+Alt+F1..F12 and turns off the run
+#      dialog, hot corners and dock hot keys), display.toml, XDG autostart entry
 #   7. ClamAV signature database (freshclam inside the container)
 #   8. Offline self-check (selftest with --network none, uv run --offline)
 #   9. Remaining manual steps and the "before unplugging the LAN" checklist
@@ -28,7 +30,8 @@
 #   - Touch panel driver (vendor scripts are never executed by this project)
 #   - Port calibration (insert a USB stick into each port and record the path)
 #   - Nominal capacity/speed in config.toml, and enabling destructive checks
-#     (allow_destructive = true plus USB_SENTINEL_DEVICE_ACCESS=rw)
+#     (allow_destructive = true plus USB_SENTINEL_DEVICE_ACCESS=rw; erasing then
+#     still needs the display's mode button switched to "Scan + erase")
 set -euo pipefail
 
 readonly REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -167,6 +170,8 @@ gsettings_user() {
         sudo -u "${DISPLAY_USER}" dbus-run-session -- gsettings "$@"
     fi
 }
+# Kiosk lockdown functions (kiosk_lockdown); they use warn and the gsettings_user helper.
+source "${REPO_DIR}/scripts/kiosk-lockdown.sh"
 if command -v gsettings >/dev/null; then
     # With automount on, run-docker.sh refuses the disk ("host-mounted disk refused").
     gsettings_user set org.gnome.desktop.media-handling automount false
@@ -176,8 +181,12 @@ if command -v gsettings >/dev/null; then
     gsettings_user set org.gnome.desktop.screensaver idle-activation-enabled false
     gsettings_user set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
     echo "GNOME: automount off, sleep and lock off"
+    # A USB keyboard must not leave the kiosk window through GNOME shortcuts.
+    # When the user is not logged in this starts one dbus session per call (about a minute).
+    kiosk_lockdown gsettings_user
 else
     warn "gsettings not found; disable automount and sleep manually"
+    warn "gsettings not found; GNOME kiosk lockdown skipped (see scripts/kiosk-lockdown.sh)"
 fi
 
 # display.toml: created from the example when missing. Port table is filled by calibrate later.
@@ -253,8 +262,17 @@ cat <<EOF
       - To enable the capacity and speed checks (they ERASE the sample):
           config.toml:  allow_destructive = true
           docker.env:   USB_SENTINEL_DEVICE_ACCESS=rw
-        Both are required; either one alone keeps the device read-only.
+        then switch the display's mode button to "Scan + erase" and enter the
+        code shown (resets to scan only at every start). All three are required;
+        without any one of them the device stays read-only.
  5. Log out once and let autologin bring you back (activates the group and autostart)
+ 6. GNOME kiosk lockdown was applied to ${DISPLAY_USER} (no shortcuts except Ctrl+Alt+F1..F12).
+      Admin access: text console Ctrl+Alt+F3 (password) or SSH.
+      To undo, as ${DISPLAY_USER}:
+        gsettings reset-recursively <schema>   for each schema in KIOSK_CLEAR_SCHEMAS
+                                               and ${KIOSK_DOCK_SCHEMA}
+        gsettings reset <schema> <key>         for each fixed setting in kiosk_lockdown
+      (both lists: scripts/kiosk-lockdown.sh)
 
 [Checklist before unplugging the LAN]
  [ ] backend selftest exited 0 (see step 8/9 above)

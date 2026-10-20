@@ -1,6 +1,7 @@
 """Tests for detail-QR limits (150 bytes, shortening s, page numbers) and joining 3 pages."""
 
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -17,6 +18,26 @@ class TestDetailLimits:
         huge = summary(serial="A" * 32, malware_count=10**20, detail=WORST_DETAIL)
         data = check(build_detail_page(huge, 1))
         assert data["s"] == "A" * 16
+
+    @pytest.mark.parametrize(("mode", "md"), [(None, None), ("scan_only", "s"), ("full", "f")])
+    def test_page1_worst_case_with_md(self, mode: str | None, md: str | None) -> None:
+        """Page 1 worst case stays <= 150 bytes with md, both with a 32-char serial and kernel."""
+        with_serial = summary(serial="A" * 32, malware_count=9999, detail=WORST_DETAIL)
+        with_serial = replace(with_serial, mode=mode)
+        data = check(build_detail_page(with_serial, 1))
+        assert data["s"] == "A" * 32
+        assert data["md"] == md
+        assert list(data)[-2:] == ["dv", "md"]
+        with_kernel = summary(serial="", kernel="sdabc", malware_count=9999, detail=WORST_DETAIL)
+        data = check(build_detail_page(replace(with_kernel, mode=mode), 1))
+        assert data["k"] == 1
+        assert data["md"] == md
+
+    def test_page1_md_mapping(self) -> None:
+        """md is "s" for scan_only, "f" for full and null when unknown."""
+        for mode, md in ((None, None), ("scan_only", "s"), ("full", "f")):
+            data = check(build_detail_page(replace(summary(), mode=mode), 1))
+            assert data["md"] == md
 
     def test_page1_oversize_raises(self) -> None:
         """Page 1 that still exceeds 150 bytes after truncation raises ValueError."""

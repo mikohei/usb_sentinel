@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import load_config
 from .device import UnsafeDeviceError
-from .models import Verdict
+from .models import InspectionMode, Verdict
 from .orchestrator import inspect
 from .report import render_text, write_all
 from .report.json_report import digest
@@ -27,7 +27,7 @@ def configure_logging() -> None:
 
 
 def main() -> int:
-    """Entry point for `usb-sentinel [--config PATH] {selftest | inspect DEVICE}`.
+    """Entry point for `usb-sentinel [--config PATH] {selftest | inspect [--mode M] DEVICE}`.
 
     Returns:
         Exit code. inspect returns 0 when the verdict is No Defect, otherwise 1. A refused
@@ -40,6 +40,12 @@ def main() -> int:
     commands.add_parser("selftest")
     inspection = commands.add_parser("inspect")
     inspection.add_argument("device")
+    inspection.add_argument(
+        "--mode",
+        choices=[m.value for m in InspectionMode],
+        default=InspectionMode.SCAN_ONLY.value,
+        help="Inspection mode; destructive steps need full and allow_destructive = true",
+    )
     args = parser.parse_args()
     configure_logging()
     runner = SubprocessRunner()
@@ -68,7 +74,7 @@ def main() -> int:
         config = load_config(args.config)
         # Use the same store for the start record (inside inspect()) and the completion record.
         store = store_for(config)
-        result = inspect(runner, config, args.device, store)
+        result = inspect(runner, config, args.device, store, mode=InspectionMode(args.mode))
         output = Path(result.output_dir)
         try:
             write_all(result, output, emit_qr=config.emit_qr)

@@ -10,6 +10,7 @@ import json
 
 from usb_sentinel.libs import (
     DeviceInfo,
+    InspectionMode,
     InspectionResult,
     StepResult,
     StepStatus,
@@ -85,6 +86,14 @@ class TestJson:
 
         assert "port_path" in payload["device"]
         assert payload["device"]["port_path"] is None
+
+    def test_mode_is_written_as_string(self) -> None:
+        """result.json carries the inspection mode as its StrEnum value, scan_only by default."""
+        result = _result(_clean_malware_step())
+        assert json.loads(to_json(result))["mode"] == "scan_only"
+
+        result.mode = InspectionMode.FULL
+        assert json.loads(to_json(result))["mode"] == "full"
 
 
 class TestText:

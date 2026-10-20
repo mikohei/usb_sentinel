@@ -23,6 +23,8 @@ DETAIL_PAGES = 3
 DETAIL_DIGEST_LEN = 12
 MB = 10**6
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# Detail page 1 `md`: inspection mode. null when the result has no known mode.
+MODE_CODES: dict[str, str] = {"scan_only": "s", "full": "f"}
 
 
 def _ascii_serial(serial: str) -> str:
@@ -117,6 +119,7 @@ def _detail_page1(summary: ResultSummary) -> dict[str, object]:
     body["e"] = None if detail.elapsed_s is None else round(detail.elapsed_s)
     body["m"] = summary.malware_count
     body["dv"] = _db_version_int(detail.clamav_db_version)
+    body["md"] = None if summary.mode is None else MODE_CODES.get(summary.mode)
     return body
 
 

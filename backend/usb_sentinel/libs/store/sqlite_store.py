@@ -36,6 +36,7 @@ DB_MODE = 0o660
 STARTED_COLUMNS = (
     "inspection_id",
     "state",
+    "mode",
     "serial",
     "kernel_name",
     "port_path",
@@ -110,9 +111,12 @@ class SqliteStore:
                 )
             if version < SCHEMA_VERSION:
                 with conn:
-                    conn.execute("BEGIN")
+                    # Take the write lock first, then re-read: a concurrent opener may have
+                    # migrated in between, and ALTER TABLE ADD COLUMN is not idempotent.
+                    conn.execute("BEGIN IMMEDIATE")
+                    current = int(conn.execute("PRAGMA user_version").fetchone()[0])
                     for target, statements in MIGRATIONS:
-                        if target <= version:
+                        if target <= current:
                             continue
                         for sql in statements:
                             conn.execute(sql)

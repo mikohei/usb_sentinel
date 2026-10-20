@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import Config
 from .device import block_info, ensure_safe, is_mounted, probe
 from .hashing import inventory
-from .models import DeviceInfo, InspectionResult, StepResult, StepStatus, Verdict
+from .models import DeviceInfo, InspectionMode, InspectionResult, StepResult, StepStatus, Verdict
 from .mounter import mounted
 from .runner import CommandRunner
 from .steps import StepContext
@@ -135,22 +135,28 @@ def _timed(run: Callable[[StepContext], StepResult], ctx: StepContext) -> StepRe
 
 
 def inspect(
-    runner: CommandRunner, config: Config, path: str, store: InspectionStore | None = None
+    runner: CommandRunner,
+    config: Config,
+    path: str,
+    store: InspectionStore | None = None,
+    mode: InspectionMode = InspectionMode.SCAN_ONLY,
 ) -> InspectionResult:
     """Drive the whole inspection sequence.
 
     probe -> safety guard -> ro mount -> malware -> inventory -> destructive tests -> verdict.
 
     When malware is detected, destructive tests (f3, fio) are not run. The condition `permitted`
-    for running destructive tests (all steps PASS, allow_destructive, and unmounted) is a safety
-    gate and must not be relaxed. The hash inventory is built only after clamscan has run a
-    scan.
+    for running destructive tests (all steps PASS, allow_destructive, inspection mode full, and
+    unmounted) is a safety gate and must not be relaxed. The hash inventory is built only after
+    clamscan has run a scan.
 
     Args:
         runner: Command runner.
-        config: Configuration.
+        config: Configuration. `allow_destructive` is the ceiling: when false, the effective
+            mode is scan_only whatever `mode` says.
         path: Path of the target device.
         store: Destination for the start record. None disables recording (NullStore).
+        mode: Requested inspection mode (from `--mode`). Default scan_only.
 
     Returns:
         Inspection result with verdict, reason codes, and duration filled in.
@@ -169,6 +175,8 @@ def inspect(
         output = output.with_name(f"{output.name}-{started.strftime('%f')}")
     output.mkdir(parents=True)
     result = InspectionResult(device, started.isoformat(), output_dir=str(output))
+    # The host ceiling narrows the requested mode; the start record already sees the result.
+    result.mode = mode if config.allow_destructive else InspectionMode.SCAN_ONLY
     # Non-destructive check of the reported capacity. Uses only the lsblk values already read
     # by probe() and does not touch the device. Not added to result.steps (so it does not
     # affect permitted or the number of digits of st in the on-screen QR code).
@@ -217,6 +225,8 @@ def inspect(
     reason = "Scan and hashing not completed"
     if not config.allow_destructive:
         permitted, reason = False, "allow_destructive = false"
+    elif result.mode is not InspectionMode.FULL:
+        permitted, reason = False, "Inspection mode is scan_only"
     elif is_mounted(block_info(runner, path)):
         permitted, reason = False, "Still mounted"
     for name, step in (("capacity", CapacityStep()), ("speed", SpeedStep())):

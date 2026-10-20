@@ -12,11 +12,23 @@ SCREEN_W = 480
 SCREEN_H = 320
 TILE_W = 160
 TILE_H = 64
-# Bottom-left button row (y256-320) is split into prev (x0-53), language (x53-107), next (x107-160).
+# Bottom-left area (y256-320) is two 32 px rows (design doc inspection-mode 3.5): the navigation
+# row prev (x0-53), language (x53-107), next (x107-160), then the full-width mode button.
 ARROW_BTN_W = 53
 LANG_BTN_X0 = 53
 LANG_BTN_X1 = 107
-BTN_H = 64
+NAV_ROW_Y0 = 256
+NAV_ROW_H = 32
+MODE_ROW_Y0 = 288
+MODE_ROW_H = 32
+# Mode button labels must measure at most 160 - 2 x 4 px (GUI test).
+MODE_LABEL_MAX_PX = 152
+# Right edge of the drive tag ("Erased" / "Scan") on tile line 2.
+TAG_RIGHT_X = 152
+# Confirmation dialog (design doc 3.6): digit buttons x ranges, their y range, Cancel rectangle.
+DIALOG_KEYS: tuple[tuple[int, int], ...] = ((14, 118), (130, 234), (246, 350), (362, 466))
+DIALOG_KEY_Y = (196, 304)
+DIALOG_CANCEL = (392, 4, 476, 40)
 QR_W = 320
 QR_H = 296
 STRIP_H = 24
@@ -54,6 +66,11 @@ COLORS: dict[str, str] = {
     "button": "#303030",
     "qr_background": "#FFFFFF",
     "qr_module": "#000000",
+    # Erase mode on / stopping: an orange-red no tile state uses.
+    "erase_on": "#BF360C",
+    "dialog": "#202020",
+    "dialog_key": "#424242",
+    "separator": "#000000",
 }
 
 # Background color per state (done and removed use the verdict color, so they are excluded).

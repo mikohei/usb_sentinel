@@ -4,17 +4,17 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
 from types import FrameType
-from typing import Protocol
 
+from .. import trust
 from ..config import DisplayConfig
-from ..mapper import Mapper
-from ..monitor import Monitor, Snapshot
-from ..results import ResultStore
-from ..store import SqliteIndex
+from ..mode_challenge import Challenge, random_code
+from ..mode_state import ModeController
+from ..models import SlotState
+from ..monitor import Snapshot
 from ..units import Runner
 from . import theme
+from .app_wiring import AppOptions, MonitorLike, build_monitor
 from .i18n import (
     initial_language,
     load_saved_language,
@@ -24,10 +24,13 @@ from .i18n import (
     text,
 )
 from .keys import bind_keys
+from .mode_ui import ModeUi
 from .qr_view import QrView
 from .strip import resolution_warning, strip_text
 from .theme import QR_W, SCREEN_H, SCREEN_W, TILE_COUNT, TILE_W, Fonts
 from .tiles import TilesView
+
+__all__ = ["App", "AppOptions", "MonitorLike", "build_monitor", "run_app"]
 
 logger = logging.getLogger(__name__)
 
@@ -36,40 +39,8 @@ FOCUS_RETRY_MS = 200
 CONFIGURE_SETTLE_MS = 100
 # Number of detail QR pages (qr_mode 1-3).
 DETAIL_PAGES = 3
-
-
-class MonitorLike(Protocol):
-    """Monitor operations used by App (replaced by a fake in tests)."""
-
-    def tick(self) -> Snapshot:
-        """Return the display contents for one tick. Never raises (returns the previous slots)."""
-        ...
-
-    def force_reload(self) -> None:
-        """Drop the result cache and reload every result.json on the next tick (F5)."""
-        ...
-
-
-@dataclass(frozen=True)
-class AppOptions:
-    """Startup options. windowed and kiosk are never given together (D13)."""
-
-    windowed: bool
-    kiosk: bool
-
-
-def build_monitor(
-    config: DisplayConfig, runner: Runner | None, now: Callable[[], float]
-) -> Monitor:
-    """Build the Monitor from the config (FEAT-002 injection point). Empty sqlite_path: no index."""
-    index = SqliteIndex(config.sqlite_path) if config.sqlite_path is not None else None
-    return Monitor(
-        config,
-        store=ResultStore(config.results_dir, index=index),
-        runner=runner,
-        mapper=Mapper(config.ports, retain_s=config.retain_minutes * 60),
-        now=now,
-    )
+# Slot states that mean a drive inserted in erase mode may still be erased (design 3.8).
+IN_PROGRESS_STATES = (SlotState.WAITING, SlotState.INSPECTING)
 
 
 class App:
@@ -83,6 +54,7 @@ class App:
         runner: Runner | None,
         now: Callable[[], float] = time.time,
         monitor: MonitorLike | None = None,
+        make_code: Callable[[], str] = random_code,
     ) -> None:
         """Build the tk root, Canvases, Views, and key bindings, and wire them to the Monitor.
 
@@ -92,6 +64,7 @@ class App:
             runner: systemctl runner. If None, unit states are not queried.
             now: Current time (swapped in tests).
             monitor: Monitor override. If None, build it with build_monitor().
+            make_code: Source of the erase-mode confirmation code (fixed in tests; D2).
         """
         self.config = config
         self.options = options
@@ -129,9 +102,31 @@ class App:
         )
         self.right_canvas.place(x=TILE_W, y=0)
         self.tiles = TilesView(
-            self.left_canvas, self.fonts, self.select, self.step, self.toggle_language, self.rows
+            self.left_canvas,
+            self.fonts,
+            self.select,
+            self.step,
+            self.toggle_language,
+            self.toggle_mode,
+            self.rows,
         )
         self.qr_view = QrView(self.right_canvas, self.fonts, self.toggle_qr_mode)
+        controller = ModeController(
+            config.control_dir,
+            config.host_config_dir,
+            config.sys_class_input,
+            trust.strike_file(),
+            challenge=Challenge(make_code=make_code),
+        )
+        self.mode_ui = ModeUi(
+            self.root,
+            self.frame,
+            self.fonts,
+            controller,
+            self._redraw,
+            lambda: self.language,
+            self._drives_in_progress,
+        )
 
         if options.windowed:
             self.root.geometry(f"{SCREEN_W}x{SCREEN_H}")
@@ -142,8 +137,13 @@ class App:
             self.root.focus_force()
             self.root.bind("<FocusOut>", self._on_focus_out)
             self._check_resolution(self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        if options.kiosk:
+            # A window-manager close request must not end the app and expose the desktop (3.11).
+            self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         bind_keys(self.root, self, kiosk=options.kiosk)
         signal.signal(signal.SIGTERM, self._on_sigterm)
+        # Every start resets the host to scan_only (R3), before the first render.
+        self.mode_ui.start()
 
     def _on_sigterm(self, signum: int, frame: FrameType | None) -> None:
         """On SIGTERM only set a flag; destroy happens on the next tick (design doc 1.4)."""
@@ -180,13 +180,25 @@ class App:
         if self._last_snapshot is not None:
             self._render(self._last_snapshot)
 
+    def _drives_in_progress(self) -> bool:
+        """Whether any slot is WAITING or INSPECTING in the latest snapshot (False before one)."""
+        snapshot = self._last_snapshot
+        if snapshot is None:
+            return False
+        return any(slot.state in IN_PROGRESS_STATES for slot in snapshot.slots)
+
     def select(self, index: int) -> None:
-        """Select a slot and redraw with the latest snapshot."""
+        """Keys 1-4 / tile tap: a code digit while the dialog is open, else select a slot."""
+        if self.mode_ui.dialog_open:
+            self.mode_ui.digit(index)
+            return
         self.selected = index % TILE_COUNT
         self._redraw()
 
     def step(self, delta: int) -> None:
         """Prev/next and arrow keys. Normal QR: adjacent slot. Detail QR: next page (1->2->3->1)."""
+        if self.mode_ui.dialog_open:
+            return
         if self.qr_mode == 0:
             self.select(self.selected + delta)
             return
@@ -195,11 +207,15 @@ class App:
 
     def toggle_qr_mode(self) -> None:
         """Right canvas tap and key Q. Normal QR -> detail page 1; in detail -> normal QR."""
+        if self.mode_ui.dialog_open:
+            return
         self.qr_mode = 1 if self.qr_mode == 0 else 0
         self._redraw()
 
     def toggle_language(self) -> None:
         """Language button and key L. Switch and save; log a save failure only once."""
+        if self.mode_ui.dialog_open:
+            return
         self.language = other_language(self.language)
         reason = save_language(state_file(), self.language)
         if reason is not None and not self._save_warned:
@@ -209,7 +225,17 @@ class App:
 
     def force_reload(self) -> None:
         """F5: drop the result cache."""
+        if self.mode_ui.dialog_open:
+            return
         self.monitor.force_reload()
+
+    def toggle_mode(self) -> None:
+        """Mode button and key M."""
+        self.mode_ui.toggle()
+
+    def cancel_dialog(self) -> None:
+        """Escape: close the code dialog without a wrong answer."""
+        self.mode_ui.cancel()
 
     def quit(self) -> None:
         """Ctrl+Q (bound only when not in kiosk mode)."""
@@ -220,7 +246,10 @@ class App:
         self._last_snapshot = snapshot
         blink_on = snapshot.tick_count % 2 == 0
         dots = snapshot.tick_count % 3 + 1
-        self.tiles.render(snapshot.slots, self.selected, blink_on, dots, self.now(), self.language)
+        mode = self.mode_ui.view()
+        self.tiles.render(
+            snapshot.slots, self.selected, blink_on, dots, self.now(), self.language, mode
+        )
         slot = snapshot.slots[self.selected] if self.selected < len(snapshot.slots) else None
         strip = strip_text(
             snapshot,
@@ -229,6 +258,7 @@ class App:
             self._resolution,
             self.language,
             self.qr_mode,
+            mode_notice=mode.notice,
         )
         self.qr_view.render(slot, strip, self.qr_mode, self.language)
 
@@ -246,9 +276,12 @@ class App:
                 self.root.after(int(self.config.poll_interval_s * 1000), self.tick)
 
     def run(self) -> None:
-        """Run the first tick and enter the main loop."""
-        self.tick()
-        self.root.mainloop()
+        """Run the first tick and the main loop; reset the mode to scan_only when it ends."""
+        try:
+            self.tick()
+            self.root.mainloop()
+        finally:
+            self.mode_ui.shutdown()
 
 
 def run_app(config: DisplayConfig, options: AppOptions, runner: Runner | None) -> int:

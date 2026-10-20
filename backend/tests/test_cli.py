@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from tests import test_orchestrator
-from usb_sentinel.libs import FakeRunner, InspectionResult
+from usb_sentinel.libs import FakeRunner, InspectionMode, InspectionResult
 from usb_sentinel.libs import cli as cli_mod
 from usb_sentinel.libs import report as report_mod
 from usb_sentinel.libs.device import UnsafeDeviceError
@@ -125,6 +125,61 @@ class TestMain:
         assert len(_result_dirs(tmp_path)) == 1
 
 
+class TestModeOption:
+    """`--mode` reaches inspect() as an InspectionMode; invalid values exit 2 before inspect."""
+
+    def _capture(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str]
+    ) -> tuple[int, list[dict[str, Any]]]:
+        calls: list[dict[str, Any]] = []
+
+        def fake_inspect(*args: object, **kwargs: object) -> InspectionResult:
+            calls.append(dict(kwargs))
+            raise UnsafeDeviceError("stop here")
+
+        monkeypatch.setattr(cli_mod, "inspect", fake_inspect)
+        monkeypatch.setattr(cli_mod, "SubprocessRunner", FakeRunner)
+        config = _write_config(tmp_path, "")
+        monkeypatch.setattr(sys, "argv", ["usb-sentinel", "--config", str(config), *argv])
+        return cli_mod.main(), calls
+
+    def test_default_mode_is_scan_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, calls = self._capture(monkeypatch, tmp_path, ["inspect", "/dev/sda"])
+
+        assert code == 2
+        assert [c["mode"] for c in calls] == [InspectionMode.SCAN_ONLY]
+
+    def test_mode_full_reaches_inspect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, calls = self._capture(
+            monkeypatch, tmp_path, ["inspect", "--mode", "full", "/dev/sda"]
+        )
+
+        assert code == 2
+        assert [c["mode"] for c in calls] == [InspectionMode.FULL]
+
+    def test_invalid_mode_exits_2_before_inspect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        monkeypatch.setattr(cli_mod, "inspect", lambda *a, **k: calls.append(a))
+        config = _write_config(tmp_path, "")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["usb-sentinel", "--config", str(config), "inspect", "--mode", "erase", "/dev/sda"],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli_mod.main()
+
+        assert exc_info.value.code == 2
+        assert calls == []
+
+
 class TestDiagnostics:
     """Diagnostics go through logging (stderr) at ERROR, and the exit code is unchanged."""
 
@@ -135,7 +190,7 @@ class TestDiagnostics:
         caplog: pytest.LogCaptureFixture,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        def refuse(*args: object) -> InspectionResult:
+        def refuse(*args: object, **kwargs: object) -> InspectionResult:
             raise UnsafeDeviceError("not a USB device")
 
         monkeypatch.setattr(cli_mod, "inspect", refuse)
@@ -154,7 +209,7 @@ class TestDiagnostics:
         caplog: pytest.LogCaptureFixture,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        def fail(*args: object) -> InspectionResult:
+        def fail(*args: object, **kwargs: object) -> InspectionResult:
             raise RuntimeError("lsblk failed")
 
         monkeypatch.setattr(cli_mod, "inspect", fail)

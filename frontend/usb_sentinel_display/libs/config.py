@@ -64,6 +64,12 @@ class DisplayConfig:
     # backend SQLite index. None scans only the result directories, without the index ("" in TOML).
     sqlite_path: Path | None = Path("/var/lib/usb-sentinel/db/inspections.sqlite")
     ports: tuple[PortMapping, ...] = ()
+    # Directory of the mode file read by run-docker.sh. None ("" in TOML) disables mode switching.
+    control_dir: Path | None = Path("/run/usb-sentinel-control")
+    # Host directory with config.toml and docker.env (the admin ceiling, read-only here).
+    host_config_dir: Path = Path("/etc/usb-sentinel")
+    # sysfs directory that lists input devices (inputN), watched for BadUSB keyboards.
+    sys_class_input: Path = Path("/sys/class/input")
 
     def __post_init__(self) -> None:
         """Validate types and ranges."""
@@ -73,6 +79,7 @@ class DisplayConfig:
             raise ValueError("sys_block must be a string")
         if self.sqlite_path is not None and not isinstance(self.sqlite_path, Path):
             raise ValueError("sqlite_path must be a string")
+        self._validate_mode_dirs()
         template = _require_str("unit_template", self.unit_template)
         if "{kernel}" not in template:
             raise ValueError("unit_template must contain {kernel}")
@@ -101,6 +108,34 @@ class DisplayConfig:
         paths = [path for p in self.ports for path in p.paths]
         if len(set(paths)) != len(paths):
             raise ValueError("ports.paths must be unique across entries")
+
+    def _validate_mode_dirs(self) -> None:
+        """Validate control_dir, host_config_dir and sys_class_input (design doc 5.4).
+
+        control_dir may be None (switching disabled). Every path must be absolute, and control_dir
+        must not be equal to or inside results_dir or the sqlite directory: the frontend never
+        writes there.
+        """
+        for name in ("host_config_dir", "sys_class_input"):
+            value = getattr(self, name)
+            if not isinstance(value, Path):
+                raise ValueError(f"{name} must be a string")
+            if not value.is_absolute():
+                raise ValueError(f"{name} must be an absolute path")
+        if self.control_dir is None:
+            return
+        if not isinstance(self.control_dir, Path):
+            raise ValueError("control_dir must be a string")
+        if not self.control_dir.is_absolute():
+            raise ValueError("control_dir must be an absolute path")
+        protected = [self.results_dir]
+        if self.sqlite_path is not None:
+            protected.append(self.sqlite_path.parent)
+        for directory in protected:
+            if self.control_dir.is_relative_to(directory):
+                raise ValueError(
+                    "control_dir must not be inside results_dir or the sqlite_path directory"
+                )
 
 
 def default_config_path() -> Path:
@@ -146,12 +181,14 @@ def load_config(path: Path) -> DisplayConfig:
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"unknown key: {sorted(unknown)}")
-    for key in ("results_dir", "sys_block"):
+    for key in ("results_dir", "sys_block", "host_config_dir", "sys_class_input"):
         if key in data:
             data[key] = Path(_require_str(key, data[key]))
-    if "sqlite_path" in data:
-        text = _require_str("sqlite_path", data["sqlite_path"])
-        data["sqlite_path"] = Path(text) if text else None
+    # Only sqlite_path and control_dir accept "" (meaning None: feature disabled).
+    for key in ("sqlite_path", "control_dir"):
+        if key in data:
+            text = _require_str(key, data[key])
+            data[key] = Path(text) if text else None
     if "ports" in data:
         data["ports"] = _parse_ports(data["ports"])
     return DisplayConfig(**data)

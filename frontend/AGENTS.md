@@ -47,6 +47,8 @@ uv run python -m usb_sentinel_display --help
 - USB由来の文字列（シリアル、カーネル名、`result.json`の`vendor`／`model`）を信頼しない。パス結合やargvに直接使わない。表示には`sysfs.sanitize_text()`を通した値だけを使う。
 - カーネル名は`re.fullmatch(r"sd[a-z]{1,3}", name)`を通ったものだけ扱う。`sysfs.py`で弾き、`units.unit_name()`でも再検証する。
 - `result.json`は読み取り専用で開く。結果ディレクトリに書き込まない。
+- 書き込み先の規則。XDG状態ディレクトリ（言語ファイルと誤入力ファイル`erase-strikes`）の外でfrontendが書いてよいのは`control_dir`（既定`/run/usb-sentinel-control`）だけで、書くのは`libs/control.py`（モードファイル`mode`）と`libs/trust.py`（入力機器ベースライン`input-baseline`）に限る。結果ディレクトリとSQLiteファイルは読み取り専用のままにする。`config.py`は`control_dir`が`results_dir`や`sqlite_path`の親の中にあることを拒否する。
+- 検査モードの規則。モードは前回の状態から復元せず、結果からも推定しない。起動時（`start()`）と終了時（`shutdown()`）は必ず`scan_only`を書く。消去モードにするには画面に出るコードの入力が要り、試行はコードを表示する前に誤入力ファイルへ記録する（累計3回でロック）。ブート後の最初の起動より後に現れた入力機器は再起動まで消去モードをロックし、オンなら解除する。信頼に関わる状態（ベースライン、誤入力回数）をプロセスのメモリだけに持たない。`mode_state.py`の`ModeController`がこの規則を実装し、`test_mode_state*.py`で確かめる。
 - `store.py`はSQLiteを`mode=ro`のURIと`PRAGMA query_only = ON`で開き、SELECT以外のSQLを持たない。`inspection_id`は`parse_dir_name()`を通ったものだけを結果ルートと結合し、`output_dir`列は使わない。DBは索引で正本は`result.json`とし、SHA-256が`result_digest`と合わなければ「結果破損」にする。DBが無い・開けない・スキーマ版が新しいときは結果ディレクトリの走査にフォールバックする。
 - `ui/i18n.py`と`ui/strip.py`は`tkinter`をimportしない。`libs/`直下から`ui/`をimportしてよいのは`cli.py`が`ui/i18n.py`を読む1箇所だけ。
 
@@ -64,7 +66,13 @@ usb_sentinel_display/
     result_file.py       結果ディレクトリ名の解析、時刻の変換、result.jsonの要約（parse_summary）
     results.py           ResultStore（結果ディレクトリの走査とSQLite索引の突き合わせ）。result_file.pyの名前を再エクスポート
     result_detail.py     result.jsonのsteps[*].detailsからResultDetail（詳細QRの材料）を組む
-    store.py             inspections.sqliteの読み取り専用索引SqliteIndex（SELECTのみ、mode=ro＋query_only）
+    store.py             inspections.sqliteの読み取り専用索引SqliteIndex（SELECTのみ、mode=ro＋query_only。user_version 2まで読む）
+    ceiling.py           ホストのconfig.tomlとdocker.envを読み、管理者が消去を許しているか（上限）を判定する
+    control.py           control_dirのモードファイルの書き込みとリセット、control_problem()。frontendがcontrol_dirに書く唯一の場所（trust.pyと共に）
+    mode_challenge.py    4桁コード（1〜4）の生成と照合（Challenge）
+    trust.py             入力機器ベースライン（control_dir/input-baseline）と誤入力ファイル（XDG状態ディレクトリ/erase-strikes）
+    mode_view.py         ModeState／ModeView、通知と理由の定数、タイムアウト定数
+    mode_state.py        ModeController（検査モードの状態機械: start／toggle／digit／cancel／heartbeat／shutdown）
     units.py             systemctl showの1回呼び出しと出力解析、Runner
     mapper.py            ディスク・結果・ユニット状態からSlot4つを組む。started行の結び付け
     qr_payload.py        画面用QRペイロード。通常QR（v2）と詳細QR（v3、3枚）の生成と上限処理
@@ -74,22 +82,34 @@ usb_sentinel_display/
       theme.py           寸法定数、判定色、フォント解決、行構成（2行／3行）の判定
       i18n.py            ja／enの文言と判定ラベル、言語の記録（XDG状態ディレクトリ）。tkinterを読まない
       strip.py           情報ストリップの文言を組む純関数。tkinterを読まない
-      tiles.py           タイル4つと◀／言語／▶のCanvas描画、タップ位置の判定、表示文字列の純関数
+      tiles.py           タイル4つ、◀／言語／▶の行、モードボタンの行、タイルのタグ（検査のみ／消去済）のCanvas描画
+      tiles_text.py      タイル・モードボタンの表示文字列と当たり判定の純関数（fit_text、hit_target、tag_key、mode_button）
+      confirm.py         消去モードのコード入力ダイアログ（ConfirmView、confirm_hit）
+      mode_ui.py         ModeControllerとtkの結線（ハートビートのafter、ダイアログの表示と非表示）
+      app_wiring.py      AppOptions、MonitorLike、build_monitor（app.pyの分割）
       qr_view.py         QRキャンバス（PhotoImage、通常QR／詳細QR 1〜3）と情報ストリップ
-      keys.py            キーバインド（1〜4、矢印、F5、L、Q、kioskでないときだけCtrl+Q）
+      keys.py            キーバインド（1〜4、矢印、F5、L、Q、M＝モード切替、Escape＝ダイアログを閉じる、kioskでないときだけCtrl+Q）
       app.py             tkルート、全画面／ウィンドウ、解像度チェック、SIGTERM、tickの結線、run_app()
 tests/                   偽sysfsツリーとFakeRunnerで外部依存を差し替えたテスト
   conftest.py            fake_sysfsフィクスチャ、FakeRunner、make_result()／sample_result()／phase2_result()
   test_i18n.py           ja／enのキー集合の一致、判定ラベル、言語の記録と優先順
   test_theme_font.py     フォント解決。tkfontを差し替え、見つからないときのWARNINGログを確かめる
-  test_store.py          SqliteIndex。backendのスキーマv1を文字列でコピーし、権限なし・壊れたファイル・版違いの理由キーを確かめる
+  test_store.py          SqliteIndex。backendのスキーマv1（CREATE_TABLE_V1）とv2の移行（ALTER_TABLE_V2）を文字列でコピーし、権限なし・壊れたファイル・版違いの理由キーを確かめる
+  test_ceiling.py／test_control.py／test_mode_challenge.py／test_trust.py  上限・制御ファイル・コード・信頼状態の単体テスト。test_control.pyはscripts/run-docker.shのMODE_TTL_Sを読み、HEARTBEAT_S*3 < TTLを確かめる
+  test_mode_state.py／test_mode_state_trust.py／test_mode_state_stopping.py  ModeControllerの状態機械（Fakesは最初のファイルが持つ）
+  test_drive_tag.py      result_file.drive_tag()（検査のみ／消去済）
+  test_tiles_hit.py      hit_target／fit_text／tag_key／mode_button／confirm_hitの境界
+  test_gui_confirm.py／test_gui_mode.py／test_gui_mode_app.py／test_gui_mode_lifecycle.py  @pytest.mark.gui。ダイアログ、モードボタン、Appの結線と終了時のリセット
+  test_dev_scripts.py    scripts/fixtures_mode.pyとscripts/dev_mode_scenes.py、make-fixtures.pyが書くdisplay.toml
   test_store_readonly.py SqliteIndexが読み取り専用である証明（バイト列不変、mode=ro、query_only）
   test_gui_smoke.py      @pytest.mark.gui。QrView／TilesView／キー束縛。tk.Tk()が作れない環境では自動skip
   test_gui_app.py        @pytest.mark.gui。Appのtick結線・QRモード・言語切替。材料はtest_gui_smokeから借りる
   （300行を超えたテストはtest_collect.py／test_result_detail.py／test_qr_detail.py／test_qr_detail_limits.py／test_mapper_update.py／test_monitor_flow.pyに分け、材料は元のファイルからimportする）
 scripts/                 開発用スクリプト（パッケージには含めない。assertを許可）
-  make-fixtures.py       偽sysfsツリーとサンプル結果、display.tomlを出力先に作る
-  dev-screenshot.py      Appをウィンドウで起動しscreencaptureで480x320を撮る（macOS用）
+  make-fixtures.py       偽sysfsツリーとサンプル結果、display.tomlを出力先に作る（--ceiling、--strikes）
+  fixtures_mode.py       make-fixtures.pyの分割。control/、host/、input/、state/と3つのモードキーを作る
+  dev-screenshot.py      Appをウィンドウで起動しscreencaptureで480x320を撮る（macOS用。--mode-scene、--code）
+  dev_mode_scenes.py     dev-screenshot.pyのモードシーン（none／scan_only／confirm／full／locked／lockout）
 deploy/
   usb-sentinel-display.desktop   XDG autostart用。--offline --frozen --no-syncと--kiosk付き
   display.example.toml           設定の全キーと英語コメント
@@ -106,7 +126,8 @@ deploy/
 - sysfsと結果ディレクトリは`tmp_path`に作る。`tests/fixtures/`に結果ディレクトリを置かない（ルートの`.gitignore`が`results/`を無視する）。
 - `tk.Tk()`を必要とするテストは`@pytest.mark.gui`を付け、`TclError`なら`pytest.skip`する。
 - 境界値と異常系（権限なし、ディレクトリ不在、切れたJSON、タイムアウト）のテストを含める。
-- SQLiteのテストは`backend/`をimportせず、`tests/test_store.py`の`CREATE_TABLE_V1`（backendの`schema.py` v1の文字列コピー）で`tmp_path`にDBを作る。backendがスキーマ版を上げたらこのコピーと`EXPECTED_SCHEMA_VERSION`も更新する。
+- SQLiteのテストは`backend/`をimportせず、`tests/test_store.py`の`CREATE_TABLE_V1`と`ALTER_TABLE_V2`（backendの`schema.py`の文字列コピー）で`tmp_path`にDBを作る。backendがスキーマ版を上げたらこのコピーと`EXPECTED_SCHEMA_VERSION`も更新する。
+- `tk.Tk()`を作るヘルパーは、destroyする前に少なくとも1回`update()`する（macOSのTkでは、イベントを処理せずに破棄したルートがあると後続の`event_generate()`がsegfaultする）。
 
 ## やらないこと
 

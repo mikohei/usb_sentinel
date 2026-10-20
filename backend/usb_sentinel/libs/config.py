@@ -120,6 +120,8 @@ class SpeedConfig:
 class Config:
     results_dir: Path = Path("/var/lib/usb-sentinel/results")
     mount_root: Path = Path("/run/usb-sentinel/mnt")
+    # Host ceiling for destructive steps (f3, fio). False forces scan_only whatever
+    # `inspect --mode` requests; True only allows `--mode full` to run them.
     allow_destructive: bool = False
     hash_inventory: bool = True
     # Time limit for building the hash inventory (seconds). Not a table because

@@ -16,6 +16,14 @@ from .sysfs import sanitize_text
 # Result directory name: <timestamp>-<serial>[-<6 digits>].
 DIR_NAME_RE = re.compile(r"^(\d{8}T\d{6}Z)-(.+?)(?:-(\d{6}))?$")
 RESULT_FILE = "result.json"
+# Values of result.json `mode` (backend InspectionMode). Anything else is treated as unknown.
+MODES: frozenset[str] = frozenset({"scan_only", "full"})
+# Steps that write to the drive, and the statuses meaning they did not run.
+_DESTRUCTIVE_STEPS = frozenset({"capacity", "speed"})
+_NOT_RUN = frozenset({"skipped", "not_implemented"})
+# drive_tag() values; the UI maps them to mode.tag_<value>.
+TAG_ERASED = "erased"
+TAG_SCAN = "scan"
 
 
 def parse_dir_name(name: str) -> tuple[str, str] | None:
@@ -106,6 +114,7 @@ def parse_summary(
         return None
     port_path = device.get("port_path")
     finished_at = data.get("finished_at")
+    mode = data.get("mode")
     return ResultSummary(
         dir_name=dir_name,
         path=path,
@@ -126,4 +135,18 @@ def parse_summary(
         malware_count=_malware_count(steps),
         digest=digest,
         detail=parse_detail(data),
+        mode=mode if isinstance(mode, str) and mode in MODES else None,
     )
+
+
+def drive_tag(summary: ResultSummary) -> str | None:
+    """What the inspection did to the drive (design doc 3.9): "erased", "scan" or None.
+
+    The step statuses are checked before the mode, so the tag stays right even if a destructive
+    step ran in scan-only mode. An `error` counts as erased: f3/fio may have written part of
+    the drive before failing.
+    """
+    for name, status in summary.steps:
+        if name in _DESTRUCTIVE_STEPS and status not in _NOT_RUN:
+            return TAG_ERASED
+    return TAG_SCAN if summary.mode is not None else None

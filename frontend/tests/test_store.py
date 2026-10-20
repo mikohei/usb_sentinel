@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS inspections (
     updated_at             TEXT NOT NULL
 )
 """
+# Copy of the v2 migration from backend schema.py (SCHEMA_VERSION = 2): the inspection mode.
+ALTER_TABLE_V2 = "ALTER TABLE inspections ADD COLUMN mode TEXT"
 
 STARTED_1 = "2025-06-01T12:00:00.123456+00:00"
 STARTED_2 = "2025-06-01T12:30:00.000001+00:00"
@@ -105,11 +107,13 @@ def db_row(inspection_id: str, **overrides: object) -> dict[str, object]:
     return row
 
 
-def make_db(path: Path, rows: list[dict[str, object]], user_version: int = 1) -> None:
-    """Create the table with CREATE_TABLE_V1, set user_version, and insert rows."""
+def make_db(path: Path, rows: list[dict[str, object]], user_version: int = 2) -> None:
+    """Create the v1 table (plus the v2 column when user_version >= 2) and insert rows."""
     conn = sqlite3.connect(path)
     try:
         conn.execute(CREATE_TABLE_V1)
+        if user_version >= 2:
+            conn.execute(ALTER_TABLE_V2)
         conn.execute(f"PRAGMA user_version = {int(user_version)}")
         for row in rows:
             columns = ", ".join(row)
@@ -131,10 +135,35 @@ class KeepOpenConnection(sqlite3.Connection):
 
 
 class TestSchemaVersion:
-    def test_expected_version_is_one(self) -> None:
-        """The readable version equals backend SCHEMA_VERSION (1); CREATE_TABLE_V1 copies it."""
-        assert EXPECTED_SCHEMA_VERSION == 1
+    def test_expected_version_is_two(self) -> None:
+        """The readable version equals backend SCHEMA_VERSION (2): v1 table plus the mode column."""
+        assert EXPECTED_SCHEMA_VERSION == 2
         assert "CREATE TABLE IF NOT EXISTS inspections" in CREATE_TABLE_V1
+        assert ALTER_TABLE_V2 == "ALTER TABLE inspections ADD COLUMN mode TEXT"
+
+    def test_make_db_v2_has_mode_column(self, tmp_path: Path) -> None:
+        db = tmp_path / "db.sqlite"
+        make_db(db, [db_row(NAME_1, mode="full")])
+        conn = sqlite3.connect(db)
+        try:
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(inspections)")]
+            assert "mode" in columns
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        finally:
+            conn.close()
+
+    def test_v1_db_still_read(self, tmp_path: Path) -> None:
+        """A database left by the old backend (user_version 1, no mode column) is still read."""
+        db = tmp_path / "db.sqlite"
+        make_db(db, [db_row(NAME_1)], user_version=1)
+        conn = sqlite3.connect(db)
+        try:
+            assert "mode" not in [row[1] for row in conn.execute("PRAGMA table_info(inspections)")]
+        finally:
+            conn.close()
+        rows, reason = SqliteIndex(db).query(STARTED_1)
+        assert reason is None
+        assert [r.inspection_id for r in rows] == [NAME_1]
 
     def test_query_columns_match_dbrow(self) -> None:
         """The SELECT column order matches the DbRow field order."""
@@ -194,9 +223,9 @@ class TestQuery:
         assert SqliteIndex(tmp_path / "none.sqlite").query(STARTED_1) == ([], NOTICE_DB_MISSING)
 
     def test_newer_schema(self, tmp_path: Path) -> None:
-        """user_version 2 gives db_schema_new (falls back to scanning even if columns grew)."""
+        """user_version 3 gives db_schema_new (falls back to scanning even if columns grew)."""
         db = tmp_path / "db.sqlite"
-        make_db(db, [db_row(NAME_1)], user_version=2)
+        make_db(db, [db_row(NAME_1)], user_version=3)
         assert SqliteIndex(db).query(STARTED_1) == ([], NOTICE_DB_SCHEMA_NEW)
 
     def test_empty_file_is_missing(self, tmp_path: Path) -> None:

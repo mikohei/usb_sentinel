@@ -12,6 +12,8 @@ PORT_PATH_RE = re.compile(r"/(\d+-[\d.]+):\d+\.\d+/")
 USB_BUS_RE = re.compile(r"/usb\d+/")
 # Kernel names handled. USB mass storage is always sdX (partitions like sdX1 are excluded).
 KERNEL_NAME_RE = re.compile(r"sd[a-z]{1,3}")
+# Input device names under /sys/class/input (inputN; event*/mouse* are their nodes, ignored).
+INPUT_NAME_RE = re.compile(r"input[0-9]{1,6}")
 SERIAL_READ_LIMIT = 256
 
 
@@ -53,6 +55,23 @@ def boot_time() -> float | None:
     except (OSError, ValueError, IndexError):
         return None
     return None
+
+
+def list_input_devices(sys_class_input: Path) -> frozenset[str] | None:
+    """Return the inputN names under sys_class_input, or None when the directory is unreadable.
+
+    Args:
+        sys_class_input: Directory equivalent to /sys/class/input.
+
+    Returns:
+        Names matching input[0-9]{1,6}. None on any OSError (missing, no permission); the caller
+        treats None as "cannot watch input devices". Never raises and never logs (called often).
+    """
+    try:
+        with os.scandir(sys_class_input) as entries:
+            return frozenset(e.name for e in entries if INPUT_NAME_RE.fullmatch(e.name))
+    except OSError:
+        return None
 
 
 def _read_serial(port_dir: Path) -> str:

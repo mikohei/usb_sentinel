@@ -137,16 +137,16 @@ class TestNotices:
         monitor.store = store
         assert monitor.tick().notice == NOTICE_RESULTS_MISSING
 
-    @pytest.mark.parametrize("kind", ["missing", "garbage", "schema2"])
+    @pytest.mark.parametrize("kind", ["missing", "garbage", "schema3"])
     def test_broken_index_falls_back_without_exception(self, tmp_path: Path, kind: str) -> None:
-        """Missing, corrupt, or schema-v2 DB: tick() never raises; returns records and a notice."""
+        """Missing, corrupt, or schema-v3 DB: tick() never raises; returns records and a notice."""
         root = tmp_path / "results"
         make_result(root, "20250601T120000Z-ABC123", sample_result(port_path="1-1.3"), 1100.0)
         db = tmp_path / "inspections.sqlite"
         if kind == "garbage":
             db.write_bytes(b"garbage" * 100)
-        elif kind == "schema2":
-            make_db(db, [], user_version=2)
+        elif kind == "schema3":
+            make_db(db, [], user_version=3)
         disks = [AttachedDisk("sda", "1-1.3", "ABC123", 1000.0)]
         monitor = build(tmp_path, list_disks=static(disks))
         monitor.store = ResultStore(root, index=SqliteIndex(db))
@@ -157,7 +157,7 @@ class TestNotices:
             == {
                 "missing": NOTICE_DB_MISSING,
                 "garbage": NOTICE_DB_OPEN_FAILED,
-                "schema2": NOTICE_DB_SCHEMA_NEW,
+                "schema3": NOTICE_DB_SCHEMA_NEW,
             }[kind]
         )
         assert snap.slots[0].state is SlotState.DONE

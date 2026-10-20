@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from tests.test_store import _completed, _started
-from usb_sentinel.libs import StepResult, StepStatus
+from usb_sentinel.libs import InspectionMode, StepResult, StepStatus
 from usb_sentinel.libs.report.json_report import digest, to_json
 from usb_sentinel.libs.store import row_from_result
 
@@ -42,6 +42,15 @@ class TestRowFromResult:
         assert row["output_dir"] == payload["output_dir"]
         assert row["inspection_id"] == Path(payload["output_dir"]).name
         assert row["result_digest"] == digest(result)
+        assert row["mode"] == payload["mode"] == "scan_only"
+
+    def test_mode_full_is_the_enum_value(self, tmp_path: Path) -> None:
+        result = _completed(tmp_path)
+        result.mode = InspectionMode.FULL
+
+        row = row_from_result(result, digest(result))
+
+        assert row["mode"] == "full"
 
     def test_missing_steps_and_keys_become_none(self, tmp_path: Path) -> None:
         """Fill with None when a step is missing or details lacks a key (ERROR path)."""

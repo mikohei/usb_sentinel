@@ -43,6 +43,7 @@ usb_sentinelが出すQRコードの中身と、`result.json`・Pi側SQLiteとの
 |---|---|---|---|
 | `v` | int | — | `1`→`3` |
 | `verdict` | str | `verdict`（判定名の文字列。第6.1節） | — |
+| `mode` | str | `mode`: `scan_only`／`full`。ホストの上限を適用した後に実際に走ったモード（第6.9節）。省略規則で削られない | 追加（検査モード切替） |
 | `serial` | str | `device.serial` | — |
 | `kernel_name` | str | `device.kernel_name`（`sda`など） | 追加 |
 | `port_path` | str \| null | `device.port_path`（`1-1.3`など） | 追加 |
@@ -154,6 +155,9 @@ frontendが通常QRの次のページとして出す。お薬手帳のQR（JAHIS
 | `e` | int | `elapsed_s`を整数秒に丸めた値 | 6 |
 | `m` | int | マルウェア検知数 | 4 |
 | `dv` | int \| null | ClamAV DBバージョン（`db_version`を整数化。失敗なら`null`） | 6 |
+| `md` | str \| null | 検査モード（第6.9節）。`s`＝`scan_only`、`f`＝`full`、`result.json`に`mode`が無ければ（切替導入前の結果）`null` | 1 |
+
+1枚目のバイト予算: ヘッダー、32文字のシリアル、`k`、6桁の`e`、4桁の`m`、6桁の`dv`で最悪137バイトだった。`md`は`,"md":"s"`の10バイトを足すので最悪147バイトになり、`s`を切らずに上限150バイトに収まる。
 
 ### 5.3 2枚目（容量とデバイス）
 
@@ -335,6 +339,16 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 
 例: `nominal_bytes`を設定し`allow_destructive = false`で申告容量が超過した検査は`["c:over", "c:skipped", "s:skipped"]`になる。
 
+### 6.9 検査モード（`md`、`mode`）
+
+| `md` | `mode`（`result.json`、ファイル用QR、SQLite） | 意味 |
+|---|---|---|
+| `s` | `scan_only` | ClamAVスキャンとハッシュ台帳だけ。容量・速度は`SKIPPED`（「Inspection mode is scan_only」）。ドライブのデータは残る |
+| `f` | `full` | ホストが消去を許し、挿入時にディスプレイが「検査＋消去」だった。容量・速度が走った（または別の理由で失敗した） |
+| `null` | 無し | 切替導入前に書かれた`result.json` |
+
+モードはホストの上限を適用した後の値である（`allow_destructive = false`なら`scan_only`に強制）。`f`は破壊的ステップに到達できたことを示し、書き込んだことを保証しない。
+
 ## 7. `result.json`との対応
 
 詳細QRのキーを基準に並べる。`…details`は`steps[]`のうち該当ステップの`details`。
@@ -350,6 +364,7 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 | シリアル | `s`、`k` | `s`、`k` | `serial`、`kernel_name` | `device.serial`、`device.kernel_name` | `serial`、`kernel_name` | — |
 | ポートパス | — | — | `port_path` | `device.port_path` | `port_path` | — |
 | 判定 | `r` | `r` | `verdict` | `verdict` | `verdict`、`verdict_code` | — |
+| 検査モード | `md`（1文字） | — | `mode` | `mode` | `mode` | — |
 | ステップ状態 | — | `st` | `steps` | `steps[].status` | `step_*` | — |
 | マルウェア検知数 | `m` | `n` | `malware_count` | `len(steps[malware].details.detections)` | `malware_count` | 件 |
 | ClamAV DB版 | `dv` | — | `clamav_db` | `…details.database.db_version` | `clamav_db_version` | — |
@@ -377,7 +392,7 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 
 ## 8. SQLite（Pi側）との対応
 
-backendは検査1件につき`/var/lib/usb-sentinel/db/inspections.sqlite`の`inspections`テーブルへ1行を書く。開始時に`state = 'started'`で挿入し、`result.json`を書いた後に全列を埋めて`state = 'completed'`に更新する。`result.json`が正本で、DBは一覧・検索のための索引である。スキーマ版は`PRAGMA user_version`（現在`1`）で管理し、以降の版では列の追加だけを行う（削除・改名はしない）。
+backendは検査1件につき`/var/lib/usb-sentinel/db/inspections.sqlite`の`inspections`テーブルへ1行を書く。開始時に`state = 'started'`で挿入し、`result.json`を書いた後に全列を埋めて`state = 'completed'`に更新する。`result.json`が正本で、DBは一覧・検索のための索引である。スキーマ版は`PRAGMA user_version`（現在`2`）で管理し、以降の版では列の追加だけを行う（削除・改名はしない）。版2は`ALTER TABLE inspections ADD COLUMN mode TEXT`で`mode`列を足す。移行は`BEGIN IMMEDIATE`の中で行い、2つのコンテナが同時にDBを開いても二重に適用されない。
 
 ### 8.1 列
 
@@ -386,6 +401,7 @@ backendは検査1件につき`/var/lib/usb-sentinel/db/inspections.sqlite`の`in
 | `inspection_id` | TEXT 主キー | 結果ディレクトリ名（`<timestamp>-<serial>`） |
 | `state` | TEXT | `started` / `completed` |
 | `verdict`、`verdict_code` | TEXT | 判定名と1文字コード（完了時に入る。開始行はNULL） |
+| `mode` | TEXT | `scan_only`／`full`（第6.9節）。開始行の時点で入る。`user_version` 2より前に書かれた行はNULL |
 | `serial`、`kernel_name`、`port_path`、`vendor`、`model` | TEXT | `result.json`の`device.*` |
 | `started_at` | TEXT | ISO 8601（UTC） |
 | `started_compact` | TEXT | `YYYYmmddTHHMMSSZ`（通常QR・詳細QRの`t`と同じ） |
@@ -476,6 +492,9 @@ Pi側の列（第8.1節）をそのまま持ち、ケース情報を列として
 | 通常QR v:2 | 画面 | 第2期。`r`に`C`（Counterfeit Suspected）を追加。形式は不変 |
 | 詳細QR v:3 | 画面 | 第2期で新設。3枚固定 |
 | SQLite `user_version` 1 | `inspections.sqlite` | 第2期で新設 |
+| ファイル用QR v:3 | `result-qr.png` | 検査モード切替。`verdict`の後に`mode`（`scan_only`／`full`）を追加。`v`は`3`のまま |
+| 詳細QR v:3 1枚目 | 画面 | 検査モード切替。`dv`の後に`md`（`s`／`f`／`null`）を追加。最悪147バイト |
+| SQLite `user_version` 2 | `inspections.sqlite` | 検査モード切替。`mode`列。backendとfrontendは同時に配備する。古いfrontendは`user_version` 2を拒否して結果ディレクトリの走査にフォールバックする |
 
 - 読み取りアプリは`v`で分岐し、v:1のファイル用QRも読めるようにしておく（第2期より前の結果ディレクトリが残っている）。v:1には`truncated`キーが無いことがあるので、無ければ`false`と解釈する。
 - ファイル用QR v:3は、将来キーを足すときも既存キーの意味を変えない。読み取りアプリは未知のキーを無視し、既知のキーが無ければ`null`扱いにする。

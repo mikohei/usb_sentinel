@@ -20,7 +20,7 @@ from tests.test_orchestrator import (
     _rw_mount_calls,
     _statuses,
 )
-from usb_sentinel.libs import Config, FakeRunner, StepStatus, Verdict, inspect
+from usb_sentinel.libs import Config, FakeRunner, InspectionMode, StepStatus, Verdict, inspect
 from usb_sentinel.libs.config import SpeedConfig
 from usb_sentinel.libs.runner import CommandResult
 from usb_sentinel.libs.steps import capacity as capacity_mod
@@ -51,7 +51,12 @@ class TestInspectDestructive:
         still_mounted["blockdevices"][0]["children"][0]["mountpoint"] = "/mnt/sda1"
         full_runner.register(["lsblk"], stdout=json.dumps(still_mounted))
 
-        result = inspect(full_runner, replace(config, allow_destructive=True), "/dev/sda")
+        result = inspect(
+            full_runner,
+            replace(config, allow_destructive=True),
+            "/dev/sda",
+            mode=InspectionMode.FULL,
+        )
 
         capacity = result.step("capacity")
         assert capacity is not None
@@ -72,7 +77,7 @@ class TestInspectDestructive:
             speed=SpeedConfig(nominal_read_mb_s=50.0, nominal_write_mb_s=10.0),
         )
 
-        result = inspect(full_runner, enabled, "/dev/sda")
+        result = inspect(full_runner, enabled, "/dev/sda", mode=InspectionMode.FULL)
 
         assert _statuses(result)["capacity"] is StepStatus.PASS
         assert _statuses(result)["speed"] is StepStatus.PASS
@@ -100,7 +105,7 @@ class TestInspectDestructive:
             speed=SpeedConfig(nominal_read_mb_s=50.0, nominal_write_mb_s=10.0),
         )
 
-        result = inspect(full_runner, enabled, "/dev/sda")
+        result = inspect(full_runner, enabled, "/dev/sda", mode=InspectionMode.FULL)
 
         assert [s.name for s in result.steps] == ["malware", "hash_inventory", "capacity", "speed"]
         for step in result.steps:
@@ -145,7 +150,12 @@ class TestInspectDestructive:
 
         monkeypatch.setattr(full_runner, "run", run)
 
-        result = inspect(full_runner, replace(config, allow_destructive=True), "/dev/sda")
+        result = inspect(
+            full_runner,
+            replace(config, allow_destructive=True),
+            "/dev/sda",
+            mode=InspectionMode.FULL,
+        )
 
         capacity = result.step("capacity")
         speed = result.step("speed")
@@ -206,7 +216,7 @@ class TestAdvertisedCheck:
         monkeypatch.setattr(capacity_mod, "DEFAULT_STATVFS", lambda _p: make_statvfs())
         enabled = _with_nominal(config, 29_000_000_000, allow_destructive=True)
 
-        result = inspect(full_runner, enabled, "/dev/sda")
+        result = inspect(full_runner, enabled, "/dev/sda", mode=InspectionMode.FULL)
 
         assert _statuses(result)["capacity"] is StepStatus.FAIL
         # The speed step also runs (no nominal speed is set, so the verdict is SKIPPED, but fio

@@ -15,9 +15,17 @@ from typing import Any
 
 import pytest
 
-from usb_sentinel.libs import Config, DeviceInfo, InspectionResult, StepResult, StepStatus, Verdict
+from usb_sentinel.libs import (
+    Config,
+    DeviceInfo,
+    InspectionMode,
+    InspectionResult,
+    StepResult,
+    StepStatus,
+    Verdict,
+)
 from usb_sentinel.libs.store import NullStore, SqliteStore, store_for
-from usb_sentinel.libs.store.schema import SCHEMA_VERSION
+from usb_sentinel.libs.store.schema import CREATE_INDEXES, CREATE_TABLE, SCHEMA_VERSION
 
 POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="file modes are POSIX only")
 
@@ -161,11 +169,11 @@ class TestSchema:
     def test_first_open_creates_schema(
         self, store: SqliteStore, db_path: Path, tmp_path: Path
     ) -> None:
-        """The first connection sets user_version=1 and creates the inspections table and five
-        indexes."""
+        """The first connection sets user_version=2 and creates the inspections table (with the
+        v2 `mode` column) and five indexes."""
         assert store.record_started(_started(tmp_path)) is None
 
-        assert _pragma(db_path, "user_version") == SCHEMA_VERSION == 1
+        assert _pragma(db_path, "user_version") == SCHEMA_VERSION == 2
         conn = sqlite3.connect(str(db_path))
         try:
             tables = {
@@ -177,9 +185,11 @@ class TestSchema:
                     "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'"
                 )
             }
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(inspections)")}
         finally:
             conn.close()
         assert tables == {"inspections"}
+        assert "mode" in columns
         assert indexes == {
             "idx_inspections_started",
             "idx_inspections_serial",
@@ -198,18 +208,48 @@ class TestSchema:
     ) -> None:
         """Do not write to a DB with a newer user_version; return a reason string."""
         conn = sqlite3.connect(str(db_path))
-        conn.execute("PRAGMA user_version = 2")
+        conn.execute("PRAGMA user_version = 3")
         conn.close()
 
         failure = store.record_started(_started(tmp_path))
 
         assert failure is not None
-        assert "schema version 2" in failure
+        assert "schema version 3" in failure
         conn = sqlite3.connect(str(db_path))
         try:
             assert conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] == 0
         finally:
             conn.close()
+
+    def test_v1_db_migrates_to_v2_with_null_mode_on_old_rows(
+        self, store: SqliteStore, db_path: Path, tmp_path: Path
+    ) -> None:
+        """A DB created with the v1 statements and one row reaches user_version 2; the old row
+        has NULL mode, and a new row records its mode."""
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(CREATE_TABLE)
+            for sql in CREATE_INDEXES:
+                conn.execute(sql)
+            conn.execute(
+                "INSERT INTO inspections (inspection_id, state, serial, kernel_name, started_at,"
+                " started_compact, output_dir, created_at, updated_at)"
+                " VALUES ('old', 'started', 'S', 'sda', ?, '20240101T000000Z', '/x', ?, ?)",
+                (STARTED_AT, STARTED_AT, STARTED_AT),
+            )
+            conn.execute("PRAGMA user_version = 1")
+            conn.commit()
+        finally:
+            conn.close()
+
+        started = _started(tmp_path)
+        started.mode = InspectionMode.FULL
+        assert store.record_started(started) is None
+
+        assert _pragma(db_path, "user_version") == 2
+        rows = {r["inspection_id"]: r for r in _rows(db_path)}
+        assert rows["old"]["mode"] is None
+        assert rows[INSPECTION_ID]["mode"] == "full"
 
     def test_corrupt_file_returns_reason_without_raising(
         self, store: SqliteStore, db_path: Path, tmp_path: Path

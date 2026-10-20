@@ -9,6 +9,9 @@ NEXT_KEYS = ("<Right>", "<Down>", "<KP_Right>", "<KP_Down>")
 # Phase-2 keys. L switches language; Q toggles normal QR/detail QR.
 LANGUAGE_KEYS = ("<Key-l>", "<Key-L>")
 QR_MODE_KEYS = ("<Key-q>", "<Key-Q>")
+# Inspection mode: M toggles (or closes the code dialog); Escape cancels the dialog.
+MODE_KEYS = ("<Key-m>", "<Key-M>")
+CANCEL_KEYS = ("<Escape>",)
 
 
 class KeyTarget(Protocol):
@@ -38,9 +41,17 @@ class KeyTarget(Protocol):
         """Toggle between normal QR and detail QR (Q)."""
         ...
 
+    def toggle_mode(self) -> None:
+        """Toggle the inspection mode or close its dialog (M)."""
+        ...
+
+    def cancel_dialog(self) -> None:
+        """Close the inspection-mode dialog without a wrong answer (Escape)."""
+        ...
+
 
 def bind_keys(root: tk.Tk, target: KeyTarget, *, kiosk: bool) -> None:
-    """Register key bindings from design doc 1.4 plus phase 2 (L, Q).
+    """Register key bindings from design doc 1.4 plus phase 2 (L, Q) and the mode keys (M, Esc).
 
     Args:
         root: Top-level widget to bind to.
@@ -63,6 +74,10 @@ def bind_keys(root: tk.Tk, target: KeyTarget, *, kiosk: bool) -> None:
         root.bind(key, lambda _e: target.toggle_language())
     for key in QR_MODE_KEYS:
         root.bind(key, lambda _e: target.toggle_qr_mode())
+    for key in MODE_KEYS:
+        root.bind(key, lambda _e: target.toggle_mode())
+    for key in CANCEL_KEYS:
+        root.bind(key, lambda _e: target.cancel_dialog())
     if not kiosk:
         # Tk prefers the more specific <Control-q> over <Key-q>, so binding both is fine.
         root.bind("<Control-q>", lambda _e: target.quit())

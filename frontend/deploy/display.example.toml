@@ -51,6 +51,25 @@ language = "en"
 # An empty string "" disables it so only the scan is used (for development machines).
 sqlite_path = "/var/lib/usb-sentinel/db/inspections.sqlite"
 
+# Directory of the inspection-mode file read by scripts/run-docker.sh at each insertion.
+# The display writes "<mode> <epoch>" there when the operator switches between
+# "Scan only" and "Scan + erase" with the mode button (bottom left) or the M key.
+# The host honours "full" only while the stamp is at most 20 s old, and the display
+# resets to scan only at every start, so erase mode is never restored after a restart.
+# An empty string "" disables switching: the button shows "Scan only (locked)".
+# Must be an absolute path outside results_dir and the sqlite_path directory.
+control_dir = "/run/usb-sentinel-control"
+
+# Host directory with the backend config.toml and docker.env. They are only read, to
+# learn whether the administrator allows erasing at all (allow_destructive = true and
+# USB_SENTINEL_DEVICE_ACCESS=rw). When not, the mode button is locked.
+host_config_dir = "/etc/usb-sentinel"
+
+# sysfs directory that lists input devices (inputN). The first start after boot records
+# the devices present; a new input device appearing later (for example a USB keyboard
+# plugged in while the station runs) locks erase mode until the next reboot.
+sys_class_input = "/sys/class/input"
+
 # Mapping from physical ports to sysfs port paths. Entries fill tiles 1 to 4 in the
 # order they appear in this file.
 # Measure each unit with `calibrate` and fill it in. It is empty by default, so

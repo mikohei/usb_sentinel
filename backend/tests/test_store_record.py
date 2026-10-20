@@ -14,6 +14,7 @@ import pytest
 
 from tests import test_store
 from tests.test_store import INSPECTION_ID, POSIX_ONLY, STARTED_AT, _completed, _rows, _started
+from usb_sentinel.libs import InspectionMode
 from usb_sentinel.libs.report.json_report import digest
 from usb_sentinel.libs.store import SqliteStore
 
@@ -40,7 +41,19 @@ class TestRecord:
         assert row["output_dir"] == str(tmp_path / INSPECTION_ID)
         assert row["verdict"] is None
         assert row["result_digest"] is None
+        assert row["mode"] == "scan_only"
         assert row["created_at"] == row["updated_at"]
+
+    def test_record_started_stores_full_mode(
+        self, store: SqliteStore, db_path: Path, tmp_path: Path
+    ) -> None:
+        """The mode is known at start, so the started row already carries it."""
+        started = _started(tmp_path)
+        started.mode = InspectionMode.FULL
+
+        assert store.record_started(started) is None
+
+        assert _rows(db_path)[0]["mode"] == "full"
 
     def test_record_completed_updates_all_columns(
         self, store: SqliteStore, db_path: Path, tmp_path: Path

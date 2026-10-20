@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from usb_sentinel_display.libs import config
+from usb_sentinel_display.libs import ceiling, config, control, mode_view
 from usb_sentinel_display.libs.models import VERDICT_CODES, SlotState
 from usb_sentinel_display.libs.ui import i18n
 from usb_sentinel_display.libs.ui.i18n import (
@@ -18,6 +18,69 @@ from usb_sentinel_display.libs.ui.i18n import (
     text,
     verdict_label,
 )
+
+# Every lock reason and notice the mode controller can put into ModeView (design doc 5.4/5.6).
+MODE_NOTICE_KEYS: tuple[str, ...] = (
+    ceiling.REASON_CEILING_OFF,
+    ceiling.REASON_UNREADABLE,
+    control.REASON_NO_CONTROL,
+    control.REASON_DISABLED,
+    mode_view.LOCKED_NEW_INPUT,
+    mode_view.LOCKED_STRIKE_FILE,
+    mode_view.LOCKED_NO_INPUT_WATCH,
+    mode_view.LOCKED_COOLDOWN,
+    mode_view.LOCKED_TOO_MANY,
+    mode_view.NOTICE_WRONG_CODE,
+    mode_view.NOTICE_WRITE_FAILED,
+    mode_view.NOTICE_RESET_FAILED,
+    mode_view.NOTICE_START_UNKNOWN,
+    mode_view.NOTICE_ERASE_OFF_BUSY,
+    mode_view.NOTICE_CEILING_LOST,
+    mode_view.NOTICE_NEW_INPUT_RESET,
+)
+MODE_LABEL_KEYS: tuple[str, ...] = (
+    "mode.button_scan_only",
+    "mode.button_full",
+    "mode.button_stopping",
+    "mode.button_locked",
+    "mode.tag_scan",
+    "mode.tag_erased",
+    "mode.confirm_title",
+    "mode.confirm_body",
+    "mode.confirm_code",
+    "mode.confirm_hint",
+    "mode.confirm_cancel",
+)
+
+
+class TestModeMessages:
+    def test_every_controller_reason_has_a_text(self) -> None:
+        """Each lock reason / notice the controller emits has a notice.mode.* text in en and ja."""
+        assert len(set(MODE_NOTICE_KEYS)) == 16
+        for lang in i18n.LANGUAGES:
+            for reason in MODE_NOTICE_KEYS:
+                assert text(lang, "notice.mode." + reason)
+
+    def test_no_orphan_mode_notice(self) -> None:
+        """No notice.mode.* text exists without a controller reason that uses it."""
+        expected = {"notice.mode." + reason for reason in MODE_NOTICE_KEYS}
+        present = {key for key in MESSAGES["en"] if key.startswith("notice.mode.")}
+        assert present == expected
+
+    def test_mode_labels_present(self) -> None:
+        """The button, tag and dialog texts exist in both languages (27 keys with the notices)."""
+        for lang in i18n.LANGUAGES:
+            for key in MODE_LABEL_KEYS:
+                assert text(lang, key)
+        mode_keys = {key for key in MESSAGES["en"] if key.startswith("mode.")}
+        assert mode_keys == set(MODE_LABEL_KEYS)
+        assert len(MODE_LABEL_KEYS) + len(MODE_NOTICE_KEYS) == 27
+
+    def test_placeholders(self) -> None:
+        assert text("en", "mode.confirm_code", code="3 1 4 2") == "Code: 3 1 4 2"
+        assert text("ja", "mode.confirm_code", code="3 1 4 2") == "コード: 3 1 4 2"
+        assert text("en", "mode.confirm_hint", n=2).endswith("(2/4)")
+        assert text("ja", "mode.confirm_hint", n=2).endswith("（2/4）")
 
 
 class TestMessages:

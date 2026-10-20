@@ -9,7 +9,7 @@ from .config import DisplayConfig, default_config_path, load_config
 from .monitor import NOTICE_SYSFS_MISSING, NOTICE_SYSFS_PERMISSION
 from .sysfs import SysfsMissingError, SysfsPermissionError, boot_time, list_usb_disks
 
-# ui/__init__.py is empty, so importing i18n does not load the GUI library (tkinter).
+# ui/__init__.py is empty, so importing i18n does not load the GUI library (Tk).
 from .ui.i18n import text
 from .units import Runner, SubprocessRunner
 

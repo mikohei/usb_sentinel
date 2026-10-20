@@ -149,6 +149,22 @@ class TestParseSummary:
         assert summary.detail.capacity_kind == "short"
         assert self.parse_ok(sample_result()).detail == ResultDetail()
 
+    @pytest.mark.parametrize("mode", ["scan_only", "full"])
+    def test_mode_parsed(self, mode: str) -> None:
+        """mode is kept only when it is scan_only or full."""
+        data = sample_result()
+        data["mode"] = mode
+        assert self.parse_ok(data).mode == mode
+
+    @pytest.mark.parametrize("mode", ["erase", "FULL", "", 1, None, True])
+    def test_mode_unknown_is_none(self, mode: object) -> None:
+        data = sample_result()
+        data["mode"] = mode
+        assert self.parse_ok(data).mode is None
+
+    def test_mode_missing_is_none(self) -> None:
+        assert self.parse_ok(sample_result()).mode is None
+
 
 class TestResultStore:
     def test_missing_root(self, tmp_path: Path) -> None:

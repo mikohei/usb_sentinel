@@ -11,11 +11,14 @@ results_dir = "/var/lib/usb-sentinel/results"
 # Root of the temporary directories used for read-only mounts.
 mount_root = "/run/usb-sentinel/mnt"
 
-# The destructive capacity and speed checks run only when this is true.
-# They are reached only after the ClamAV scan and the hash inventory have finished.
-# They erase the drive's data, so keep false when samples are returned to their owner.
-# With the Docker setup, USB_SENTINEL_DEVICE_ACCESS=rw in /etc/usb-sentinel/docker.env
-# is also required.
+# Ceiling for the destructive capacity and speed checks. true means this host MAY
+# erase; false means it never does (the steps are SKIPPED and the display's mode
+# button is locked). Even with true, a drive is erased only when it was inserted
+# while the display showed "Scan + erase" (the operator entered the on-screen code)
+# and /etc/usb-sentinel/docker.env has USB_SENTINEL_DEVICE_ACCESS=rw; run-docker.sh
+# then passes --mode full with the device read-write. Drives inserted in scan-only
+# mode keep their data. The steps are reached only after the ClamAV scan and the
+# hash inventory have finished. Keep false when samples are returned to their owner.
 allow_destructive = false
 
 # Whether to build the file hash inventory (hash-inventory.tsv).

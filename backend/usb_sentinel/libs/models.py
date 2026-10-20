@@ -11,6 +11,17 @@ class StepStatus(StrEnum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
+class InspectionMode(StrEnum):
+    """Mode an inspection ran in after the host ceiling (allow_destructive).
+
+    SCAN_ONLY: malware scan and hash inventory only; FULL: destructive capacity and speed steps
+    were allowed for this drive (whether they ran is shown by the step statuses).
+    """
+
+    SCAN_ONLY = "scan_only"
+    FULL = "full"
+
+
 class Verdict(StrEnum):
     NO_DEFECT = "No Defect"
     MALWARE_DETECTED = "Malware Detected"
@@ -52,6 +63,8 @@ class InspectionResult:
     started_at: str
     finished_at: str = ""
     verdict: Verdict = Verdict.INCONCLUSIVE
+    # Effective inspection mode (requested mode narrowed by allow_destructive).
+    mode: InspectionMode = InspectionMode.SCAN_ONLY
     steps: list[StepResult] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     output_dir: str = ""

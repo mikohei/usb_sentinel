@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -93,7 +94,9 @@ def write_fakes(bindir: Path, fakes: dict[str, str]) -> None:
         path.chmod(0o755)
 
 
-def prepare(tmp_path: Path, extra_fakes: dict[str, str] | None = None) -> InstallRun:
+def prepare(
+    tmp_path: Path, extra_fakes: dict[str, str] | None = None, uv_fake: str = UV_FAKE
+) -> InstallRun:
     """Copy the repo pieces, write the fakes and the fake home; return the paths (code -1)."""
     repo = tmp_path / "repo"
     shutil.copytree(SCRIPTS, repo / "scripts")
@@ -109,7 +112,7 @@ def prepare(tmp_path: Path, extra_fakes: dict[str, str] | None = None) -> Instal
     home = tmp_path / "home"
     (home / ".local" / "bin").mkdir(parents=True)
     uv = home / ".local" / "bin" / "uv"
-    uv.write_text(UV_FAKE)
+    uv.write_text(uv_fake)
     uv.chmod(0o755)
     (tmp_path / "calls.log").touch()
     clamav = tmp_path / "clamav"
@@ -143,9 +146,15 @@ def run_install_all_to_end(
     *,
     cmdline: str | None = None,
     extra_fakes: dict[str, str] | None = None,
+    uv_fake: str = UV_FAKE,
+    before: Callable[[InstallRun], None] | None = None,
 ) -> InstallRun:
-    """Run the copied install-all.sh to its end and collect code, output, log and paths."""
-    run = prepare(tmp_path, extra_fakes)
+    """Run the copied install-all.sh to its end and collect code, output, log and paths.
+
+    before, if given, runs on the prepared sandbox just before the script starts."""
+    run = prepare(tmp_path, extra_fakes, uv_fake)
+    if before is not None:
+        before(run)
     if cmdline is not None:
         run.cmdline.write_text(cmdline)
     result = subprocess.run(

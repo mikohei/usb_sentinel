@@ -33,7 +33,8 @@
 #   3. uv (official installer downloaded and confirmed in step 1)
 #   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs,
 #      erase enabled on the host unless INSTALL_ALLOW_ERASE=0)
-#   5. frontend: uv sync --frozen and a tkinter import check
+#   5. frontend: uv sync --frozen on the system Python (apt's python3-tk, Tk with Xft);
+#      a venv on uv's own Python is rebuilt; tkinter import and Xft checks
 #   6. Display user: usb-sentinel group, GDM autologin, GNOME automount off,
 #      sleep/lock off, display.toml, XDG autostart entry written DISABLED
 #      (Hidden=true) so an aborted run never leaves autostart armed; boot video
@@ -202,7 +203,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 # docker.io: inspection container. fonts-noto-cjk: Japanese UI text ("Noto Sans CJK JP"
 # regular and bold, all the UI uses; fonts-noto-cjk-extra is not needed). fontconfig:
-# fc-cache. python3-tk: fallback when uv's Python lacks tkinter. curl/ca-certificates:
+# fc-cache. python3-tk: tkinter for the system Python
+# the frontend venv uses (its Tk draws Japanese via Xft). curl/ca-certificates:
 # uv download. console-setup: larger text-console font.
 apt-get install -y --no-install-recommends \
     docker.io curl ca-certificates fonts-noto-cjk fontconfig console-setup python3 python3-tk
@@ -242,25 +244,40 @@ USB_SENTINEL_IMAGE="${IMAGE}" bash "${REPO_DIR}/scripts/install-docker.sh"
 
 # ---------------------------------------------------------------- 5. frontend
 log "5/10 Syncing frontend dependencies (the app starts with --offline from now on)"
-run_as_user "${UV_BIN}" sync --frozen --project "${REPO_DIR}/frontend"
+# The venv is built on the system Python so tkinter comes from apt's python3-tk, whose Tk
+# draws with Xft (fontconfig, Japanese fonts). uv's standalone Python has a Tk without Xft.
+# A venv left over from an earlier run on uv's Python is removed and rebuilt.
+readonly SYSTEM_PYTHON=/usr/bin/python3
+readonly FRONTEND_VENV="${REPO_DIR}/frontend/.venv"
+if [[ -f "${FRONTEND_VENV}/pyvenv.cfg" ]] \
+        && ! grep -qx "home = $(dirname "${SYSTEM_PYTHON}")" "${FRONTEND_VENV}/pyvenv.cfg"; then
+    echo "frontend venv: recreating on the system Python (${SYSTEM_PYTHON})"
+    run_as_user rm -rf -- "${FRONTEND_VENV}"
+fi
+run_as_user env UV_PYTHON_PREFERENCE=only-system "${UV_BIN}" sync --frozen \
+    --python "${SYSTEM_PYTHON}" --project "${REPO_DIR}/frontend"
 if run_as_user "${UV_BIN}" run --offline --frozen --no-sync --project "${REPO_DIR}/frontend" \
         python -c "import tkinter" 2>/dev/null; then
-    echo "tkinter: available in uv's Python"
+    echo "tkinter: available in the system Python"
 else
-    warn "tkinter cannot be imported from uv's Python; switch to apt's python3-tk"
-    warn "see frontend/README.md, 'Display setup' step 8, for the alternative .desktop Exec line"
+    warn "tkinter cannot be imported from the system Python; install apt's python3-tk and re-run"
 fi
-# Japanese needs Tk built with Xft (fontconfig fonts). Without it the app warns on screen.
-# The probe needs a display; without one it reports "unknown" and the app check decides.
-TK_FONTSYSTEM="$(run_as_user "${UV_BIN}" run --offline --frozen --no-sync \
-    --project "${REPO_DIR}/frontend" python -c \
-    "import tkinter; r = tkinter.Tk(); print(r.tk.call('::tk::pkgconfig', 'get', 'fontsystem'))" \
+# Japanese needs Tk built with Xft. Checked without a display: libXft among the libraries
+# _tkinter loads (apt's Tk), or Xft symbols inside it (a statically linked Tk).
+TKINTER_SO="$(run_as_user "${UV_BIN}" run --offline --frozen --no-sync \
+    --project "${REPO_DIR}/frontend" python -c "import _tkinter; print(_tkinter.__file__)" \
     2>/dev/null | tail -n 1)" || true
-case "${TK_FONTSYSTEM}" in
-    xft) echo "Tk font system: xft (Japanese fonts via fontconfig)" ;;
-    x11) warn "uv's Python Tk lacks Xft; Japanese text may show as boxes (see README, Japanese font)" ;;
-    *) echo "Tk font system: unknown (no display during install; the app warns on screen if no Japanese font is found)" ;;
-esac
+if [[ -n "${TKINTER_SO}" && -f "${TKINTER_SO}" ]] \
+        && { ldd "${TKINTER_SO}" 2>/dev/null | grep -q libXft \
+            || grep -q XftDrawString "${TKINTER_SO}"; }; then
+    echo "Tk font system: xft (Japanese fonts via fontconfig)"
+else
+    warn "=================================================================="
+    warn "Tk font system: NO Xft in ${TKINTER_SO:-_tkinter of the frontend venv}"
+    warn "Japanese text will show as boxes; the frontend venv is not on apt's python3-tk."
+    warn "Fix: sudo apt-get install python3-tk, then re-run: sudo INSTALL_YES=1 bash scripts/install-all.sh"
+    warn "=================================================================="
+fi
 
 # ---------------------------------------------------------------- 6. display user
 log "6/10 Configuring the display user ${DISPLAY_USER}"

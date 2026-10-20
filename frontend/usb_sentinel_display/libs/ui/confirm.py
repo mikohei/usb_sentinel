@@ -1,13 +1,14 @@
 """Confirmation overlay for erase mode: a random 4-digit code entered with keys or buttons.
 
-Design doc (inspection-mode) 3.6. The Canvas covers the whole 480x320 frame, so taps cannot
-reach the tiles or the QR canvas while it is open. There is no Erase button and Enter does
-nothing; the fourth correct digit confirms.
+Design doc (inspection-mode) 3.6. The Canvas covers the whole frame (480x320 design units at
+the App's scale), so taps cannot reach the tiles or the QR canvas while it is open. There is no
+Erase button and Enter does nothing; the fourth correct digit confirms.
 """
 
 import tkinter as tk
 from collections.abc import Callable
 
+from ..geometry import IDENTITY, Geometry
 from . import theme
 from .i18n import text
 from .theme import DIALOG_CANCEL, DIALOG_KEY_Y, DIALOG_KEYS, SCREEN_H, SCREEN_W, Fonts
@@ -47,19 +48,25 @@ class ConfirmView:
         fonts: Fonts,
         on_digit: Callable[[int], None],
         on_cancel: Callable[[], None],
+        *,
+        geometry: Geometry = IDENTITY,
     ) -> None:
         """Create the hidden Canvas and bind taps.
 
         Args:
-            frame: The 480x320 App frame.
+            frame: The App frame (480x320 design units at the given scale).
             fonts: The resolved font set.
             on_digit: Called with the 0-based button index (left to right).
             on_cancel: Called when the Cancel button is tapped.
+            geometry: Design-unit to device-pixel conversion (drawn in design units and scaled
+                once per show(); taps are converted back).
         """
+        self.geometry = geometry
+        width, height = geometry.frame_size
         self.canvas = tk.Canvas(
             frame,
-            width=SCREEN_W,
-            height=SCREEN_H,
+            width=width,
+            height=height,
             highlightthickness=0,
             bd=0,
             background=theme.COLORS["dialog"],
@@ -72,7 +79,8 @@ class ConfirmView:
 
     def _on_click(self, event: tk.Event) -> None:
         """Dispatch a tap; anything outside the five buttons is ignored."""
-        hit = confirm_hit(int(event.x), int(event.y))
+        geometry = self.geometry
+        hit = confirm_hit(int(geometry.design(event.x)), int(geometry.design(event.y)))
         if hit is None:
             return
         kind, index = hit
@@ -120,7 +128,8 @@ class ConfirmView:
             *BODY_POS,
             text=text(lang, "mode.confirm_body"),
             anchor="n",
-            width=BODY_WIDTH,
+            # The wrap width is the one option Canvas.scale() leaves alone: give it in device px.
+            width=self.geometry.px(BODY_WIDTH),
             justify="center",
             fill=white,
             font=fonts.body,
@@ -150,6 +159,9 @@ class ConfirmView:
                 fill=white,
                 font=fonts.verdict,
             )
+        geometry = self.geometry
+        if not geometry.is_identity:
+            canvas.scale("all", 0, 0, geometry.scale, geometry.scale)
         if not self._visible:
             canvas.place(x=0, y=0)
             self._visible = True

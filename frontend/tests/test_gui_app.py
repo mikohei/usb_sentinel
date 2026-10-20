@@ -123,7 +123,7 @@ class TestStrip:
         def ja(snapshot: Snapshot, selected: int, resolution: tuple[int, int] | None) -> str:
             return strip_text(snapshot, selected, template, resolution, "ja", 0)
 
-        assert ja(Snapshot(slots), 0, (640, 480)) == "画面解像度640x480（480x320を想定）"
+        assert ja(Snapshot(slots), 0, (640, 480)) == "画面解像度640x480（480x320未満）"
         assert ja(Snapshot(slots, error="E"), 0, None) == "内部エラー: E"
         assert (
             ja(Snapshot(slots, error="E", error_repeated=True), 0, None)

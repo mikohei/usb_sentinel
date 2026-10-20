@@ -49,7 +49,38 @@ class TestParser:
         assert isinstance(config, DisplayConfig)
         assert config.results_dir == tmp_path / "results"
         assert options == app_mod.AppOptions(windowed=True, kiosk=False)
+        assert options == app_mod.AppOptions(windowed=True, kiosk=False, scale=None)
         assert runner is None
+
+    def test_scale_is_passed_to_app_options(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--scale 1.5 reaches AppOptions.scale."""
+        from usb_sentinel_display.libs.ui import app as app_mod
+
+        seen: list[object] = []
+        monkeypatch.setattr(
+            app_mod, "run_app", lambda config, options, runner: seen.append(options) or 0
+        )
+        argv = ["--config", str(tmp_path / "none.toml"), "run", "--windowed", "--no-systemctl"]
+        assert main([*argv, "--scale", "1.5"]) == 0
+        assert seen[0] == app_mod.AppOptions(windowed=True, kiosk=False, scale=1.5)
+
+    @pytest.mark.parametrize("value", ["0", "9"])
+    def test_scale_out_of_range_exits_two(
+        self, value: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--scale outside 0.25..8 is an argparse usage error."""
+        with pytest.raises(SystemExit) as info:
+            main(["run", "--windowed", "--scale", value])
+        assert info.value.code == 2
+        assert "--scale must be between 0.25 and 8" in capsys.readouterr().err
+
+    def test_run_help_lists_scale(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit) as info:
+            main(["run", "--help"])
+        assert info.value.code == 0
+        assert "--scale" in capsys.readouterr().out
 
     def test_run_without_no_systemctl_uses_subprocess_runner(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

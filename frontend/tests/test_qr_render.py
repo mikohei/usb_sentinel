@@ -67,3 +67,33 @@ class TestPpm:
         assert side == 265
         assert ppm.startswith(b"P6 265 265 255\n")
         assert len(ppm) == len(b"P6 265 265 255\n") + 265 * 265 * 3
+
+    @pytest.mark.parametrize(("canvas_px", "side"), [(493, 477), (592, 583), (444, 424)])
+    def test_render_scaled_canvas(self, canvas_px: int, side: int) -> None:
+        """The module size is canvas_px // 53, so the side is 53 times that whole number."""
+        ppm, got = render(TYPICAL, canvas_px=canvas_px)
+        assert got == side
+        header = b"P6 %d %d 255\n" % (side, side)
+        assert ppm.startswith(header)
+        assert len(ppm) == len(header) + side * side * 3
+
+    def test_nearest_neighbour_by_byte_replication(self) -> None:
+        """Each module is a run of box identical triplets and each row is repeated box times."""
+        box = 9
+        ppm = matrix_to_ppm([[True, False], [False, True]], box)
+        header = b"P6 18 18 255\n"
+        body = ppm[len(header) :]
+        assert set(body) == {0x00, 0xFF}
+        row_bytes = 2 * box * 3
+        rows = [body[i : i + row_bytes] for i in range(0, len(body), row_bytes)]
+        assert len(rows) == 2 * box
+        assert rows[:box] == [b"\x00" * box * 3 + b"\xff" * box * 3] * box
+        assert rows[box:] == [b"\xff" * box * 3 + b"\x00" * box * 3] * box
+
+    def test_quiet_zone_is_part_of_matrix(self) -> None:
+        """The 4-module quiet zone is in the matrix, so it scales with the modules."""
+        matrix = make_matrix(TYPICAL)
+        assert len(matrix) == 45 + 8
+        for i in (0, 1, 2, 3, -4, -3, -2, -1):
+            assert not any(matrix[i])
+            assert not any(row[i] for row in matrix)

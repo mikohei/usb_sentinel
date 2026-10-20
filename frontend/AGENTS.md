@@ -76,24 +76,26 @@ usb_sentinel_display/
     units.py             systemctl showの1回呼び出しと出力解析、Runner
     mapper.py            ディスク・結果・ユニット状態からSlot4つを組む。started行の結び付け
     qr_payload.py        画面用QRペイロード。通常QR（v2）と詳細QR（v3、3枚）の生成と上限処理
-    qr_render.py         qrcodeの行列からPPMバイト列を作る
+    qr_render.py         qrcodeの行列からPPMバイト列を作る（canvas_pxで1モジュールの画素数を決める。バイト複製なので最近傍）
+    geometry.py          480x320のデザイン単位→実画素の換算（compute_scale、letterbox、Geometry、IDENTITY）。tkinterを読まない
     monitor.py           tick本体（列挙→結果→systemctl→mapper）、例外規則、情報ストリップの通知キー
     ui/                  tkinterに依存する描画層。ここだけがtkinterをimportする
-      theme.py           寸法定数、判定色、フォント解決、行構成（2行／3行）の判定
+      theme.py           寸法定数（デザイン単位）、判定色、フォント解決（Geometryで実画素サイズ）、行構成（2行／3行）の判定
       i18n.py            ja／enの文言と判定ラベル、言語の記録（XDG状態ディレクトリ）。tkinterを読まない
-      strip.py           情報ストリップの文言を組む純関数。tkinterを読まない
+      strip.py           情報ストリップの文言を組む純関数。geometry.pyだけを読み、tkinterもtheme.pyも読まない
       tiles.py           タイル4つ、◀／言語／▶の行、モードボタンの行、タイルのタグ（検査のみ／消去済）のCanvas描画
       tiles_text.py      タイル・モードボタンの表示文字列と当たり判定の純関数（fit_text、hit_target、tag_key、mode_button）
       confirm.py         消去モードのコード入力ダイアログ（ConfirmView、confirm_hit）
       mode_ui.py         ModeControllerとtkの結線（ハートビートのafter、ダイアログの表示と非表示）
-      app_wiring.py      AppOptions、MonitorLike、build_monitor（app.pyの分割）
+      app_wiring.py      AppOptions（--scale）、MonitorLike、choose_scale、build_monitor（app.pyの分割）
       qr_view.py         QRキャンバス（PhotoImage、通常QR／詳細QR 1〜3）と情報ストリップ
       keys.py            キーバインド（1〜4、矢印、F5、L、Q、M＝モード切替、Escape＝ダイアログを閉じる、kioskでないときだけCtrl+Q）
-      app.py             tkルート、全画面／ウィンドウ、解像度チェック、SIGTERM、tickの結線、run_app()
+      app.py             tkルート、全画面／ウィンドウ、画面に合わせた拡大（黒のレターボックス）、解像度チェック、SIGTERM、tickの結線、run_app()
 tests/                   偽sysfsツリーとFakeRunnerで外部依存を差し替えたテスト
   conftest.py            fake_sysfsフィクスチャ、FakeRunner、make_result()／sample_result()／phase2_result()
   test_i18n.py           ja／enのキー集合の一致、判定ラベル、言語の記録と優先順
   test_theme_font.py     フォント解決。tkfontを差し替え、見つからないときのWARNINGログを確かめる
+  test_geometry.py       compute_scale／letterbox／Geometryの数値と、resolution_warningが480x320未満だけ警告すること
   test_store.py          SqliteIndex。backendのスキーマv1（CREATE_TABLE_V1）とv2の移行（ALTER_TABLE_V2）を文字列でコピーし、権限なし・壊れたファイル・版違いの理由キーを確かめる
   test_ceiling.py／test_control.py／test_mode_challenge.py／test_trust.py  上限・制御ファイル・コード・信頼状態の単体テスト。test_control.pyはscripts/run-docker.shのMODE_TTL_Sを読み、HEARTBEAT_S*3 < TTLを確かめる
   test_mode_state.py／test_mode_state_trust.py／test_mode_state_stopping.py  ModeControllerの状態機械（Fakesは最初のファイルが持つ）
@@ -104,6 +106,7 @@ tests/                   偽sysfsツリーとFakeRunnerで外部依存を差し�
   test_store_readonly.py SqliteIndexが読み取り専用である証明（バイト列不変、mode=ro、query_only）
   test_gui_smoke.py      @pytest.mark.gui。QrView／TilesView／キー束縛。tk.Tk()が作れない環境では自動skip
   test_gui_app.py        @pytest.mark.gui。Appのtick結線・QRモード・言語切替。材料はtest_gui_smokeから借りる
+  test_gui_scale.py      @pytest.mark.gui。scale 2.0でのApp（960x640、QR 583px、フォント比）、TilesView／ConfirmViewのタップ換算
   （300行を超えたテストはtest_collect.py／test_result_detail.py／test_qr_detail.py／test_qr_detail_limits.py／test_mapper_update.py／test_monitor_flow.pyに分け、材料は元のファイルからimportする）
 scripts/                 開発用スクリプト（パッケージには含めない。assertを許可）
   make-fixtures.py       偽sysfsツリーとサンプル結果、display.tomlを出力先に作る（--ceiling、--strikes）

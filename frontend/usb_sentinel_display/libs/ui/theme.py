@@ -3,13 +3,14 @@ import tkinter as tk
 from dataclasses import dataclass
 from tkinter import font as tkfont
 
+from ..geometry import DESIGN_H, DESIGN_W, IDENTITY, Geometry
 from ..models import SlotState
 
 logger = logging.getLogger(__name__)
 
-# Dimensions of the screen and each area (design doc 1.1).
-SCREEN_W = 480
-SCREEN_H = 320
+# Dimensions of the design (design units; see geometry.py) and each area (design doc 1.1).
+SCREEN_W = DESIGN_W
+SCREEN_H = DESIGN_H
 TILE_W = 160
 TILE_H = 64
 # Bottom-left area (y256-320) is two 32 px rows (design doc inspection-mode 3.5): the navigation
@@ -71,6 +72,8 @@ COLORS: dict[str, str] = {
     "dialog": "#202020",
     "dialog_key": "#424242",
     "separator": "#000000",
+    # Root window background seen around the frame when the screen is not 3:2.
+    "letterbox": "#000000",
 }
 
 # Background color per state (done and removed use the verdict color, so they are excluded).
@@ -128,24 +131,25 @@ class Fonts:
     arrow: tkfont.Font
 
     @classmethod
-    def create(cls, root: tk.Misc, family: str) -> "Fonts":
-        """Build the font set from a family name. A negative size means pixels."""
+    def create(cls, root: tk.Misc, family: str, geometry: Geometry = IDENTITY) -> "Fonts":
+        """Build the font set from a family name at device size. A negative size means pixels."""
         return cls(
-            verdict=tkfont.Font(root, family=family, size=-18, weight="bold"),
-            body=tkfont.Font(root, family=family, size=-14),
-            arrow=tkfont.Font(root, family=family, size=-24),
+            verdict=tkfont.Font(root, family=family, size=-geometry.font_px(18), weight="bold"),
+            body=tkfont.Font(root, family=family, size=-geometry.font_px(14)),
+            arrow=tkfont.Font(root, family=family, size=-geometry.font_px(24)),
         )
 
 
-def row_layout(root: tk.Misc, fonts: Fonts) -> int:
+def row_layout(root: tk.Misc, fonts: Fonts, geometry: Geometry = IDENTITY) -> int:
     """Choose the tile line count. 2 lines if the 3-line total pitch exceeds 58 px (design doc 1.2).
 
     Args:
         root: Unused, but tells the caller that font measuring happens after Tk init.
-        fonts: Fonts to measure.
+        fonts: Fonts to measure (device pixels).
+        geometry: Scale that turns the 58 design px limit into device px.
 
     Returns:
         2 or 3.
     """
     total = fonts.verdict.metrics("linespace") + fonts.body.metrics("linespace") * 2
-    return 2 if total > ROW_LIMIT_PX else 3
+    return 2 if total > geometry.px(ROW_LIMIT_PX) else 3

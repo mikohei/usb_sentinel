@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..config import DisplayConfig
+from ..geometry import compute_scale
 from ..mapper import Mapper
 from ..monitor import Monitor, Snapshot
 from ..results import ResultStore
@@ -26,10 +27,22 @@ class MonitorLike(Protocol):
 
 @dataclass(frozen=True)
 class AppOptions:
-    """Startup options. windowed and kiosk are never given together (D13)."""
+    """Startup options. windowed and kiosk are never given together (D13).
+
+    scale: fixed design-to-screen factor (--scale). None means 1.0 when windowed and the factor
+    that fits the screen in full screen.
+    """
 
     windowed: bool
     kiosk: bool
+    scale: float | None = None
+
+
+def choose_scale(options: AppOptions, screen_w: int, screen_h: int) -> float:
+    """Design-to-screen factor: --scale if given, else 1.0 windowed, else fit the screen."""
+    if options.scale is not None:
+        return options.scale
+    return 1.0 if options.windowed else compute_scale(screen_w, screen_h)
 
 
 def build_monitor(

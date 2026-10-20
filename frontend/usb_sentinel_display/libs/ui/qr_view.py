@@ -2,6 +2,7 @@ import tkinter as tk
 from collections.abc import Callable
 
 from .. import qr_payload, qr_render
+from ..geometry import IDENTITY, Geometry
 from ..models import Slot
 from . import theme
 from .i18n import text
@@ -13,19 +14,29 @@ STRIP_TEXT_X = 4
 class QrView:
     """Draw the right 320 px QR canvas (white) and the info strip. A tap toggles normal/detail."""
 
-    def __init__(self, canvas: tk.Canvas, fonts: Fonts, on_toggle: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        canvas: tk.Canvas,
+        fonts: Fonts,
+        on_toggle: Callable[[], None],
+        *,
+        geometry: Geometry = IDENTITY,
+    ) -> None:
         """Take the target Canvas and fonts, and bind a tap to toggle normal/detail.
 
         Args:
             canvas: The right-side 320 px Canvas.
             fonts: The resolved font set.
             on_toggle: Function called on tap (toggles normal QR/detail QR).
+            geometry: Design-unit to device-pixel conversion. The QR image is rendered at
+                device size; the rest is drawn in design units and scaled once per redraw.
         """
         self.canvas = canvas
         self.fonts = fonts
+        self.geometry = geometry
         # Canvas does not hold a reference to PhotoImage, so keep it here to avoid GC.
         self._image: tk.PhotoImage | None = None
-        self._image_key: tuple[str, str, int] | None = None
+        self._image_key: tuple[str, str, int, int] | None = None
         canvas.bind("<Button-1>", lambda _e: on_toggle())
 
     def _photo(self, slot: Slot, qr_mode: int) -> tk.PhotoImage | None:
@@ -36,14 +47,15 @@ class QrView:
         """
         if slot.result is None:
             return None
-        key = (slot.result.dir_name, slot.result.digest, qr_mode)
+        canvas_px = self.geometry.px(qr_render.CANVAS_PX)
+        key = (slot.result.dir_name, slot.result.digest, qr_mode, canvas_px)
         if self._image is not None and self._image_key == key:
             return self._image
         if qr_mode == 0:
             payload = qr_payload.build_payload(slot.result)
         else:
             payload = qr_payload.build_detail_page(slot.result, qr_mode)
-        ppm, _side = qr_render.render(payload)
+        ppm, _side = qr_render.render(payload, canvas_px=canvas_px)
         self._image = tk.PhotoImage(master=self.canvas, data=ppm)
         self._image_key = key
         return self._image
@@ -74,6 +86,7 @@ class QrView:
                     font=self.fonts.verdict,
                 )
             else:
+                # Design-unit centre; Canvas.scale moves the image but never resamples it.
                 canvas.create_image(QR_W // 2, QR_H // 2, image=image)
         else:
             self._image = None
@@ -87,6 +100,9 @@ class QrView:
             fill=theme.COLORS["text"],
             font=self.fonts.body,
         )
+        geometry = self.geometry
+        if not geometry.is_identity:
+            canvas.scale("all", 0, 0, geometry.scale, geometry.scale)
 
     @property
     def image(self) -> tk.PhotoImage | None:

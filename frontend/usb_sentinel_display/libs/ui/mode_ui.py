@@ -9,6 +9,7 @@ import logging
 import tkinter as tk
 from collections.abc import Callable
 
+from ..geometry import IDENTITY, Geometry
 from ..mode_state import HEARTBEAT_S, ModeController, ModeView
 from .confirm import ConfirmView
 from .theme import Fonts
@@ -32,21 +33,24 @@ class ModeUi:
         on_change: Callable[[], None],
         lang: Callable[[], str],
         drives_in_progress: Callable[[], bool],
+        *,
+        geometry: Geometry = IDENTITY,
     ) -> None:
         """Build the hidden ConfirmView; nothing is written until start().
 
         Args:
             root: Widget that owns the after() timer.
-            frame: The 480x320 App frame the dialog covers.
+            frame: The App frame the dialog covers (480x320 design units at the scale).
             fonts: The resolved font set.
             controller: The mode state machine.
             on_change: App redraw, called after every controller call.
             lang: Returns the current display language.
             drives_in_progress: Whether any slot is WAITING or INSPECTING (erase_off_busy).
+            geometry: Design-unit to device-pixel conversion, forwarded to ConfirmView.
         """
         self.root = root
         self.controller = controller
-        self.confirm = ConfirmView(frame, fonts, self.digit, self.cancel)
+        self.confirm = ConfirmView(frame, fonts, self.digit, self.cancel, geometry=geometry)
         self._on_change = on_change
         self._lang = lang
         self._drives_in_progress = drives_in_progress

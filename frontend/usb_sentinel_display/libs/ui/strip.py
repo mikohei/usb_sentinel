@@ -1,19 +1,24 @@
-"""Pure functions that build the info strip (320x24) text. Does not load the GUI library."""
+"""Pure functions that build the info strip (320x24) text. Imports no GUI library (nor theme)."""
 
+from ..geometry import compute_scale
 from ..models import Slot, SlotState
 from ..monitor import Snapshot
 from ..qr_payload import DETAIL_DIGEST_LEN, DETAIL_PAGES
 from ..units import unit_name
 from .i18n import state_label, text
-from .theme import SCREEN_H, SCREEN_W
 
 STRIP_SERIAL_HEAD = 8
 STRIP_DIGEST_HEAD = 16
 
 
 def resolution_warning(width: int, height: int) -> tuple[int, int] | None:
-    """Measured (width, height) if not 480x320, else None (design doc 1.1). Caller writes text."""
-    if (width, height) == (SCREEN_W, SCREEN_H):
+    """Measured (width, height) if the 480x320 design does not fit, else None. Caller writes text.
+
+    Non-positive sizes (a window that is not mapped yet) give None.
+    """
+    if width <= 0 or height <= 0:
+        return None
+    if compute_scale(width, height) >= 1.0:
         return None
     return (width, height)
 

@@ -8,13 +8,14 @@ from types import FrameType
 
 from .. import trust
 from ..config import DisplayConfig
+from ..geometry import Geometry
 from ..mode_challenge import Challenge, random_code
 from ..mode_state import ModeController
 from ..models import SlotState
 from ..monitor import Snapshot
 from ..units import Runner
 from . import theme
-from .app_wiring import AppOptions, MonitorLike, build_monitor
+from .app_wiring import AppOptions, MonitorLike, build_monitor, choose_scale
 from .i18n import (
     initial_language,
     load_saved_language,
@@ -27,7 +28,7 @@ from .keys import bind_keys
 from .mode_ui import ModeUi
 from .qr_view import QrView
 from .strip import resolution_warning, strip_text
-from .theme import QR_W, SCREEN_H, SCREEN_W, TILE_COUNT, TILE_W, Fonts
+from .theme import QR_W, SCREEN_H, TILE_COUNT, TILE_W, Fonts
 from .tiles import TilesView
 
 __all__ = ["App", "AppOptions", "MonitorLike", "build_monitor", "run_app"]
@@ -60,7 +61,7 @@ class App:
 
         Args:
             config: Display config.
-            options: Startup options (windowed/kiosk).
+            options: Startup options (windowed/kiosk/scale).
             runner: systemctl runner. If None, unit states are not queried.
             now: Current time (swapped in tests).
             monitor: Monitor override. If None, build it with build_monitor().
@@ -85,22 +86,30 @@ class App:
 
         self.root = tk.Tk()
         self.root.title(WINDOW_TITLE)
+        # Scale of the 480x320 design: --scale, else 1.0 windowed, else fit the screen.
+        self.geometry = Geometry(
+            choose_scale(options, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        )
+        px = self.geometry.px
         family = theme.resolve_font_family(self.root, config.font_family)
-        self.fonts = Fonts.create(self.root, family)
-        self.rows = theme.row_layout(self.root, self.fonts)
+        self.fonts = Fonts.create(self.root, family, self.geometry)
+        self.rows = theme.row_layout(self.root, self.fonts, self.geometry)
 
+        # The root shows through as black bars where the screen is not 3:2 (letterbox).
+        self.root.configure(background=theme.COLORS["letterbox"])
+        frame_w, frame_h = self.geometry.frame_size
         self.frame = tk.Frame(
-            self.root, width=SCREEN_W, height=SCREEN_H, background=theme.COLORS["empty"]
+            self.root, width=frame_w, height=frame_h, background=theme.COLORS["empty"]
         )
         self.frame.place(relx=0.5, rely=0.5, anchor="center")
         self.left_canvas = tk.Canvas(
-            self.frame, width=TILE_W, height=SCREEN_H, highlightthickness=0, bd=0
+            self.frame, width=px(TILE_W), height=px(SCREEN_H), highlightthickness=0, bd=0
         )
         self.left_canvas.place(x=0, y=0)
         self.right_canvas = tk.Canvas(
-            self.frame, width=QR_W, height=SCREEN_H, highlightthickness=0, bd=0
+            self.frame, width=px(QR_W), height=px(SCREEN_H), highlightthickness=0, bd=0
         )
-        self.right_canvas.place(x=TILE_W, y=0)
+        self.right_canvas.place(x=px(TILE_W), y=0)
         self.tiles = TilesView(
             self.left_canvas,
             self.fonts,
@@ -109,8 +118,11 @@ class App:
             self.toggle_language,
             self.toggle_mode,
             self.rows,
+            geometry=self.geometry,
         )
-        self.qr_view = QrView(self.right_canvas, self.fonts, self.toggle_qr_mode)
+        self.qr_view = QrView(
+            self.right_canvas, self.fonts, self.toggle_qr_mode, geometry=self.geometry
+        )
         controller = ModeController(
             config.control_dir,
             config.host_config_dir,
@@ -126,10 +138,11 @@ class App:
             self._redraw,
             lambda: self.language,
             self._drives_in_progress,
+            geometry=self.geometry,
         )
 
         if options.windowed:
-            self.root.geometry(f"{SCREEN_W}x{SCREEN_H}")
+            self.root.geometry(f"{frame_w}x{frame_h}")
             self.root.bind("<Configure>", self._on_configure)
         else:
             self.root.attributes("-fullscreen", True)
@@ -169,7 +182,7 @@ class App:
         self._check_resolution(self.root.winfo_width(), self.root.winfo_height())
 
     def _check_resolution(self, width: int, height: int) -> None:
-        """If not 480x320, log a warning once and keep it for the info strip."""
+        """Warn once when the screen is smaller than the 480x320 design; keep it for the strip."""
         resolution = resolution_warning(width, height)
         if resolution is not None and self._resolution is None:
             logger.warning(text(self.language, "resolution", width=width, height=height))

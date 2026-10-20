@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .config import DisplayConfig, default_config_path, load_config
+from .geometry import MAX_SCALE, MIN_SCALE
 from .monitor import NOTICE_SYSFS_MISSING, NOTICE_SYSFS_PERMISSION
 from .sysfs import SysfsMissingError, SysfsPermissionError, boot_time, list_usb_disks
 
@@ -45,9 +46,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--results-dir", type=Path, default=None, help="Override the results root")
     run.add_argument("--sys-block", type=Path, default=None, help="Override /sys/block")
     mode = run.add_mutually_exclusive_group()
-    mode.add_argument("--windowed", action="store_true", help="Show in a 480x320 window")
+    mode.add_argument(
+        "--windowed", action="store_true", help="Show in a 480x320 window (times --scale)"
+    )
     mode.add_argument("--kiosk", action="store_true", help="Full screen with Ctrl+Q disabled")
     run.add_argument("--no-systemctl", action="store_true", help="Do not call systemctl")
+    run.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="Draw the 480x320 design at this factor (development; default: fit the screen)",
+    )
 
     calibrate = commands.add_parser(
         "calibrate", help="Print the port path of each connected USB drive"
@@ -114,7 +123,14 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Exit code. 1 for config ValueError (including TOML syntax errors) and load OSError.
     """
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if (
+        args.command == "run"
+        and args.scale is not None
+        and not (MIN_SCALE <= args.scale <= MAX_SCALE)
+    ):
+        parser.error("--scale must be between 0.25 and 8")
     configure_logging()
     config_path = args.config if args.config is not None else default_config_path()
     try:
@@ -128,4 +144,5 @@ def main(argv: list[str] | None = None) -> int:
     from .ui.app import AppOptions, run_app
 
     runner: Runner | None = None if args.no_systemctl else SubprocessRunner()
-    return run_app(config, AppOptions(windowed=args.windowed, kiosk=args.kiosk), runner)
+    options = AppOptions(windowed=args.windowed, kiosk=args.kiosk, scale=args.scale)
+    return run_app(config, options, runner)

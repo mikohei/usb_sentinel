@@ -1,6 +1,7 @@
 import tkinter as tk
 from collections.abc import Callable
 
+from ..geometry import IDENTITY, Geometry
 from ..mode_view import ModeView
 from ..models import Slot, SlotState
 from ..result_file import drive_tag
@@ -59,6 +60,8 @@ class TilesView:
         on_language: Callable[[], None],
         on_mode: Callable[[], None],
         rows: int,
+        *,
+        geometry: Geometry = IDENTITY,
     ) -> None:
         """Take the target and callbacks, and bind tap detection.
 
@@ -70,21 +73,29 @@ class TilesView:
             on_language: Function called when the language button is tapped.
             on_mode: Function called when the mode button is tapped.
             rows: Lines per tile (2 or 3, decided by theme.row_layout()).
+            geometry: Design-unit to device-pixel conversion (the Canvas is drawn in design
+                units and scaled once per redraw; taps are converted back).
         """
         self.canvas = canvas
         self.fonts = fonts
+        self.geometry = geometry
         self.on_select = on_select
         self.on_step = on_step
         self.on_language = on_language
         self.on_mode = on_mode
         self.rows = rows
         self._lang = "en"
-        self._line_h = (fonts.verdict.metrics("linespace"), fonts.body.metrics("linespace"))
+        # Line heights in design units: the fonts are device-sized, the drawing is not yet.
+        self._line_h = (
+            fonts.verdict.metrics("linespace") / geometry.scale,
+            fonts.body.metrics("linespace") / geometry.scale,
+        )
         canvas.bind("<Button-1>", self._on_click)
 
     def _on_click(self, event: tk.Event) -> None:
         """Map a tap to a tile or button. App decides what prev/next mean (port or page)."""
-        target, index = hit_target(int(event.x), int(event.y))
+        geometry = self.geometry
+        target, index = hit_target(int(geometry.design(event.x)), int(geometry.design(event.y)))
         if target == "tile":
             self.on_select(index)
         elif target == "prev":
@@ -149,7 +160,9 @@ class TilesView:
         tag = self._tag(slot)
         if tag is not None:
             measure = self.fonts.body.measure
-            serial = fit_text(serial, TILE_W - TEXT_X * 2 - measure(tag) - TAG_GAP, measure)
+            # Both sides in device pixels: the font measures at device size.
+            room = self.geometry.px(TILE_W - TEXT_X * 2 - TAG_GAP) - measure(tag)
+            serial = fit_text(serial, room, measure)
             canvas.create_text(
                 TAG_RIGHT_X, y, text=tag, anchor="ne", fill=color, font=self.fonts.body
             )
@@ -182,7 +195,14 @@ class TilesView:
             fill=theme.COLORS[background],
             width=0,
         )
-        canvas.create_line(0, MODE_ROW_Y0, TILE_W, MODE_ROW_Y0, fill=theme.COLORS["separator"])
+        canvas.create_line(
+            0,
+            MODE_ROW_Y0,
+            TILE_W,
+            MODE_ROW_Y0,
+            fill=theme.COLORS["separator"],
+            width=self.geometry.px(1),
+        )
         canvas.create_text(
             TILE_W // 2,
             MODE_ROW_Y0 + MODE_ROW_H // 2,
@@ -218,3 +238,6 @@ class TilesView:
         for slot in slots[:TILE_COUNT]:
             self._tile(slot, slot.index == selected, blink_on, now, dots)
         self._buttons(lang, mode)
+        geometry = self.geometry
+        if not geometry.is_identity:
+            self.canvas.scale("all", 0, 0, geometry.scale, geometry.scale)

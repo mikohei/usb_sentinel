@@ -52,8 +52,18 @@ def matrix_to_ppm(matrix: list[list[bool]], box: int) -> bytes:
     return b"P6 %d %d 255\n" % (side, side) + b"".join(rows)
 
 
-def render(payload: str) -> tuple[bytes, int]:
-    """Return the PPM bytes and the side in px for the payload."""
+def render(payload: str, canvas_px: int = CANVAS_PX) -> tuple[bytes, int]:
+    """Return the PPM bytes and the side in px for the payload at the given canvas size.
+
+    The module size is canvas_px // side, so the image is the largest whole-module square that
+    fits. The PPM is built by byte replication, which makes it nearest-neighbour by construction,
+    and the 4-module quiet zone (BORDER, part of get_matrix()) scales with the modules. No Tk
+    resampling (zoom/subsample) is ever applied to the result.
+
+    Args:
+        payload: QR text.
+        canvas_px: Side of the square the QR must fit (device pixels).
+    """
     matrix = make_matrix(payload)
-    box = box_size_for(len(matrix))
+    box = box_size_for(len(matrix), canvas_px)
     return matrix_to_ppm(matrix, box), len(matrix) * box

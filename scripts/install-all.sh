@@ -11,25 +11,28 @@
 #   sudo INSTALL_YES=1 bash scripts/install-all.sh   # answer every question with yes (no prompts at all)
 #   sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
 #                                                    # opt-in key-only SSH for the sudo caller
-#   sudo bash scripts/kiosk-enable.sh                # final step, after the manual steps
+#   sudo INSTALL_KIOSK=0 bash scripts/install-all.sh # install but do NOT arm the kiosk at the end
+#   sudo INSTALL_VIDEO_HINT=1 bash scripts/install-all.sh
+#                                                    # also add video=HDMI-A-1:480x320@60 to cmdline.txt
+#   sudo bash scripts/kiosk-enable.sh                # arm later, when INSTALL_KIOSK=0 was used
 #   sudo bash scripts/kiosk-disable.sh               # undo from a text console
 #
 # What it does:
 #   1. Preflight checks (Ubuntu, arm64, sudo, internet), then EVERY question the
-#      script has is asked here, before anything is changed: the uv installer is
-#      downloaded, its SHA-256 shown and confirmation asked (skipped when uv is
-#      already installed), and whether to run freshclam in step 8. After the
-#      preflight the run is unattended. INSTALL_YES=1 answers yes to everything.
+#      script has is asked here, before anything is changed. Three questions: the
+#      uv installer (downloaded, SHA-256 shown; skipped when uv is already
+#      installed), whether to run freshclam in step 8, and whether to arm the
+#      kiosk at the end (default yes). After the preflight the run is unattended.
+#      INSTALL_YES=1 answers yes to everything; INSTALL_KIOSK=0/1 overrides the
+#      kiosk question.
 #   2. apt: Docker Engine, Noto CJK fonts, python3-tk, curl
 #   3. uv (official installer downloaded and confirmed in step 1)
 #   4. backend: scripts/install-docker.sh (image build, udev/systemd, result dirs)
 #   5. frontend: uv sync --frozen and a tkinter import check
-#   6. Display user: usb-sentinel group, GDM autologin (kept on purpose: it lands
-#      the user on the normal desktop for the manual steps; the app does NOT
-#      start until scripts/kiosk-enable.sh is run), GNOME automount off,
+#   6. Display user: usb-sentinel group, GDM autologin, GNOME automount off,
 #      sleep/lock off, display.toml, XDG autostart entry written DISABLED
-#      (Hidden=true)
-#      Kiosk lockdown and autostart are armed later by scripts/kiosk-enable.sh
+#      (Hidden=true) so an aborted run never leaves autostart armed; boot video
+#      hint (cmdline.txt) only with INSTALL_VIDEO_HINT=1
 #   7. SSH maintenance access, only with INSTALL_SSH=1 (default: nothing is
 #      installed): openssh-server, key-only login for the sudo caller
 #      (SSH_AUTHORIZED_KEY or SSH_AUTHORIZED_KEY_FILE required; no password
@@ -37,21 +40,29 @@
 #      only when ufw is already active. See scripts/ssh-access.sh
 #   8. ClamAV signature database (freshclam inside the container)
 #   9. Offline self-check (selftest with --network none, uv run --offline)
-#  10. Remaining manual steps and the "before unplugging the LAN" checklist
+#  10. Arms the kiosk (GNOME lockdown + autostart enabled) unless the kiosk
+#      question was answered no or INSTALL_KIOSK=0, then prints the escape
+#      routes, the optional steps and the "before unplugging the LAN" checklist.
+#      After a reboot the display app starts full screen on power-on.
 #
 # What it leaves to the operator (printed at the end):
-#   - Fixing the display resolution to 480x320 (GNOME monitors.xml)
 #   - Touch panel driver (vendor scripts are never executed by this project)
-#   - Port calibration (insert a USB stick into each port and record the path)
+#   - Port calibration (optional: uncalibrated ports show P? and keep working)
 #   - Nominal capacity/speed in config.toml, and enabling destructive checks
 #     (allow_destructive = true plus USB_SENTINEL_DEVICE_ACCESS=rw; erasing then
 #     still needs the display's mode button switched to "Scan + erase")
+#   The app scales its 480x320 design to the actual screen; no resolution setting
+#   is needed.
 set -euo pipefail
 
 readonly REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly DISPLAY_USER="${DISPLAY_USER:-${SUDO_USER:-}}"
 readonly INSTALL_YES="${INSTALL_YES:-0}"
 readonly INSTALL_SSH="${INSTALL_SSH:-0}"
+# Kiosk arming at the end: 0 = never, 1 = always, empty = ask (INSTALL_YES=1 answers yes).
+readonly INSTALL_KIOSK="${INSTALL_KIOSK:-}"
+# Boot video hint (video=HDMI-A-1:480x320@60 in cmdline.txt): opt-in, the app scales anyway.
+readonly INSTALL_VIDEO_HINT="${INSTALL_VIDEO_HINT:-0}"
 # Admin user allowed to log in over SSH: the sudo caller, never the display (kiosk) user.
 readonly SSH_ADMIN_USER="${SSH_ADMIN_USER:-${SUDO_USER:-}}"
 readonly UV_VERSION_PIN="${UV_VERSION_PIN:-}"   # e.g. 0.11.7; empty = latest
@@ -73,10 +84,26 @@ confirm() {
     [[ "${answer}" =~ ^[Yy]$ ]]
 }
 
+confirm_default_yes() {
+    # Like confirm, but an empty answer means yes; n, N, no and NO decline. INSTALL_YES=1 answers yes.
+    if [[ "${INSTALL_YES}" == 1 ]]; then
+        return 0
+    fi
+    local answer
+    read -r -p "$1 [Y/n] " answer
+    [[ ! "${answer}" =~ ^[Nn]([Oo])?$ ]]
+}
+
 run_as_user() {
     # Run a command as the display user with that user's HOME and ~/.local/bin on PATH.
     sudo -u "${DISPLAY_USER}" -H env "PATH=/home/${DISPLAY_USER}/.local/bin:${PATH}" "$@"
 }
+
+# Shared helpers, sourced before step 1 so steps 6 and 10 can use them:
+#   kiosk-lockdown.sh: kiosk_gsettings_user, kiosk_autostart_hide, kiosk_resolution_hint, kiosk_arm
+#   boot-video-hint.sh: video_hint_append (step 6, only with INSTALL_VIDEO_HINT=1)
+source "${REPO_DIR}/scripts/kiosk-lockdown.sh"
+source "${REPO_DIR}/scripts/boot-video-hint.sh"
 
 # ---------------------------------------------------------------- 1. preflight
 log "1/10 Preflight checks"
@@ -124,6 +151,16 @@ if confirm "Run freshclam in step 8/10 to update ${CLAMAV_DB_DIR}? (takes a few 
     readonly RUN_FRESHCLAM=1
 else
     readonly RUN_FRESHCLAM=0
+fi
+# Precedence: INSTALL_KIOSK (0 or 1) > INSTALL_YES=1 (yes) > prompt (default yes).
+if [[ "${INSTALL_KIOSK}" == 0 ]]; then
+    readonly ARM_KIOSK=0; echo "kiosk: not armed at the end (INSTALL_KIOSK=0)"
+elif [[ "${INSTALL_KIOSK}" == 1 ]]; then
+    readonly ARM_KIOSK=1; echo "kiosk: armed at the end (INSTALL_KIOSK=1)"
+elif confirm_default_yes "Arm the kiosk (autostart + lockdown) at the end?"; then
+    readonly ARM_KIOSK=1
+else
+    readonly ARM_KIOSK=0
 fi
 echo "No more questions; the rest runs unattended (about 15 minutes). INSTALL_YES=1 skips the questions entirely."
 
@@ -196,30 +233,18 @@ else
     warn "GDM config ${GDM_CONF} not found; enable autologin manually"
 fi
 
-# GNOME automount and sleep settings live in the user's dconf. Use the running
-# session bus when the user is logged in, otherwise a throwaway dbus session.
-gsettings_user() {
-    local uid
-    uid="$(id -u "${DISPLAY_USER}")"
-    if [[ -S "/run/user/${uid}/bus" ]]; then
-        sudo -u "${DISPLAY_USER}" env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" gsettings "$@"
-    else
-        sudo -u "${DISPLAY_USER}" dbus-run-session -- gsettings "$@"
-    fi
-}
-# Kiosk helpers (kiosk_autostart_hide here; kiosk_lockdown is used by kiosk-enable.sh).
-source "${REPO_DIR}/scripts/kiosk-lockdown.sh"
+# GNOME automount and sleep settings live in the user's dconf. kiosk_gsettings_user
+# (scripts/kiosk-lockdown.sh) uses the running session bus when the user is logged in,
+# otherwise a throwaway dbus session.
 if command -v gsettings >/dev/null; then
     # With automount on, run-docker.sh refuses the disk ("host-mounted disk refused").
-    gsettings_user set org.gnome.desktop.media-handling automount false
-    gsettings_user set org.gnome.desktop.media-handling automount-open false
-    gsettings_user set org.gnome.desktop.session idle-delay 0
-    gsettings_user set org.gnome.desktop.screensaver lock-enabled false
-    gsettings_user set org.gnome.desktop.screensaver idle-activation-enabled false
-    gsettings_user set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+    kiosk_gsettings_user "${DISPLAY_USER}" set org.gnome.desktop.media-handling automount false
+    kiosk_gsettings_user "${DISPLAY_USER}" set org.gnome.desktop.media-handling automount-open false
+    kiosk_gsettings_user "${DISPLAY_USER}" set org.gnome.desktop.session idle-delay 0
+    kiosk_gsettings_user "${DISPLAY_USER}" set org.gnome.desktop.screensaver lock-enabled false
+    kiosk_gsettings_user "${DISPLAY_USER}" set org.gnome.desktop.screensaver idle-activation-enabled false
+    kiosk_gsettings_user "${DISPLAY_USER}" set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
     echo "GNOME: automount off, sleep and lock off"
-    # Kiosk lockdown is deliberately NOT applied here; scripts/kiosk-enable.sh does it
-    # once the display is tuned.
 else
     warn "gsettings not found; disable automount and sleep manually"
 fi
@@ -237,7 +262,8 @@ else
 fi
 
 # XDG autostart entry with <user> and the project path filled in. It is written with
-# Hidden=true so nothing starts at login until scripts/kiosk-enable.sh removes that line.
+# Hidden=true so an aborted run never leaves autostart armed; step 10 (kiosk_arm) or
+# scripts/kiosk-enable.sh removes that line.
 readonly AUTOSTART_DIR="${USER_HOME}/.config/autostart"
 readonly DESKTOP_FILE="${AUTOSTART_DIR}/usb-sentinel-display.desktop"
 install -d -o "${DISPLAY_USER}" -g "${DISPLAY_USER}" -m 0755 "${AUTOSTART_DIR}"
@@ -248,8 +274,21 @@ sed -e "s|/home/<user>/.local/bin/uv|${UV_BIN}|g" \
 chown "${DISPLAY_USER}:${DISPLAY_USER}" "${DESKTOP_FILE}"
 chmod 0644 "${DESKTOP_FILE}"
 kiosk_autostart_hide "${DESKTOP_FILE}"
-echo "autostart: ${DESKTOP_FILE} (disabled until kiosk-enable.sh)"
+echo "autostart: ${DESKTOP_FILE} (disabled until step 10/10)"
 grep '^Exec=' "${DESKTOP_FILE}"
+
+# Boot video hint (scripts/boot-video-hint.sh), opt-in. The status line is kept for step 10;
+# video_hint_append writes its warnings to stderr, so they are not captured.
+if [[ "${INSTALL_VIDEO_HINT}" == 1 ]]; then
+    VIDEO_HINT_STATE="$(video_hint_append)"
+    if [[ -z "${VIDEO_HINT_STATE}" ]]; then
+        VIDEO_HINT_STATE="boot video hint: not applied (see the warning in step 6/10)"
+    fi
+    echo "${VIDEO_HINT_STATE}"
+else
+    VIDEO_HINT_STATE="boot video hint: skipped (opt in with INSTALL_VIDEO_HINT=1; the app scales, so it is not required)"
+    echo "${VIDEO_HINT_STATE}"
+fi
 
 # ---------------------------------------------------------------- 7. SSH (opt-in)
 log "7/10 SSH maintenance access (INSTALL_SSH=${INSTALL_SSH})"
@@ -292,8 +331,22 @@ else
     die "frontend does not start with --offline; check that uv sync --frozen completed"
 fi
 
-# --------------------------------------------------------------- 10. next steps
-log "10/10 Installation complete. Remaining manual steps and pre-isolation checklist"
+# --------------------------------------------------------------- 10. arm the kiosk
+if [[ "${ARM_KIOSK}" == 1 ]]; then
+    log "10/10 Arming the kiosk (autostart + GNOME lockdown)"
+    kiosk_resolution_hint "${USER_HOME}"
+    # Mirrors step 6: a missing gsettings only warns here; kiosk_arm dies for kiosk-enable.sh.
+    if command -v gsettings >/dev/null; then
+        kiosk_arm "${DISPLAY_USER}" "${DESKTOP_FILE}"
+        KIOSK_STATE="armed: reboot (sudo reboot) and the display starts full screen on power-on"
+    else
+        warn "gsettings not found; kiosk not armed. Install GNOME, then run scripts/kiosk-enable.sh"
+        KIOSK_STATE="not armed: gsettings missing; run  sudo bash ${REPO_DIR}/scripts/kiosk-enable.sh"
+    fi
+else
+    log "10/10 Installation complete (kiosk NOT armed)"
+    KIOSK_STATE="not armed: run  sudo bash ${REPO_DIR}/scripts/kiosk-enable.sh  when ready"
+fi
 if [[ "${INSTALL_SSH}" == 1 ]]; then
     SSH_RECOVERY_HINT="SSH as ${SSH_ADMIN_USER} (enabled in step 7/10; works while the LAN is plugged in)"
 else
@@ -301,40 +354,41 @@ else
 fi
 cat <<EOF
 
-[Manual steps]
- 1. Fix the display resolution to 480x320
-      frontend/README.md, "Display setup" step 1 (GNOME monitors.xml)
- 2. Touch panel driver (optional; the keyboard covers every action)
-      vendor instructions: https://osoyoo.com/ja/?p=56145
- 3. Calibrate the ports (insert one USB stick per port and record its path)
-      after re-login:  ${UV_BIN} run --offline --frozen --no-sync \\
-                         --project ${REPO_DIR}/frontend usb-sentinel-display calibrate
-      write the result into the [[ports]] table of ${DISPLAY_CONF}
- 4. Adjust /etc/usb-sentinel/config.toml for your operation
-      - [capacity] nominal_bytes, [speed] nominal_*_mb_s / device_class (when known)
-      - To enable the capacity and speed checks (they ERASE the sample):
-          config.toml:  allow_destructive = true
-          docker.env:   USB_SENTINEL_DEVICE_ACCESS=rw
-        then switch the display's mode button to "Scan + erase" and enter the
-        code shown (resets to scan only at every start). All three are required;
-        without any one of them the device stays read-only.
- 5. Log out once and let autologin bring you back (activates the usb-sentinel group).
-      The display app does NOT start yet: its autostart entry is written with Hidden=true.
- 6. Arm the kiosk (only after steps 1 and 3 are done):
-      sudo bash ${REPO_DIR}/scripts/kiosk-enable.sh
-    This enables autostart and applies the GNOME lockdown (scripts/kiosk-lockdown.sh:
-    every shortcut except Ctrl+Alt+F1..F12 is cleared, the dock is emptied).
-    Once armed, the app covers the whole screen, hides the cursor and takes focus back
-    from every other window. The only ways out are:
-      - Ctrl+Alt+F3 (text console, password) or ${SSH_RECOVERY_HINT}, then
-          pkill -f usb-sentinel-display                      stop the app until the next login
-          sudo bash ${REPO_DIR}/scripts/kiosk-disable.sh     undo autostart and lockdown
-    GDM autologin stays on in both states (${GDM_CONF}; remove the two AutomaticLogin
-    lines to turn it off).
+Kiosk: ${KIOSK_STATE}
+
+[Escape routes]
+  Once armed, the app covers the whole screen, hides the cursor and takes focus back
+  from every other window; GNOME keeps no shortcut except Ctrl+Alt+F1..F12
+  (scripts/kiosk-lockdown.sh). To get out:
+    - Ctrl+Alt+F3 (text console, password) or ${SSH_RECOVERY_HINT}, then
+        pkill -f usb-sentinel-display                      stop the app until the next login
+        sudo bash ${REPO_DIR}/scripts/kiosk-disable.sh     undo autostart and lockdown
+    - Ctrl+Alt+F1 returns to the graphical session.
+
+[Port calibration (optional, later)]
+  Uncalibrated ports show P? and the screen keeps working. Over SSH or from the
+  text console run
+      ${UV_BIN} run --offline --frozen --no-sync \\
+          --project ${REPO_DIR}/frontend usb-sentinel-display calibrate
+  and write the [[ports]] table into ${DISPLAY_CONF}; the app reads it at the next start.
+
+[Boot video hint]
+  ${VIDEO_HINT_STATE}
+  undo: cp /boot/firmware/cmdline.txt.bak /boot/firmware/cmdline.txt
+
+[Optional]
+  - Touch panel driver (the keyboard covers every action): https://osoyoo.com/ja/?p=56145
+  - /etc/usb-sentinel/config.toml: [capacity] nominal_bytes, [speed] nominal_*_mb_s.
+    Capacity and speed checks ERASE the sample; they need all three of
+      config.toml allow_destructive = true, docker.env USB_SENTINEL_DEVICE_ACCESS=rw,
+      and the display's mode button switched to "Scan + erase" (code shown on screen).
+  - The app scales to any screen; no resolution setting is needed.
+  - GDM autologin stays on in both kiosk states (${GDM_CONF}; remove the two
+    AutomaticLogin lines to turn it off).
 
 [Checklist before unplugging the LAN]
  [ ] backend selftest exited 0 (see step 9/10 above)
- [ ] After kiosk-enable.sh and a reboot the full-screen display shows four tiles
+ [ ] After a reboot the full-screen display shows four tiles
  [ ] A disposable USB stick shows "Scanning" and then a verdict
  [ ] result.json appears under /var/lib/usb-sentinel/results/
  [ ] The on-screen QR codes scan with a phone (summary QR and the 3 detail pages)

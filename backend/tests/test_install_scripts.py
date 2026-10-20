@@ -41,6 +41,7 @@ def _ordered(text: str, *needles: str) -> None:
         "kiosk-lockdown.sh",
         "kiosk-enable.sh",
         "kiosk-disable.sh",
+        "boot-video-hint.sh",
         "run-docker.sh",
         "ssh-access.sh",
     ],
@@ -57,7 +58,8 @@ def test_install_all_prompts_only_in_preflight() -> None:
     """Every confirm/read call sits before step 2; steps 3 and 8 only read the stored answers."""
     lines = _script("install-all.sh").splitlines()
     step2 = lines.index('log "2/10 Installing apt packages"')
-    prompts = [i for i, line in enumerate(lines) if re.search(r"\bconfirm \"|\bread -r\b", line)]
+    prompt_re = r"\bconfirm(_default_yes)? \"|\bread -r\b"
+    prompts = [i for i, line in enumerate(lines) if re.search(prompt_re, line)]
     assert prompts, "the preflight must still ask the questions"
     assert all(i < step2 for i in prompts), [lines[i] for i in prompts if i >= step2]
     text = "\n".join(lines)
@@ -72,6 +74,7 @@ def test_install_all_prompts_only_in_preflight() -> None:
         'echo "SHA-256:',
         'confirm "Run this installer as',
         'confirm "Run freshclam',
+        'confirm_default_yes "Arm the kiosk',
         'log "2/10',
         "apt-get update",
     )
@@ -112,10 +115,15 @@ def _run_install_all(tmp_path: Path, stdin: str, env_extra: dict[str, str]) -> t
     home.mkdir()
     log = tmp_path / "calls.log"
     log.touch()
-    # EUID is a readonly bash variable, so the sudo check is disabled in a scratch copy.
+    # EUID is a readonly bash variable, so the sudo check is disabled in a scratch copy. The
+    # copy lives under <tmp>/scripts/ next to the helper files it sources before step 1.
     original = _script("install-all.sh")
     assert ROOT_CHECK in original
-    script = tmp_path / "install-all.sh"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for helper in ("kiosk-lockdown.sh", "boot-video-hint.sh"):
+        (scripts / helper).write_text(_script(helper))
+    script = scripts / "install-all.sh"
     script.write_text(original.replace(ROOT_CHECK, "true"))
     env = {
         "PATH": f"{bindir}:/usr/bin:/bin",
@@ -136,9 +144,9 @@ def _run_install_all(tmp_path: Path, stdin: str, env_extra: dict[str, str]) -> t
     return result.returncode, log.read_text() + result.stdout + result.stderr
 
 
-def test_install_all_consumes_both_answers_before_apt_get(tmp_path: Path) -> None:
-    """With INSTALL_YES unset, both y answers on stdin are read before the first apt-get call."""
-    code, log = _run_install_all(tmp_path, "y\ny\n", {})
+def test_install_all_consumes_all_answers_before_apt_get(tmp_path: Path) -> None:
+    """With INSTALL_YES unset, all three y answers on stdin are read before the first apt-get."""
+    code, log = _run_install_all(tmp_path, "y\ny\ny\n", {})
     assert code == 99, log
     _ordered(
         log,
@@ -153,7 +161,7 @@ def test_install_all_consumes_both_answers_before_apt_get(tmp_path: Path) -> Non
 
 def test_install_all_rejecting_uv_dies_before_apt_get(tmp_path: Path) -> None:
     """Answering N to the uv question exits in the preflight; apt-get never runs."""
-    code, log = _run_install_all(tmp_path, "n\ny\n", {})
+    code, log = _run_install_all(tmp_path, "n\ny\ny\n", {})
     assert code == 1
     assert "uv installation cancelled" in log
     assert "apt-get" not in log
@@ -161,30 +169,54 @@ def test_install_all_rejecting_uv_dies_before_apt_get(tmp_path: Path) -> None:
 
 def test_install_all_yes_env_asks_nothing(tmp_path: Path) -> None:
     """INSTALL_YES=1 reaches apt-get without reading stdin (the n answers stay unread)."""
-    code, log = _run_install_all(tmp_path, "n\nn\n", {"INSTALL_YES": "1"})
+    code, log = _run_install_all(tmp_path, "n\nn\nn\n", {"INSTALL_YES": "1"})
     assert code == 99, log
-    assert "apt-get update stdin=[n\nn]" in log
+    assert "apt-get update stdin=[n\nn\nn]" in log
 
 
-def test_install_all_sources_lockdown_after_gsettings_user() -> None:
-    """install-all.sh sources kiosk-lockdown.sh once gsettings_user exists."""
-    lines = (SCRIPTS / "install-all.sh").read_text().splitlines()
-    defined = next(i for i, line in enumerate(lines) if line.startswith("gsettings_user()"))
-    sourced = lines.index('source "${REPO_DIR}/scripts/kiosk-lockdown.sh"')
-    assert defined < sourced
+def test_install_all_sources_lockdown_before_preflight() -> None:
+    """Both helpers are sourced before step 1; gsettings_user stays only in kiosk-disable.sh."""
+    lines = _script("install-all.sh").splitlines()
+    preflight = lines.index('log "1/10 Preflight checks"')
+    assert lines.index('source "${REPO_DIR}/scripts/kiosk-lockdown.sh"') < preflight
+    assert lines.index('source "${REPO_DIR}/scripts/boot-video-hint.sh"') < preflight
+    assert "gsettings_user() {" not in _script("install-all.sh")
+    assert "gsettings_user() {" not in _script("kiosk-enable.sh")
+    assert "gsettings_user() {" in _script("kiosk-disable.sh")
 
 
-def test_install_all_never_calls_kiosk_lockdown() -> None:
-    """install-all.sh does not arm the lockdown; the final message points at kiosk-enable.sh."""
+def test_install_all_arms_only_in_step_10() -> None:
+    """kiosk_arm runs once, in step 10, inside the ARM_KIOSK and gsettings guards."""
     lines = _script("install-all.sh").splitlines()
     assert not any(re.match(r"^\s*kiosk_lockdown\b", line) for line in lines)
+    arms = [i for i, line in enumerate(lines) if re.match(r"^\s*kiosk_arm\b", line)]
+    assert len(arms) == 1
+    arm = arms[0]
+    step10 = next(
+        i for i, line in enumerate(lines) if line.strip().startswith('log "10/10 Arming the kiosk')
+    )
+    assert step10 < arm
+    guard = max(
+        i for i, line in enumerate(lines[:arm]) if line == 'if [[ "${ARM_KIOSK}" == 1 ]]; then'
+    )
+    gsettings = max(
+        i
+        for i, line in enumerate(lines[:arm])
+        if line.strip() == "if command -v gsettings >/dev/null; then"
+    )
+    assert guard < gsettings < arm
     start = lines.index("cat <<EOF")
     end = lines.index("EOF", start)
     message = "\n".join(lines[start:end])
-    assert "kiosk-enable.sh" in message
-    assert "kiosk-disable.sh" in message
-    assert "Ctrl+Alt+F3" in message
-    assert "pkill -f usb-sentinel-display" in message
+    for needle in (
+        "KIOSK_STATE",
+        "Ctrl+Alt+F3",
+        "kiosk-disable.sh",
+        "pkill -f usb-sentinel-display",
+        "calibrate",
+        "P?",
+    ):
+        assert needle in message
 
 
 def test_install_all_writes_autostart_hidden() -> None:
@@ -224,19 +256,29 @@ def test_desktop_template_substitutes_and_logs() -> None:
 
 
 def test_kiosk_enable_structure() -> None:
-    """kiosk-enable.sh checks the resolution, confirms, locks down, then shows the entry."""
+    """kiosk-enable.sh hints at the resolution, confirms, then arms through kiosk_arm."""
     text = _script("kiosk-enable.sh")
     _ordered(
         text,
         'source "${REPO_DIR}/scripts/kiosk-lockdown.sh"',
+        'kiosk_resolution_hint "${USER_HOME}"',
         "KIOSK_FORCE",
         'confirm "',
-        "kiosk_lockdown gsettings_user",
-        'kiosk_autostart_show "${DESKTOP_FILE}"',
+        'kiosk_arm "${DISPLAY_USER}" "${DESKTOP_FILE}"',
     )
-    assert "gsettings_user() {" in text
-    assert "/run/user/${uid}/bus" in text
-    assert "dbus-run-session" in text
+    assert 'die "fix the resolution' not in text
+    force_lines = [
+        line for line in text.splitlines() if "KIOSK_FORCE" in line and not line.startswith("#")
+    ]
+    assert force_lines
+    for line in force_lines:
+        assert "warn" in line or line.strip().startswith('if [[ "${KIOSK_FORCE:-0}"'), line
+    # The shared gsettings wrapper moved to kiosk-lockdown.sh.
+    lockdown = _script("kiosk-lockdown.sh")
+    assert "kiosk_gsettings_user() {" in lockdown
+    assert "/run/user/${uid}/bus" in lockdown
+    assert "dbus-run-session" in lockdown
+    assert "gsettings_user() {" not in text
 
 
 def test_kiosk_disable_structure() -> None:

@@ -7,13 +7,18 @@
 # the password-protected console switch (Ctrl+Alt+F1..F12), and fixes a few settings.
 #
 # Functions only: install-all.sh, kiosk-enable.sh, kiosk-disable.sh and backend/tests source
-# this file. It needs the caller's `warn` function. Every gsettings function takes the gsettings
-# command (a function name such as gsettings_user) as its first argument so tests can pass a
-# fake. bash 3.2 only: no mapfile, no associative arrays, no `readonly -a`.
+# this file. It needs the caller's `warn` and `die` functions (`die` is used only by kiosk_arm).
+# Every gsettings function takes the gsettings command (a function name such as gsettings_user)
+# as its first argument so tests can pass a fake. bash 3.2 only: no mapfile, no associative
+# arrays, no `readonly -a`.
 #
 # Undo with kiosk_unlock (scripts/kiosk-disable.sh): it resets exactly the keys kiosk_lockdown
 # sets. The XDG autostart entry is toggled with kiosk_autostart_hide / kiosk_autostart_show
 # (append or remove a `Hidden=true` line).
+#
+# Shared by install-all.sh (step 6 and 10) and kiosk-enable.sh: kiosk_gsettings_user (gsettings
+# as the display user), kiosk_resolution_hint (information only) and kiosk_arm (lockdown plus
+# autostart in one call).
 
 # Keybinding schemas whose string-list keys are all cleared (except kiosk_keep_key).
 KIOSK_CLEAR_SCHEMAS="org.gnome.desktop.wm.keybindings org.gnome.shell.keybindings
@@ -186,4 +191,46 @@ kiosk_autostart_show() {
     fi
     sed -i.bak '/^Hidden=/d' "${file}" && rm -f "${file}.bak"
     echo "autostart: enabled ${file}"
+}
+
+# kiosk_gsettings_user <user> <gsettings args...>: run gsettings as <user> on their session bus
+# when logged in, else in a throwaway dbus session (about a minute per lockdown without a bus).
+kiosk_gsettings_user() {
+    local user="$1"; shift
+    local uid
+    uid="$(id -u "${user}")"
+    if [[ -S "/run/user/${uid}/bus" ]]; then
+        sudo -u "${user}" env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" gsettings "$@"
+    else
+        sudo -u "${user}" dbus-run-session -- gsettings "$@"
+    fi
+}
+
+# kiosk_resolution_hint <user_home>: information only; the app scales to the actual screen.
+# Looks for a 480x320 mode in <user_home>/.config/monitors.xml (written by Settings -> Displays).
+# No xrandr: the target image runs Wayland and the result changes nothing. Always returns 0.
+kiosk_resolution_hint() {
+    local monitors="$1/.config/monitors.xml"
+    if [[ -f "${monitors}" ]] \
+        && tr -d ' \n' < "${monitors}" | grep -q '<width>480</width><height>320</height>'; then
+        echo "resolution: 480x320 found in ${monitors}"
+    else
+        warn "could not confirm a 480x320 display; the app scales to the actual screen (letterboxed)"
+    fi
+    return 0
+}
+
+# kiosk_arm <user> <desktop_file>: apply the lockdown and enable autostart.
+# Dies (caller's die) when the entry is missing or gsettings is absent.
+kiosk_arm() {
+    local user="$1" file="$2"
+    [[ -f "${file}" ]] || die "autostart entry missing: ${file}"
+    command -v gsettings >/dev/null || die "gsettings not found"
+    # kiosk_lockdown takes a command name. bash scopes locals dynamically, so ${user} is
+    # visible inside _kiosk_gs while kiosk_arm runs; no global is needed.
+    _kiosk_gs() { kiosk_gsettings_user "${user}" "$@"; }
+    kiosk_lockdown _kiosk_gs                 # about a minute without a session bus
+    unset -f _kiosk_gs
+    kiosk_autostart_show "${file}"
+    chown "${user}:${user}" "${file}"         # sed -i may recreate the file as root
 }

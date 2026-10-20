@@ -118,3 +118,22 @@ class TestLifecycle:
             assert app.mode_ui._job is not None
         finally:
             destroy(app)
+
+
+class TestKioskModeKey:
+    def test_m_key_toggles_mode_in_kiosk(self, tmp_path: Path) -> None:
+        """--kiosk でも M でダイアログが開き、コード入力で消去モードになり、もう一度 M で戻る。"""
+        app = make_mode_app(tmp_path, kiosk=True)
+        try:
+            press(app, "Key-m")
+            assert app.mode_ui.dialog_open is True
+            enter_code_by_keys(app)
+            content = mode_file(tmp_path)
+            assert content is not None and FULL_RE.fullmatch(content)
+            assert app.mode_ui.view().state is ModeState.FULL
+            press(app, "Key-M")
+            content = mode_file(tmp_path)
+            assert content is not None and SCAN_ONLY_RE.fullmatch(content)
+            assert app.mode_ui.view().state is ModeState.SCAN_ONLY
+        finally:
+            destroy(app)

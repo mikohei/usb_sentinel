@@ -58,10 +58,12 @@ def strip_text(
     lang: str,
     qr_mode: int,
     mode_notice: str | None = None,
+    font_missing: bool = False,
 ) -> str:
     """Pick the info strip text by priority.
 
-    Priority: resolution warning > internal error > mode notice > notice > "N others" +
+    Priority: resolution warning > internal error > mode notice > notice > missing
+    Japanese font > "N others" +
     journalctl hint > normal.
 
     Args:
@@ -72,6 +74,7 @@ def strip_text(
         lang: 'en' or 'ja'.
         qr_mode: 0 for normal QR, 1-3 for detail QR pages.
         mode_notice: ModeView.notice (an i18n key without the "notice.mode." prefix) or None.
+        font_missing: True when theme.resolve_font found no Japanese font.
     """
     if resolution is not None:
         width, height = resolution
@@ -84,6 +87,8 @@ def strip_text(
         return text(lang, "notice.mode." + mode_notice)
     if snapshot.notice is not None:
         return text(lang, "notice." + snapshot.notice)
+    if font_missing:
+        return text(lang, "font_missing")
     slot = snapshot.slots[selected] if selected < len(snapshot.slots) else None
     parts: list[str] = []
     if snapshot.overflow > 0:

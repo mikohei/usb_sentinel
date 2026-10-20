@@ -162,3 +162,19 @@ class TestStrip:
             strip_text(Snapshot(slots), 0, template, None, "ja", 0, mode_notice="locked_cooldown")
             == "コード誤り。60秒後に再試行"
         )
+
+    def test_font_missing_notice_shown_when_nothing_else(self) -> None:
+        """日本語フォント欠落の警告は通知より弱く「他N台」と通常表示より強い。"""
+        slots = scene_a_slots()
+        template = "usb-sentinel-docker@{kernel}.service"
+        warning = "No Japanese font (install fonts-noto-cjk)"
+
+        def ja(snapshot: Snapshot, notice: str | None = None) -> str:
+            return strip_text(
+                snapshot, 0, template, None, "ja", 0, mode_notice=notice, font_missing=True
+            )
+
+        assert ja(Snapshot(slots)) == warning
+        assert ja(Snapshot(slots, overflow=2)) == warning
+        assert ja(Snapshot(slots, notice="sysfs_missing")).startswith("sysfs")
+        assert ja(Snapshot(slots), "wrong_code") != warning

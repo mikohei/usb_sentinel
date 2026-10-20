@@ -31,6 +31,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "overflow": "+{count} more",
         "check_journal": "Check journalctl -u {unit}",
         "resolution": "Resolution {width}x{height} is below 480x320",
+        "font_missing": "No Japanese font (install fonts-noto-cjk)",
         "internal_error": "Internal error: {name}",
         "internal_error_repeated": "Internal error persists; check stderr",
         "notice.results_missing": "Results directory not found",
@@ -96,6 +97,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "overflow": "他{count}台",
         "check_journal": "journalctl -u {unit}を確認",
         "resolution": "画面解像度{width}x{height}（480x320未満）",
+        # ASCII on purpose: without a Japanese font, Japanese text would render as boxes.
+        "font_missing": "No Japanese font (install fonts-noto-cjk)",
         "internal_error": "内部エラー: {name}",
         "internal_error_repeated": "内部エラーが継続中。標準エラー出力を確認",
         "notice.results_missing": "結果ディレクトリが見つからない",

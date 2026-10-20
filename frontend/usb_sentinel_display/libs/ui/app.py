@@ -91,7 +91,9 @@ class App:
             choose_scale(options, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
         )
         px = self.geometry.px
-        family = theme.resolve_font_family(self.root, config.font_family)
+        family, font_found = theme.resolve_font(self.root, config.font_family)
+        # Shown in the info strip when no Japanese font was found.
+        self.font_missing = not font_found
         self.fonts = Fonts.create(self.root, family, self.geometry)
         self.rows = theme.row_layout(self.root, self.fonts, self.geometry)
 
@@ -272,6 +274,7 @@ class App:
             self.language,
             self.qr_mode,
             mode_notice=mode.notice,
+            font_missing=self.font_missing,
         )
         self.qr_view.render(slot, strip, self.qr_mode, self.language)
 

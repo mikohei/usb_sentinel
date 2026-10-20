@@ -105,8 +105,46 @@ def darken(color: str) -> str:
     return f"#{red:02X}{green:02X}{blue:02X}"
 
 
+# Japanese-capable families tried, in order, after config.font_family. fonts-noto-cjk
+# provides the first one on Ubuntu.
+FONT_FALLBACKS = (
+    "Noto Sans CJK JP",
+    "Noto Sans JP",
+    "Noto Sans CJK SC",
+    "IPAGothic",
+    "IPAexGothic",
+    "TakaoGothic",
+    "VL Gothic",
+)
+
+
+def resolve_font(root: tk.Misc, preferred: str) -> tuple[str, bool]:
+    """Pick config.font_family, else the first installed FONT_FALLBACKS entry (D17).
+
+    Without Xft, Tk lists no fontconfig family, so a missing Japanese font shows up here.
+
+    Args:
+        root: Widget used to list fonts.
+        preferred: font_family from the config file.
+
+    Returns:
+        (family actually used, found). found is False when neither preferred nor any
+        FONT_FALLBACKS entry is installed; TkDefaultFont's family is used then.
+    """
+    installed = set(tkfont.families(root))
+    for family in dict.fromkeys((preferred, *FONT_FALLBACKS)):
+        if family in installed:
+            if family != preferred:
+                logger.warning("Font %s not found; using %s", preferred, family)
+            logger.info("Font family: %s", family)
+            return family, True
+    fallback = str(tkfont.nametofont("TkDefaultFont", root).actual("family"))
+    logger.warning("Font %s not found; using %s", preferred, fallback)
+    return fallback, False
+
+
 def resolve_font_family(root: tk.Misc, preferred: str) -> str:
-    """Return the preferred font if present, else warn and return TkDefaultFont's family (D17).
+    """Return only the family chosen by resolve_font.
 
     Args:
         root: Widget used to list fonts.
@@ -115,11 +153,7 @@ def resolve_font_family(root: tk.Misc, preferred: str) -> str:
     Returns:
         The font family actually used.
     """
-    if preferred in tkfont.families(root):
-        return preferred
-    fallback = str(tkfont.nametofont("TkDefaultFont", root).actual("family"))
-    logger.warning("Font %s not found; using %s", preferred, fallback)
-    return fallback
+    return resolve_font(root, preferred)[0]
 
 
 @dataclass(frozen=True)

@@ -83,3 +83,9 @@ class TestTextV3:
         lines = render_text(result).splitlines()
         assert lines[3] == "Mode: full"
         assert lines[4] == "Link speed: 5000Mbps"
+
+    def test_scan_only_verdict_first_line(self) -> None:
+        """検査のみの判定名が 1 行目に出る。"""
+        result = _full_result()
+        result.verdict = Verdict.NO_DEFECT_SCAN_ONLY
+        assert render_text(result).splitlines()[0] == "Verdict: No Defect (Scan Only)"

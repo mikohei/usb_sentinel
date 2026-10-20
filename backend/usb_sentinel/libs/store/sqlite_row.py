@@ -16,6 +16,7 @@ from ..models import InspectionResult, StepResult, Verdict
 
 VERDICT_CODES: dict[Verdict, str] = {
     Verdict.NO_DEFECT: "N",
+    Verdict.NO_DEFECT_SCAN_ONLY: "n",
     Verdict.MALWARE_DETECTED: "M",
     Verdict.COUNTERFEIT_SUSPECTED: "C",
     Verdict.SPEC_MISMATCH: "S",

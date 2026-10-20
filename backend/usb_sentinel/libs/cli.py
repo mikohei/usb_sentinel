@@ -30,7 +30,8 @@ def main() -> int:
     """Entry point for `usb-sentinel [--config PATH] {selftest | inspect [--mode M] DEVICE}`.
 
     Returns:
-        Exit code. inspect returns 0 when the verdict is No Defect, otherwise 1. A refused
+        Exit code. inspect returns 0 when the verdict is No Defect, otherwise 1 (also for No Defect
+        (Scan Only), which did not test capacity and speed). A refused
         inspection (UnsafeDeviceError) returns 2, and an execution error returns 3. selftest
         returns 0 when all required commands and the ClamAV definition DB are present, else 3.
     """

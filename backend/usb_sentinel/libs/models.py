@@ -24,6 +24,7 @@ class InspectionMode(StrEnum):
 
 class Verdict(StrEnum):
     NO_DEFECT = "No Defect"
+    NO_DEFECT_SCAN_ONLY = "No Defect (Scan Only)"
     MALWARE_DETECTED = "Malware Detected"
     COUNTERFEIT_SUSPECTED = "Counterfeit Suspected"
     SPEC_MISMATCH = "Spec Mismatch"

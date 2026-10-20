@@ -38,9 +38,44 @@ def result_dir_for(root: Path, started: datetime, device: DeviceInfo) -> Path:
     return root / f"{started.strftime('%Y%m%dT%H%M%SZ')}-{serial}"
 
 
+# Skip reasons of the capacity/speed gate in inspect() that mean "scan-only by design".
+_SCAN_ONLY_DESTRUCTIVE_OFF = "allow_destructive = false"
+_SCAN_ONLY_MODE = "Inspection mode is scan_only"
+_SCAN_ONLY_SKIP_REASONS = (_SCAN_ONLY_DESTRUCTIVE_OFF, _SCAN_ONLY_MODE)
+SCAN_ONLY_REASON = "Scan only: capacity and speed not tested"
+
+
+def _is_scan_only_pass(result: InspectionResult) -> bool:
+    """検査のみモードで、容量と速度以外がすべて PASS かを返す。
+
+    Args:
+        result: 判定対象の検査結果。
+
+    Returns:
+        PASS 以外のステップが、検査のみの理由で SKIPPED になった capacity と speed だけなら True。
+    """
+    if result.mode is not InspectionMode.SCAN_ONLY:
+        return False
+    malware = result.step("malware")
+    if malware is None or malware.status is not StepStatus.PASS:
+        return False
+    return all(
+        step.status is StepStatus.PASS
+        or (
+            step.status is StepStatus.SKIPPED
+            and step.name in ("capacity", "speed")
+            and step.summary in _SCAN_ONLY_SKIP_REASONS
+        )
+        for step in result.steps
+    )
+
+
 def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
     """Decide the verdict. Priority: Malware -> Counterfeit Suspected -> Defective ->
-    Spec Mismatch -> No Defect -> Inconclusive."""
+    Spec Mismatch -> No Defect -> No Defect (Scan Only) -> Inconclusive.
+
+    No Defect (Scan Only) is returned only when the effective mode is scan-only, malware and
+    every other step passed, and capacity/speed were skipped solely by the scan-only gate."""
     malware = result.step("malware")
     if malware and malware.status == StepStatus.FAIL:
         return Verdict.MALWARE_DETECTED, [
@@ -62,6 +97,8 @@ def classify(result: InspectionResult) -> tuple[Verdict, list[str]]:
         return Verdict.SPEC_MISMATCH, reasons
     if result.steps and all(step.status == StepStatus.PASS for step in result.steps):
         return Verdict.NO_DEFECT, ["All steps passed"]
+    if _is_scan_only_pass(result):
+        return Verdict.NO_DEFECT_SCAN_ONLY, [SCAN_ONLY_REASON]
     return Verdict.INCONCLUSIVE, [
         f"{step.name}: {step.summary}" for step in result.steps if step.status != StepStatus.PASS
     ]
@@ -224,9 +261,9 @@ def inspect(
     )
     reason = "Scan and hashing not completed"
     if not config.allow_destructive:
-        permitted, reason = False, "allow_destructive = false"
+        permitted, reason = False, _SCAN_ONLY_DESTRUCTIVE_OFF
     elif result.mode is not InspectionMode.FULL:
-        permitted, reason = False, "Inspection mode is scan_only"
+        permitted, reason = False, _SCAN_ONLY_MODE
     elif is_mounted(block_info(runner, path)):
         permitted, reason = False, "Still mounted"
     for name, step in (("capacity", CapacityStep()), ("speed", SpeedStep())):

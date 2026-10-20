@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from tests.test_store import _completed, _started
-from usb_sentinel.libs import InspectionMode, StepResult, StepStatus
+from usb_sentinel.libs import InspectionMode, StepResult, StepStatus, Verdict
 from usb_sentinel.libs.report.json_report import digest, to_json
 from usb_sentinel.libs.store import row_from_result
 
@@ -70,3 +70,12 @@ class TestRowFromResult:
         assert row["read_mb_s"] is None
         assert row["verdict_code"] == "I"
         assert row["finished_at"] is None
+
+    def test_scan_only_verdict_code_is_lower_n(self, tmp_path: Path) -> None:
+        """検査のみの判定は verdict_code "n" で記録し、JSON の verdict と一致する。"""
+        result = _completed(tmp_path)
+        result.verdict = Verdict.NO_DEFECT_SCAN_ONLY
+        payload = json.loads(to_json(result))
+        row = row_from_result(result, digest(result))
+        assert payload["verdict"] == row["verdict"] == "No Defect (Scan Only)"
+        assert row["verdict_code"] == "n"

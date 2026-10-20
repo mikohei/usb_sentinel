@@ -1,6 +1,7 @@
 """Verdict classification (classify).
 
-Verify the priority order: malware > Defective > Spec Mismatch > No Defect > Inconclusive.
+Verify the priority order: malware > Defective > Spec Mismatch > No Defect >
+No Defect (Scan Only) > Inconclusive.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from typing import Any
 
 from usb_sentinel.libs import (
     DeviceInfo,
+    InspectionMode,
     InspectionResult,
     StepResult,
     StepStatus,
@@ -225,3 +227,84 @@ def test_missing_db_reason_reaches_reasons() -> None:
     verdict, reasons = classify(result)
     assert verdict is Verdict.INCONCLUSIVE
     assert f"malware: {DB_MISSING_SUMMARY}" in reasons
+
+
+def _scan_only(
+    *steps: StepResult, mode: InspectionMode = InspectionMode.SCAN_ONLY
+) -> InspectionResult:
+    device = DeviceInfo(path="/dev/sda", kernel_name="sda", advertised_bytes=1)
+    return InspectionResult(
+        device=device, started_at="2024-01-01T00:00:00+00:00", steps=list(steps), mode=mode
+    )
+
+
+def _gate_skips(reason: str = "allow_destructive = false") -> list[StepResult]:
+    return [
+        StepResult(name="capacity", status=StepStatus.SKIPPED, summary=reason),
+        StepResult(name="speed", status=StepStatus.SKIPPED, summary=reason),
+    ]
+
+
+class TestScanOnlyVerdict:
+    def test_scan_only_pass_is_no_defect_scan_only(self) -> None:
+        """検査のみで他がすべて合格なら No Defect (Scan Only) になる。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.PASS, summary="No malware"),
+            StepResult(name="hash_inventory", status=StepStatus.PASS, summary="0 files"),
+            *_gate_skips(),
+        )
+        verdict, reasons = classify(result)
+        assert verdict is Verdict.NO_DEFECT_SCAN_ONLY
+        assert reasons == ["Scan only: capacity and speed not tested"]
+
+    def test_mode_scan_only_reason_also_counts(self) -> None:
+        """M キーで検査のみを選んだ場合の理由でも同じ判定になる。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.PASS),
+            *_gate_skips("Inspection mode is scan_only"),
+        )
+        assert classify(result)[0] is Verdict.NO_DEFECT_SCAN_ONLY
+
+    def test_scan_only_with_error_step_is_inconclusive(self) -> None:
+        """検査のみでも他のステップが ERROR なら判定不能のまま。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.PASS),
+            StepResult(name="hash_inventory", status=StepStatus.ERROR, summary="x"),
+            *_gate_skips(),
+        )
+        assert classify(result)[0] is Verdict.INCONCLUSIVE
+
+    def test_scan_only_with_malware_error_is_inconclusive(self) -> None:
+        """ウイルス検査が失敗した検査のみは判定不能のまま。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.ERROR, summary="Scan failed"),
+            *_gate_skips("Scan and hashing not completed"),
+        )
+        assert classify(result)[0] is Verdict.INCONCLUSIVE
+
+    def test_other_skip_reason_is_inconclusive(self) -> None:
+        """検査のみ以外の理由で飛ばした容量と速度は判定不能のまま。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.PASS),
+            *_gate_skips("Still mounted"),
+        )
+        assert classify(result)[0] is Verdict.INCONCLUSIVE
+
+    def test_full_mode_with_gate_skips_is_inconclusive(self) -> None:
+        """実効モードが full なら検査のみの判定は使わない。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.PASS),
+            *_gate_skips(),
+            mode=InspectionMode.FULL,
+        )
+        assert classify(result)[0] is Verdict.INCONCLUSIVE
+
+    def test_full_mode_all_pass_is_no_defect(self) -> None:
+        """破壊検査まで全部合格なら従来どおり No Defect。"""
+        result = _scan_only(
+            StepResult(name="malware", status=StepStatus.PASS),
+            StepResult(name="capacity", status=StepStatus.PASS),
+            StepResult(name="speed", status=StepStatus.PASS),
+            mode=InspectionMode.FULL,
+        )
+        assert classify(result)[0] is Verdict.NO_DEFECT

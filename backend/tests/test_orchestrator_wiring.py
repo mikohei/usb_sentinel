@@ -69,7 +69,7 @@ class TestStoreWiring:
 
         assert result.warnings == ["SQLite record failed (start): SQLite error: database is locked"]
         assert _statuses(result)["malware"] is StepStatus.PASS
-        assert result.verdict is Verdict.INCONCLUSIVE
+        assert result.verdict is Verdict.NO_DEFECT_SCAN_ONLY
 
     def test_store_none_is_accepted(self, full_runner: FakeRunner, config: Config) -> None:
         result = inspect(full_runner, config, "/dev/sda", None)

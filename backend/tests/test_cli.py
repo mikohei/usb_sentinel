@@ -70,7 +70,7 @@ class TestMain:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full_runner: FakeRunner
     ) -> None:
         """A normal inspect leaves one completed row, and the exit code follows the verdict
-        (1 for Inconclusive)."""
+        (1 for No Defect (Scan Only))."""
         db = tmp_path / "db" / "inspections.sqlite"
         db.parent.mkdir()
 
@@ -81,7 +81,8 @@ class TestMain:
         assert len(rows) == 1
         row = rows[0]
         assert row["state"] == "completed"
-        assert row["verdict"] == "Inconclusive"
+        assert row["verdict"] == "No Defect (Scan Only)"
+        assert row["verdict_code"] == "n"
         assert row["step_malware"] == "pass"
         assert row["step_capacity"] == "skipped"
         (result_dir,) = _result_dirs(tmp_path)

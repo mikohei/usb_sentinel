@@ -2,7 +2,7 @@
 
 # 表示フロントエンド（USB Sentinel Display）
 
-Raspberry Pi 4に接続した3.5インチHDMIタッチディスプレイ（480x320）に、4ポート分の検査状態と選択中ポートのQRコードを表示するtkinterアプリケーションである。`backend/`には手を入れず、ホスト上で次の4つを1秒周期で読んで画面を組み立てる。
+Raspberry Pi 4に接続した3.5インチHDMIタッチディスプレイに、4ポート分の検査状態と選択中ポートのQRコードを表示するtkinterアプリケーションである。画面は480x320で設計し、実際の画面に合わせて拡大する。`backend/`には手を入れず、ホスト上で次の4つを1秒周期で読んで画面を組み立てる。
 
 - `/var/lib/usb-sentinel/results/<timestamp>-<serial>/result.json`（検査結果。これが正本）
 - `/var/lib/usb-sentinel/db/inspections.sqlite`（backendのSQLite索引。読み取り専用。無ければ結果ディレクトリの走査だけで動く）
@@ -37,33 +37,9 @@ y320 +--------+----------------------------+
 
 ## ディスプレイの設置
 
-Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/install-all.sh`が手順3〜8と10を行う（自動起動の項目は無効の状態で書く）。手順1、2、9は常に手作業で、最後に`scripts/kiosk-enable.sh`を実行する。backendのDocker構成（ルートの`README.ja.md`）を導入済みであること。
+Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/install-all.sh`は、タッチドライバ（手順2）とポートのキャリブレーション（手順9）を除く以下のすべてを行い、最後の手順でキオスクを有効化する。番号付きの手順は、一部を手でやり直すときに使う。backendのDocker構成（ルートの`README.ja.md`）はインストーラの手順4（`scripts/install-docker.sh`）が行う。
 
-1. **解像度を480x320に固定する。** 480x320より高い解像度はLCD側で縮小されてQRが滲む。Ubuntu on Pi 4はKMSドライバで動くため、効く層が3つに分かれる。GNOMEセッションの解像度を決めるのはmutterなので(c)を主にし、(b)をコンソール用に併用する。
-   - (a) `/boot/firmware/config.txt`（ファームウェア層。KMSでは効かない可能性が高い。効かなければ消す）
-     ```ini
-     hdmi_group=2
-     hdmi_mode=87
-     hdmi_cvt=480 320 60 6 0 0 0
-     hdmi_drive=2
-     ```
-   - (b) `/boot/firmware/cmdline.txt`にカーネル引数`video=HDMI-A-1:480x320@60`を追加する（コンソールと初期モード用）。
-   - (c) **GNOMEセッション**: 「設定→ディスプレイ」で480x320を選ぶ。一覧に無い場合は`~/.config/monitors.xml`に次のように書く。`connector`は`HDMI-1`、`vendor`などの値は設定アプリで一度別の解像度を選んで生成されたファイルから写す。GDMのログイン画面にも効かせるなら`sudo cp ~/.config/monitors.xml /var/lib/gdm3/.config/monitors.xml`し、所有者を`gdm:gdm`にする。
-     ```xml
-     <monitors version="2">
-       <configuration>
-         <logicalmonitor>
-           <x>0</x><y>0</y><scale>1</scale><primary>yes</primary>
-           <monitor>
-             <monitorspec><connector>HDMI-1</connector><vendor>...</vendor><product>...</product><serial>...</serial></monitorspec>
-             <mode><width>480</width><height>320</height><rate>60</rate></mode>
-           </monitor>
-         </logicalmonitor>
-       </configuration>
-     </monitors>
-     ```
-   - **確認方法**: 手順11でアプリを起動したとき、標準エラーにも情報ストリップにも「画面解像度WxH（480x320を想定）」の警告が出ないこと。出る場合は上の(c)が効いていない。
-   - どの手段でも480x320が選べない場合は、LCDが整数比で縮小できる960x640を選び、アプリ側を2倍で描く`--scale 2`を実装する案がある。現時点では実装していない。
+1. **より鮮明な表示（任意）。** アプリは480x320の設計を画面に合わせて拡大する（800x600なら1.67倍で余白は黒、960x640なら2倍）。`install-all.sh`は`INSTALL_VIDEO_HINT=1`を付けると`/boot/firmware/cmdline.txt`に`video=HDMI-A-1:480x320@60`を追加できる。これはテキストコンソールとGDMのログイン画面にだけ効き、アプリには影響しない。最も鮮明にするには、「設定→ディスプレイ」に480x320か960x640があればそれを選ぶ。この手順は必須ではない。
 2. **タッチドライバ**を入れる。ベンダー手順（https://osoyoo.com/ja/?p=56145）に従う。ベンダーの注記では「Raspberry Pi OS bookwormではタッチ非対応」とあり、Ubuntuでの動作は未検証である。ドライバが動かなくても本アプリはキーボードで全操作できる（「操作」節）。外部サイトのスクリプトを本プロジェクトから自動取得・実行はしない。
 3. **日本語フォント**を入れる。
    ```bash
@@ -113,12 +89,12 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/ins
     sed "s|<user>|$USER|g" deploy/usb-sentinel-display.desktop > ~/.config/autostart/usb-sentinel-display.desktop
     ```
     プロジェクトを`/home/<user>/usb_sentinel`以外に置いた場合は`--project`のパスも直す。
-    `install-all.sh`はこのファイルを書いたあと`Hidden=true`を追記する。`sudo bash ../scripts/kiosk-enable.sh`がその行を外すまで、ログイン時に何も起動しない。項目は5秒待ってから起動し（`X-GNOME-Autostart-Delay=5`）、アプリの出力を`~/.local/state/usb-sentinel-display/autostart.log`に書く。
-11. **動作を確認し、キオスクを有効にする。** 手動で起動し、USBを挿して表示を確かめる。
+    `install-all.sh`は手順6でこのファイルを`Hidden=true`付きで書き、手順10でキオスクを有効化するときにその行を外す。有効化しない指示（`INSTALL_KIOSK=0`または`n`）をしたときだけ、あとで`sudo bash ../scripts/kiosk-enable.sh`がその行を外す。項目は5秒待ってから起動し（`X-GNOME-Autostart-Delay=5`）、アプリの出力を`~/.local/state/usb-sentinel-display/autostart.log`に書く。
+11. **動作を確認する。** 手動で起動し、USBを挿して表示を確かめる。
     ```bash
     uv run usb-sentinel-display run --windowed
     ```
-    `Ctrl+Q`で終了する。次に`sudo bash ../scripts/kiosk-enable.sh`を実行して再起動する。自動起動した全画面に4つのタイルが出る。
+    `Ctrl+Q`で終了し、`sudo reboot`で再起動する。自動起動した全画面に4つのタイルが出る（インストーラでキオスクを有効化しなかった場合は、先に`sudo bash ../scripts/kiosk-enable.sh`を実行する）。
     `--kiosk`では`Ctrl+Q`が使えない。復旧はテキストコンソール（Ctrl+Alt+F3）またはSSHから`pkill -f usb-sentinel-display`で行う。自動起動とロックダウンを戻すには`sudo bash scripts/kiosk-disable.sh`を実行する。
 
 ## ポートのキャリブレーション
@@ -183,7 +159,7 @@ Ubuntu Desktop（Pi 4、GNOME）を前提にした手順である。`scripts/ins
 uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /path/to/results --sys-block /path/to/sys_block
 ```
 
-`run`のオプションは`--results-dir`、`--sys-block`、`--windowed`または`--kiosk`（排他）、`--no-systemctl`（`systemctl`を呼ばない。開発機用。ユニットの状態が取れないため、SQLite索引に`started`行があるディスクは結果が出るまで「検査中」のまま表示される）。
+`run`のオプションは`--results-dir`、`--sys-block`、`--windowed`または`--kiosk`（排他）、`--scale <倍率>`（「操作」節を参照）、`--no-systemctl`（`systemctl`を呼ばない。開発機用。ユニットの状態が取れないため、SQLite索引に`started`行があるディスクは結果が出るまで「検査中」のまま表示される）。
 `calibrate`のオプションは`--sys-block`と`--interval`（確認間隔の秒数。既定は`1.0`）。
 
 ## 操作
@@ -206,11 +182,12 @@ uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /pa
 
 言語は切り替えるたびに状態ファイルに記録され、次回の起動では設定ファイルの`language`より優先される。記録先は`$XDG_STATE_HOME/usb-sentinel-display/language`、`XDG_STATE_HOME`が無ければ`~/.local/state/usb-sentinel-display/language`である。書けないときは標準エラーに警告を1回出すだけで、表示は切り替わる。結果ディレクトリには何も書かない。
 
-起動モードは3つある。
+起動モードは3つあり、拡大の指定が1つある。全画面では480x320の設計を画面に合わせて拡大し、余白を黒で埋める。
 
 - 指定なし: 全画面。`Ctrl+Q`で終了できる。
 - `--kiosk`: 全画面で`Ctrl+Q`を無効にする。`.desktop`はこのモードで起動する。停止は別の端末（SSHなど）から`pkill -f usb-sentinel-display`で行う。アプリはSIGTERMを受けると次の更新で終了する。
-- `--windowed`: 480x320のウィンドウで表示する。開発機用。
+- `--windowed`: 480x320のウィンドウで表示する（`--scale`を付けるとその倍率）。開発機用。
+- `--scale <倍率>`: 画面に合わせる代わりに、480x320の設計を固定の倍率（0.25〜8）で描く。開発用。`--windowed --scale 2`は960x640のウィンドウを開く。範囲外の値は終了コード2で止まる。
 
 設定ファイルを変えた後の再起動手順は次のとおり。
 
@@ -322,7 +299,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 
 ## トラブルシュート
 
-ログイン後にアプリが出ないときは、まず`~/.local/state/usb-sentinel-display/autostart.log`を読む（自動起動の項目がアプリの出力をここに書く）。ファイルが無ければ項目に`Hidden=true`が残っている。`sudo bash scripts/kiosk-enable.sh`を実行する。
+ログイン後にアプリが出ないときは、まず`~/.local/state/usb-sentinel-display/autostart.log`を読む（自動起動の項目がアプリの出力をここに書く）。ファイルが無ければ項目に`Hidden=true`が残っている。インストーラでキオスクを有効化しなかった状態である。`sudo bash scripts/kiosk-enable.sh`を実行する。
 
 情報ストリップの文言ごとの原因と対処。
 
@@ -336,7 +313,7 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 | 結果破損 | `result.json`が10秒以上読めない | `cat result.json`で内容を確認する。backendが書き込み中なら待つ。`F5`で再読み込み |
 | 内部エラー: <例外名> | 更新処理で例外が出た。前回の表示は保持される | 標準エラー出力（自動起動なら`~/.local/state/usb-sentinel-display/autostart.log`）のスタックトレースを見る |
 | 内部エラーが継続中。標準エラー出力を確認 | 同じ例外が30秒連続した | 同上 |
-| 画面解像度WxH（480x320を想定） | 解像度が480x320に固定されていない | 「ディスプレイの設置」手順1 |
+| 画面解像度WxH（480x320未満） | 画面が設計より小さい | 480x320以上のモードを選ぶ（「設定→ディスプレイ」） |
 | 他N台 | 5台以上接続している | タイルは先頭4台だけ表示する |
 | SQLite索引が無い／開けない／新しい形式のため結果ディレクトリを走査（SQLiteの文言が出続ける） | 索引が読めず走査にフォールバックしている。表示は続く | 表示ユーザーが`usb-sentinel`グループに入っているか（`id`）、`sqlite_path`のパスにbackendがDBを作っているか（`ls -l /var/lib/usb-sentinel/db`）、ディレクトリが`2770`かを確認する。backend第2期を導入していない機や開発機では`sqlite_path = ""`で索引を無効にすれば文言は消える。「新しい形式」はfrontendの更新で直す |
 
@@ -412,14 +389,14 @@ uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --
 uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --mode-scene confirm --out /tmp/confirm.png
 ```
 
-シーンAは4台（異常なし、マルウェア検知、検査中、結果破損）、シーンBは2台（仕様不一致、不良）とP3・P4の未接続である。`dev-screenshot.py`は`systemctl`の出力を偽装して「検査中」を出し、`XDG_STATE_HOME`を`<fixtures>/state`に向け、同じディレクトリの`scripts/fixtures_mode.py`と`scripts/dev_mode_scenes.py`を使う。Retina画面では`screencapture`が960x640で書くので、`sips -z 320 480 <png>`で縮める。`--geometry 640x400`で解像度警告、`--results-dir /nonexistent`で「結果ディレクトリが見つからない」を確認できる。`make-fixtures.py`が書く`display.toml`は`sqlite_path = ""`で索引を無効にしているので、開発機でSQLiteの文言は出ない。
+シーンAは4台（異常なし、マルウェア検知、検査中、結果破損）、シーンBは2台（仕様不一致、不良）とP3・P4の未接続である。`dev-screenshot.py`は`systemctl`の出力を偽装して「検査中」を出し、`XDG_STATE_HOME`を`<fixtures>/state`に向け、同じディレクトリの`scripts/fixtures_mode.py`と`scripts/dev_mode_scenes.py`を使う。Retina画面では`screencapture`が960x640で書くので、`sips -z 320 480 <png>`で縮める。`--geometry 400x300`で480x320未満の警告、`--results-dir /nonexistent`で「結果ディレクトリが見つからない」を確認できる。`make-fixtures.py`が書く`display.toml`は`sqlite_path = ""`で索引を無効にしているので、開発機でSQLiteの文言は出ない。
 
 ## 実機確認項目
 
 開発機（macOS）では確認できず、Pi（aarch64、Ubuntu Desktop）で確かめる事項。
 
 1. uv管理のPython 3.13で`import tkinter`が通ること。通らなければ手順8のapt構成に切り替える。
-2. 解像度固定が効く層。手順1の(a)(b)(c)のどれで480x320になるか。アプリの解像度警告が出ないことで判定する。
+2. パネルの実際のモードでの拡大表示。黒い余白が出て、タイルとQRが読め、QRをスマートフォンで読み取れること。
 3. タッチドライバがUbuntuで動き、タップが`<Button-1>`として届いてタイルと◀▶で選択が変わること。動かなくてもキーボードで運用できる。
 4. sysfsのポートパスのディレクトリ（例`/sys/bus/usb/devices/1-1.3`の実体）の`st_mtime`がUSBを挿した時刻になること。`stat`で挿入前後を比べる。ならない場合はシステム起動時刻へフォールバックするため、起動後に書かれた結果はすべて候補になる（起動前の結果は拾わない）。
 5. `systemctl show -p Id -p ActiveState`に複数ユニットを渡したときの出力が、`Id=`で始まるブロックの空行区切りであること。

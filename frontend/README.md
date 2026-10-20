@@ -2,7 +2,7 @@
 
 # Display frontend (USB Sentinel Display)
 
-A tkinter application that shows the inspection status of four ports and the QR code of the selected port on a 3.5-inch HDMI touch display (480x320) connected to a Raspberry Pi 4. It does not touch `backend/`. Every second it reads the following four sources on the host and builds the screen from them.
+A tkinter application that shows the inspection status of four ports and the QR code of the selected port on a 3.5-inch HDMI touch display connected to a Raspberry Pi 4. The screen is a 480x320 design, scaled to the actual screen. It does not touch `backend/`. Every second it reads the following four sources on the host and builds the screen from them.
 
 - `/var/lib/usb-sentinel/results/<timestamp>-<serial>/result.json` (the inspection result; this is the source of truth)
 - `/var/lib/usb-sentinel/db/inspections.sqlite` (the backend's SQLite index; opened read-only; without it the app works by scanning the results directory alone)
@@ -37,33 +37,9 @@ y320 +--------+----------------------------+
 
 ## Display setup
 
-These steps assume Ubuntu Desktop (Pi 4, GNOME). `scripts/install-all.sh` performs steps 3-8 and 10 (with the autostart entry disabled); steps 1, 2 and 9 are always manual, and `scripts/kiosk-enable.sh` is the final step. The backend Docker setup (the root `README.md`) must already be installed.
+These steps assume Ubuntu Desktop (Pi 4, GNOME). `scripts/install-all.sh` does everything below except the touch driver (step 2) and port calibration (step 9), and arms the kiosk in its last step; the numbered steps are for redoing one part by hand. The backend Docker setup (the root `README.md`) is step 4 of the installer (`scripts/install-docker.sh`).
 
-1. **Fix the resolution at 480x320.** At resolutions higher than 480x320, the LCD downscales the image and the QR code blurs. Ubuntu on the Pi 4 runs on the KMS driver, so the setting takes effect in three separate layers. The resolution of the GNOME session is decided by mutter, so use (c) as the main setting and use (b) alongside it for the console.
-   - (a) `/boot/firmware/config.txt` (firmware layer. It probably has no effect under KMS. Remove it if it does nothing.)
-     ```ini
-     hdmi_group=2
-     hdmi_mode=87
-     hdmi_cvt=480 320 60 6 0 0 0
-     hdmi_drive=2
-     ```
-   - (b) Add the kernel argument `video=HDMI-A-1:480x320@60` to `/boot/firmware/cmdline.txt` (for the console and the initial mode).
-   - (c) **GNOME session**: choose 480x320 in "Settings → Displays". If it is not in the list, write `~/.config/monitors.xml` as shown below. Use `HDMI-1` for `connector`, and copy values such as `vendor` from the file that the Settings app generates once you select a different resolution there. To apply it to the GDM login screen as well, run `sudo cp ~/.config/monitors.xml /var/lib/gdm3/.config/monitors.xml` and change the owner to `gdm:gdm`.
-     ```xml
-     <monitors version="2">
-       <configuration>
-         <logicalmonitor>
-           <x>0</x><y>0</y><scale>1</scale><primary>yes</primary>
-           <monitor>
-             <monitorspec><connector>HDMI-1</connector><vendor>...</vendor><product>...</product><serial>...</serial></monitorspec>
-             <mode><width>480</width><height>320</height><rate>60</rate></mode>
-           </monitor>
-         </logicalmonitor>
-       </configuration>
-     </monitors>
-     ```
-   - **How to check**: when you start the app in step 11, neither standard error nor the info strip should show the warning "Resolution WxH (expected 480x320)". If it appears, (c) above is not taking effect.
-   - If 480x320 cannot be selected by any means, one option is to select 960x640, which the LCD can downscale at an integer ratio, and implement `--scale 2` so the app draws at 2x. This is not implemented at present.
+1. **Sharper output (optional).** The app scales its 480x320 design to the screen (800x600 → 1.67x, letterboxed; 960x640 → 2x). `install-all.sh` can add `video=HDMI-A-1:480x320@60` to `/boot/firmware/cmdline.txt` with `INSTALL_VIDEO_HINT=1`; it only affects the text console and the GDM greeter, not the app. For the sharpest image, pick 480x320 or 960x640 in Settings → Displays if offered. Nothing here is required.
 2. **Install the touch driver.** Follow the vendor's instructions (https://osoyoo.com/ja/?p=56145). The vendor's note says "touch is not supported on Raspberry Pi OS bookworm", and operation on Ubuntu has not been verified. Even if the driver does not work, every operation in this app can be done from the keyboard (the "Controls" section). This project does not automatically download or run scripts from external sites.
 3. **Install a Japanese font.**
    ```bash
@@ -113,12 +89,12 @@ These steps assume Ubuntu Desktop (Pi 4, GNOME). `scripts/install-all.sh` perfor
     sed "s|<user>|$USER|g" deploy/usb-sentinel-display.desktop > ~/.config/autostart/usb-sentinel-display.desktop
     ```
     If you placed the project somewhere other than `/home/<user>/usb_sentinel`, also fix the `--project` path.
-    `install-all.sh` writes this file and appends `Hidden=true`, so nothing starts at login until `sudo bash ../scripts/kiosk-enable.sh` removes that line. The entry waits 5 seconds (`X-GNOME-Autostart-Delay=5`) and writes the app's output to `~/.local/state/usb-sentinel-display/autostart.log`.
-11. **Check operation, then arm the kiosk.** Start the app manually, plug in a USB drive and check the display.
+    `install-all.sh` writes this file in step 6 with `Hidden=true` and removes that line when it arms the kiosk in step 10. Only when the installer was told not to arm (`INSTALL_KIOSK=0` or `n`) does `sudo bash ../scripts/kiosk-enable.sh` remove it later. The entry waits 5 seconds (`X-GNOME-Autostart-Delay=5`) and writes the app's output to `~/.local/state/usb-sentinel-display/autostart.log`.
+11. **Check operation.** Start the app manually, plug in a USB drive and check the display.
     ```bash
     uv run usb-sentinel-display run --windowed
     ```
-    Press `Ctrl+Q` to quit. Then run `sudo bash ../scripts/kiosk-enable.sh` and reboot; the autostarted full-screen app shows four tiles.
+    Press `Ctrl+Q` to quit, then `sudo reboot`; the autostarted full-screen app shows four tiles. (If the installer was told not to arm, run `sudo bash ../scripts/kiosk-enable.sh` first.)
     In `--kiosk` mode there is no `Ctrl+Q`. Recover from the text console (Ctrl+Alt+F3) or SSH with `pkill -f usb-sentinel-display`, or undo autostart and the lockdown with `sudo bash scripts/kiosk-disable.sh`.
 
 ## Port calibration
@@ -183,7 +159,7 @@ Command-line values override the configuration file. `--config` is a common opti
 uv run usb-sentinel-display --config /path/to/display.toml run --results-dir /path/to/results --sys-block /path/to/sys_block
 ```
 
-The options of `run` are `--results-dir`, `--sys-block`, `--windowed` or `--kiosk` (mutually exclusive), and `--no-systemctl` (does not call `systemctl`; for development machines. Because the unit state cannot be obtained, a disk that has a `started` row in the SQLite index stays "Scanning" until a result appears).
+The options of `run` are `--results-dir`, `--sys-block`, `--windowed` or `--kiosk` (mutually exclusive), `--scale <factor>` (see "Controls"), and `--no-systemctl` (does not call `systemctl`; for development machines. Because the unit state cannot be obtained, a disk that has a `started` row in the SQLite index stays "Scanning" until a result appears).
 The options of `calibrate` are `--sys-block` and `--interval` (the check interval in seconds; the default is `1.0`).
 
 ## Controls
@@ -206,11 +182,12 @@ While the code dialog is open, every other key and tap (port selection, arrows, 
 
 Each time you switch the language, it is recorded in the state file, and at the next startup it takes precedence over `language` in the configuration file. The file is `$XDG_STATE_HOME/usb-sentinel-display/language`, or `~/.local/state/usb-sentinel-display/language` if `XDG_STATE_HOME` is not set. If it cannot be written, the app prints one warning to standard error and the display still switches. Nothing is written to the results directory.
 
-There are three startup modes.
+There are three startup modes and one scaling option. In full screen the app scales its 480x320 design to the screen and letterboxes the rest in black.
 
 - No option: full screen. `Ctrl+Q` quits.
 - `--kiosk`: full screen with `Ctrl+Q` disabled. The `.desktop` file starts the app in this mode. To stop it, run `pkill -f usb-sentinel-display` from another terminal (SSH, for example). On SIGTERM the app exits at its next update.
-- `--windowed`: shows a 480x320 window. For development machines.
+- `--windowed`: shows a 480x320 window (times `--scale`). For development machines.
+- `--scale <factor>`: draws the 480x320 design at a fixed factor (0.25 to 8) instead of fitting the screen. For development; `--windowed --scale 2` opens a 960x640 window. Out-of-range values exit with code 2.
 
 To restart after changing the configuration file:
 
@@ -322,7 +299,7 @@ The inspection-mode toggle raises the SQLite schema to `user_version` 2 (`mode` 
 
 ## Troubleshooting
 
-When the app does not appear after login, read `~/.local/state/usb-sentinel-display/autostart.log` first (the autostart entry redirects the app's output there). If the file is missing, the entry still has `Hidden=true`: run `sudo bash scripts/kiosk-enable.sh`.
+When the app does not appear after login, read `~/.local/state/usb-sentinel-display/autostart.log` first (the autostart entry redirects the app's output there). If the file is missing, the entry still has `Hidden=true`: the installer was told not to arm the kiosk. Run `sudo bash scripts/kiosk-enable.sh`.
 
 The cause and remedy for each message on the info strip.
 
@@ -336,7 +313,7 @@ The cause and remedy for each message on the info strip.
 | Broken | `result.json` has been unreadable for 10 seconds or more | Check the contents with `cat result.json`. If the backend is still writing, wait. Reload with `F5` |
 | Internal error: <exception name> | An exception occurred during an update. The previous display is kept | Look at the stack trace in standard error (`~/.local/state/usb-sentinel-display/autostart.log` for autostart) |
 | Internal error persists; check stderr | The same exception occurred for 30 seconds in a row | Same as above |
-| Resolution WxH (expected 480x320) | The resolution is not fixed at 480x320 | Step 1 of "Display setup" |
+| Resolution WxH is below 480x320 | The screen is smaller than the design | Use a 480x320 or larger mode (Settings → Displays) |
 | +N more | 5 or more disks are connected | Only the first 4 are shown as tiles |
 | No SQLite index / SQLite index unreadable / SQLite index schema is newer; scanning results dir (the SQLite message keeps appearing) | The index cannot be read and the app has fallen back to the scan. The display continues | Check whether the display user is in the `usb-sentinel` group (`id`), whether the backend has created the DB at the `sqlite_path` path (`ls -l /var/lib/usb-sentinel/db`), and whether the directory is `2770`. On a machine without backend phase 2 or on a development machine, disable the index with `sqlite_path = ""` and the message goes away. Fix "newer schema" by updating the frontend |
 
@@ -412,14 +389,14 @@ uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --
 uv run python scripts/dev-screenshot.py --fixtures /tmp/usb-sentinel-fixtures --mode-scene confirm --out /tmp/confirm.png
 ```
 
-Scene A has four disks (No Defect, Malware Detected, scanning, broken result), and scene B has two disks (Spec Mismatch, Defective) with P3 and P4 not connected. `dev-screenshot.py` fakes the output of `systemctl` to show "Scanning", points `XDG_STATE_HOME` at `<fixtures>/state` and uses the sibling modules `scripts/fixtures_mode.py` and `scripts/dev_mode_scenes.py`. On a Retina screen `screencapture` writes 960x640; shrink with `sips -z 320 480 <png>`. With `--geometry 640x400` you can check the resolution warning, and with `--results-dir /nonexistent` you can check "Results directory not found". The `display.toml` written by `make-fixtures.py` disables the index with `sqlite_path = ""`, so no SQLite message appears on a development machine.
+Scene A has four disks (No Defect, Malware Detected, scanning, broken result), and scene B has two disks (Spec Mismatch, Defective) with P3 and P4 not connected. `dev-screenshot.py` fakes the output of `systemctl` to show "Scanning", points `XDG_STATE_HOME` at `<fixtures>/state` and uses the sibling modules `scripts/fixtures_mode.py` and `scripts/dev_mode_scenes.py`. On a Retina screen `screencapture` writes 960x640; shrink with `sips -z 320 480 <png>`. With `--geometry 400x300` you can check the warning shown below 480x320, and with `--results-dir /nonexistent` you can check "Results directory not found". The `display.toml` written by `make-fixtures.py` disables the index with `sqlite_path = ""`, so no SQLite message appears on a development machine.
 
 ## On-device checks
 
 Items that cannot be checked on the development machine (macOS) and must be verified on the Pi (aarch64, Ubuntu Desktop).
 
 1. `import tkinter` works with uv-managed Python 3.13. If it does not, switch to the apt setup in step 8.
-2. Which layer of the resolution fix takes effect. Which of (a), (b), and (c) in step 1 produces 480x320. Judge by the absence of the app's resolution warning.
+2. Letterboxing on the panel's actual mode: black bars, tiles and QR readable, QR scans with a phone.
 3. The touch driver works on Ubuntu, taps arrive as `<Button-1>`, and the selection changes with the tiles and ◀▶. The system can be operated from the keyboard even if it does not work.
 4. The `st_mtime` of the port-path directory in sysfs (for example the real target of `/sys/bus/usb/devices/1-1.3`) becomes the time the USB drive was plugged in. Compare before and after insertion with `stat`. If it does not, the app falls back to the system boot time, so every result written after boot becomes a candidate (results from before boot are not picked up).
 5. When several units are passed to `systemctl show -p Id -p ActiveState`, the output is blocks that begin with `Id=`, separated by blank lines.

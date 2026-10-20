@@ -123,9 +123,10 @@ deploy/
   usb-sentinel-docker@.service systemd unit that starts Docker (host side)
   config.example.toml      All configuration keys
 scripts/
-  install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, ClamAV DB; autostart is written disabled)
-  kiosk-enable.sh          Final step: enables autostart and applies the GNOME lockdown
+  install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, ClamAV DB; arms the kiosk at the end)
+  kiosk-enable.sh          Arms the kiosk later when the installer was told not to
   kiosk-disable.sh         Recovery: disables autostart, stops the app, resets the lockdown
+  boot-video-hint.sh       Optional cmdline.txt video= hint (sourced by install-all.sh, INSTALL_VIDEO_HINT=1)
   ssh-access.sh            Opt-in key-only SSH for maintenance (sourced by install-all.sh, INSTALL_SSH=1)
   install-docker.sh        Docker setup (called from install-all.sh; can also be used alone)
   run-docker.sh            Starts an inspection container per USB drive
@@ -178,34 +179,61 @@ lost, because all of them remain in `result.json`. The `reindex` subcommand, whi
 
 ### 0. One-shot setup (recommended)
 
-Setup happens in three phases, so that a fresh install never leaves the operator in front of a
-locked-down kiosk on an unreadable screen.
+Two steps. The station is ready for people who do not know the technology inside.
 
-1. `sudo bash scripts/install-all.sh` on a Pi that is connected to the network, after cloning the
-   repository. It installs Docker, uv, the display app and the ClamAV definition DB, turns on
-   automatic login and writes the autostart entry with `Hidden=true`. Nothing starts at login;
-   the display user lands on the normal GNOME desktop.
-2. Manual tuning: fix the resolution at 480x320, install the touch driver, calibrate the ports
-   and adjust `config.toml` (the script lists these steps at the end).
-3. `sudo bash scripts/kiosk-enable.sh`, then reboot. It removes `Hidden=true` and applies the
-   GNOME lockdown. From now on the app covers the whole screen.
+1. On a Pi that is connected to the network, clone the repository and run one command:
+   ```bash
+   sudo INSTALL_YES=1 bash scripts/install-all.sh
+   # With maintenance SSH (recommended; see below)
+   sudo INSTALL_YES=1 INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
+   # When the display user is someone other than the user running sudo
+   sudo INSTALL_YES=1 DISPLAY_USER=kiosk bash scripts/install-all.sh
+   ```
+   It installs Docker, uv, the display app and the ClamAV definition DB, turns on automatic
+   login, writes the autostart entry and, in its last step, arms the kiosk (autostart enabled,
+   GNOME lockdown applied). The run is unattended and takes about 15 minutes.
+2. `sudo reboot`. From now on the app starts full screen every time the Pi is powered on.
 
-At the end `install-all.sh` prints the remaining manual work and a "checklist before unplugging the LAN". Re-running it keeps existing settings.
+Without `INSTALL_YES=1` the script asks three questions up front, before anything is changed:
+whether to run the official uv installer (SHA-256 shown; skipped when uv is already installed),
+whether to run freshclam, and whether to arm the kiosk at the end (`[Y/n]`, Enter means yes).
+At the end it prints the kiosk state, the escape routes, the optional steps and a "checklist
+before unplugging the LAN". Re-running it keeps existing settings.
 
-```bash
-sudo bash scripts/install-all.sh
-# When the display user is someone other than the user running sudo
-sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
-```
+#### Optional: port calibration
 
-Every question is asked up front, in the preflight, before anything is changed: the script fetches the
-official uv installer, shows its SHA-256 and asks for confirmation (skipped when uv is already
-installed), then asks whether to run freshclam. After that the run is unattended (about 15 minutes).
-`sudo INSTALL_YES=1 bash scripts/install-all.sh` answers yes to everything and asks nothing.
-Installing the touch panel driver, setting the 480x320 screen resolution, port calibration, and
-enabling the capacity and speed inspections (which erase the sample) are not automated; the script describes them as steps at the end.
-`kiosk-enable.sh` refuses to arm the kiosk unless `~/.config/monitors.xml` (or `xrandr` on X11)
-shows 480x320; `KIOSK_FORCE=1` overrides that check.
+Uncalibrated ports show `P?` with the kernel name and keep working. To give them names, log in over
+SSH or press Ctrl+Alt+F3 for the text console, run `usb-sentinel-display calibrate` (the exact
+command is printed at the end of the install) and write the `[[ports]]` table into
+`~/.config/usb-sentinel/display.toml`; the app reads it at its next start. See
+[frontend/README.md](frontend/README.md), "Port calibration".
+
+#### Opting out of arming
+
+Answer `n` to the kiosk question, or run with `INSTALL_KIOSK=0` (it beats `INSTALL_YES=1`). The
+display user then lands on the normal GNOME desktop with the autostart entry written but hidden.
+Arm later with `sudo bash scripts/kiosk-enable.sh` and reboot.
+
+#### Recovery
+
+Once armed, the app takes focus back from every window and GNOME has no shortcuts left. Press
+Ctrl+Alt+F3 for the text console, or, when SSH was enabled, plug in the LAN and log in with
+`ssh <admin>@<ip>`. Then run `pkill -f usb-sentinel-display` to stop the app and
+`sudo bash scripts/kiosk-disable.sh` to turn autostart off and reset the lockdown. Ctrl+Alt+F1
+returns to the desktop. A crash at login is logged in
+`~/.local/state/usb-sentinel-display/autostart.log`. If `INSTALL_VIDEO_HINT=1` (below) left the
+console blank, restore the boot line with `sudo cp /boot/firmware/cmdline.txt.bak /boot/firmware/cmdline.txt`.
+
+#### Screen size
+
+The app scales its 480x320 design to the screen (letterboxed with black bars). No resolution
+setting is needed. `INSTALL_VIDEO_HINT=1` adds the boot hint `video=HDMI-A-1:480x320@60` to
+`/boot/firmware/cmdline.txt` for a sharper text console and GDM greeter; it is off by default
+because the panel's acceptance of that mode is unverified. The installer keeps
+`cmdline.txt.bak` for undoing it.
+
+Installing the touch panel driver and enabling the capacity and speed inspections (which erase
+the sample) are not automated; the script lists them at the end.
 
 #### SSH for maintenance (optional)
 
@@ -226,13 +254,7 @@ ufw is already active. Without a key the script stops; it never falls back to pa
 the end it prints the LAN addresses and the `ssh <admin>@<ip>` command. sshd stays enabled after
 the LAN is unplugged, which is harmless; `sudo systemctl disable --now ssh` turns it off.
 
-**Recovery.** Once armed, the app takes focus back from every window and GNOME has no shortcuts
-left. Press Ctrl+Alt+F3 for the text console, or, when SSH was enabled above, plug in the LAN and
-log in with `ssh <admin>@<ip>`; then run
-`pkill -f usb-sentinel-display` to stop the app and `sudo bash scripts/kiosk-disable.sh` to turn
-autostart off and reset the lockdown. Ctrl+Alt+F1 returns to the desktop. A crash at login is
-logged in `~/.local/state/usb-sentinel-display/autostart.log`.
-Steps 1 to 3 explain what `install-all.sh` does internally, and are used to redo individual parts.
+Steps 1 to 3 below explain what `install-all.sh` does internally, and are used to redo individual parts.
 
 ### 1. Install Docker and the services
 
@@ -357,7 +379,7 @@ Either one alone returns the device to read-only, and the display's button becom
 A USB device that presents itself as a keyboard (BadUSB) could type at the kiosk. Three
 measures limit what it can do; none of them replaces the air gap.
 
-**GNOME lockdown (applied by `scripts/kiosk-enable.sh`).** `scripts/kiosk-lockdown.sh` clears
+**GNOME lockdown (applied by `install-all.sh` step 10 or `scripts/kiosk-enable.sh`).** `scripts/kiosk-lockdown.sh` clears
 every shortcut in `org.gnome.desktop.wm.keybindings`, `org.gnome.shell.keybindings`,
 `org.gnome.mutter.keybindings`, `org.gnome.mutter.wayland.keybindings` and
 `org.gnome.settings-daemon.plugins.media-keys` except `switch-to-session-1..12`
@@ -413,7 +435,7 @@ Items that only the real station can confirm:
    and letting autologin restart the display keeps the lock (baseline in `/run`).
 5. After a reboot the button shows "Mode: Scan only" and the mode file is gone.
 6. One wrong code survives a logout and a reboot in `~/.local/state/usb-sentinel-display/erase-strikes`.
-7. After `kiosk-enable.sh` ran, Super, Super+1..9, Shift+Super+1, Ctrl+Super+1, Super+A/S/V,
+7. After the installer armed the kiosk (or after `kiosk-enable.sh`), Super, Super+1..9, Shift+Super+1, Ctrl+Super+1, Super+A/S/V,
    Super+Page Down, Ctrl+Alt+arrows, Shift+Ctrl+Alt+arrows, Alt+F1, Alt+F2, Alt+Space,
    Alt+Tab, Alt+Esc, Alt+F4, Ctrl+Alt+T, Ctrl+Alt+Del, Ctrl+Alt+Tab, Print and the power key do
    nothing visible; Ctrl+Alt+F3 still opens the text console;
@@ -464,7 +486,6 @@ scan of the results directory and shows the reason on the info strip. A setup th
 For setup, port calibration, settings, controls, and troubleshooting, see
 [frontend/README.md](frontend/README.md). The main host settings required to enable it are as follows.
 
-- Fix the screen resolution at 480x320 (GNOME settings or `~/.config/monitors.xml`).
 - Disable GNOME automount. This is required on the Desktop edition; if it stays enabled, `run-docker.sh` refuses the inspection
   as a host-mounted disk.
 - Stop sleep and the screensaver (`gsettings`).
@@ -472,8 +493,8 @@ For setup, port calibration, settings, controls, and troubleshooting, see
   results root as `root:usb-sentinel` with `0750`, so group members can read it. The SQLite index
   directory (`2770`) is also readable by the same group.
 - Install `fonts-noto-cjk`.
-- Register `frontend/deploy/usb-sentinel-display.desktop` for XDG autostart (`~/.config/autostart/`);
-  `install-all.sh` writes it with `Hidden=true` and `kiosk-enable.sh` removes that line.
+- Register `frontend/deploy/usb-sentinel-display.desktop` for XDG autostart (`~/.config/autostart/`).
+  `install-all.sh` writes it and arms it in its last step unless told otherwise; `kiosk-disable.sh` hides it again.
 
 ## Carrying out results (across the air gap)
 

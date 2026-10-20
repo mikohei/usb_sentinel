@@ -123,9 +123,10 @@ deploy/
   usb-sentinel-docker@.service Docker起動用systemdユニット（ホスト側）
   config.example.toml      設定の全キー
 scripts/
-  install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、ClamAV DB。自動起動は無効の状態で書く）
-  kiosk-enable.sh          最終手順。自動起動を有効にし、GNOMEのロックダウンを適用する
+  install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、ClamAV DB。最後にキオスクを有効化する）
+  kiosk-enable.sh          導入時に有効化しなかったキオスクを、あとから有効化する
   kiosk-disable.sh         復旧用。自動起動を無効にし、アプリを止め、ロックダウンを戻す
+  boot-video-hint.sh       任意のcmdline.txt向けvideo=ヒント（install-all.shがINSTALL_VIDEO_HINT=1のときに読み込む）
   ssh-access.sh            保守用の鍵認証SSH（任意。install-all.shがINSTALL_SSH=1のときに読み込む）
   install-docker.sh        Docker構成の導入（install-all.shから呼ばれる。単独でも使える）
   run-docker.sh            USBごとに検査コンテナを起動
@@ -178,32 +179,56 @@ DBが壊れたときは、検査が走っていないことを確認してから
 
 ### 0. 一括導入（推奨）
 
-導入は3段階で進める。導入直後に、文字が読めない画面でロックダウン済みのキオスクに
-閉じ込められないようにするためである。
+手順は2つである。技術に詳しくない人が触る前提で、作業はスクリプトに任せる。
 
-1. ネットワーク接続中のPi上で、リポジトリをcloneしたあと`sudo bash scripts/install-all.sh`を1回実行する。
-   Docker、uv、表示アプリ、ClamAV定義DBを導入し、自動ログインを有効にし、自動起動の項目を`Hidden=true`付きで書く。
-   この時点では再起動しても表示アプリは起動しない。表示ユーザーは通常のGNOMEデスクトップに入る。
-2. 手作業の調整。解像度を480x320に固定し、タッチパネルのドライバを入れ、ポートを校正し、`config.toml`を直す
-   （スクリプトが終了時に手順を表示する）。
-3. `sudo bash scripts/kiosk-enable.sh`を実行して再起動する。`Hidden=true`を外し、GNOMEのロックダウンを適用する。
-   これ以後、アプリが画面全体を覆う。
+1. ネットワーク接続中のPi上で、リポジトリをcloneし、次のコマンドを1回実行する。
+   ```bash
+   sudo INSTALL_YES=1 bash scripts/install-all.sh
+   # 保守用SSHも入れる場合（推奨。後述）
+   sudo INSTALL_YES=1 INSTALL_SSH=1 SSH_AUTHORIZED_KEY="ssh-ed25519 AAAA... you@laptop" bash scripts/install-all.sh
+   # 表示ユーザーをsudoの実行者以外にする場合
+   sudo INSTALL_YES=1 DISPLAY_USER=kiosk bash scripts/install-all.sh
+   ```
+   Docker、uv、表示アプリ、ClamAV定義DBを導入する。自動ログインを有効にし、自動起動の項目を書く。
+   最後の手順でキオスクを有効化する（自動起動を有効にし、GNOMEのロックダウンを適用する）。
+   途中の操作は不要で、約15分で終わる。
+2. `sudo reboot`を実行する。以後、電源を入れるたびにアプリが全画面で起動する。
 
-`install-all.sh`は最後に残る手作業と「LANを外す前のチェックリスト」を表示する。再実行しても既存の設定は保持する。
+`INSTALL_YES=1`を付けない場合、スクリプトは冒頭で3つの質問をする。何も変更する前に済ませる。
+uvの公式インストーラを実行するか（SHA-256を表示する。uvが入っていれば省く）、freshclamを実行するか、
+最後にキオスクを有効化するか（`[Y/n]`。Enterだけなら「はい」）の3つである。
+終了時にキオスクの状態、復旧の経路、任意の手順、「LANを外す前のチェックリスト」を表示する。再実行しても既存の設定は保持する。
 
-```bash
-sudo bash scripts/install-all.sh
-# 表示ユーザーをsudoの実行者以外にする場合
-sudo DISPLAY_USER=kiosk bash scripts/install-all.sh
-```
+#### 任意: ポートのキャリブレーション
 
-質問はすべて冒頭の事前確認でまとめて行い、何も変更する前に済ませる。uvの公式インストーラを取得してSHA-256を表示し、
-実行してよいか尋ねる（uvが入っていれば省く）。続けてfreshclamを実行するかを尋ねる。以後は操作なしで完了まで進む（約15分）。
-`sudo INSTALL_YES=1 bash scripts/install-all.sh`はすべてに「はい」と答え、質問を一切しない。
-タッチパネルのドライバ導入、画面解像度480x320の設定、ポートのキャリブレーション、
-容量・速度検査の有効化（検体を消去する）は自動化せず、終了時に手順として案内する。
-`kiosk-enable.sh`は`~/.config/monitors.xml`（X11では`xrandr`）に480x320が無いと実行を拒む。
-`KIOSK_FORCE=1`でこの確認を省略できる。
+校正していないポートは`P?`とカーネル名で表示され、そのまま使える。ポート名を付けるには、
+SSHでログインするか、Ctrl+Alt+F3でテキストコンソールに入る。`usb-sentinel-display calibrate`を実行し
+（正確なコマンドは導入の最後に表示される）、`~/.config/usb-sentinel/display.toml`に`[[ports]]`を書く。
+アプリは次の起動時に読み込む。[frontend/README.ja.md](frontend/README.ja.md)の「ポートのキャリブレーション」を参照。
+
+#### キオスクを有効化しない場合
+
+キオスクの質問に`n`と答える。または`INSTALL_KIOSK=0`を付けて実行する（`INSTALL_YES=1`より優先する）。
+表示ユーザーは通常のGNOMEデスクトップに入る。自動起動の項目は書かれるが、隠した状態になる。
+あとから有効化するには`sudo bash scripts/kiosk-enable.sh`を実行して再起動する。
+
+#### 復旧
+
+有効化後はアプリがすべてのウィンドウからフォーカスを奪い、GNOMEのショートカットも残らない。
+復旧するには、Ctrl+Alt+F3でテキストコンソールに入る。SSHを有効にしていれば、LANをつないで`ssh <admin>@<ip>`でも入れる。
+`pkill -f usb-sentinel-display`でアプリを止め、`sudo bash scripts/kiosk-disable.sh`で自動起動とロックダウンを戻す。
+Ctrl+Alt+F1でデスクトップに戻る。ログイン時の異常終了は`~/.local/state/usb-sentinel-display/autostart.log`に残る。
+`INSTALL_VIDEO_HINT=1`（後述）でコンソールが表示されなくなったときは、
+`sudo cp /boot/firmware/cmdline.txt.bak /boot/firmware/cmdline.txt`で起動行を戻す。
+
+#### 画面サイズ
+
+アプリは480x320で設計した画面を、実際の画面に合わせて拡大する（余白は黒で埋める）。解像度の設定は不要である。
+`INSTALL_VIDEO_HINT=1`を付けると、`/boot/firmware/cmdline.txt`に起動ヒント`video=HDMI-A-1:480x320@60`を追加する。
+テキストコンソールとGDMのログイン画面が鮮明になる。パネルがこのモードを受け付けるか未確認のため、既定では付けない。
+スクリプトは元に戻すための`cmdline.txt.bak`を残す。
+
+タッチパネルのドライバ導入と、容量・速度検査の有効化（検体を消去する）は自動化しない。スクリプトが終了時に案内する。
 
 #### 保守用SSH（任意）
 
@@ -224,11 +249,7 @@ sudo INSTALL_SSH=1 SSH_AUTHORIZED_KEY_FILE=/path/to/id_ed25519.pub bash scripts/
 終了時にLANのIPアドレスと`ssh <admin>@<ip>`のコマンドを表示する。
 LANを外したあともsshdは有効のまま残るが、到達できないため害はない。止めるには`sudo systemctl disable --now ssh`を実行する。
 
-**復旧。** 有効化後はアプリがすべてのウィンドウからフォーカスを奪い、GNOMEのショートカットも残らない。
-復旧するには、Ctrl+Alt+F3でテキストコンソールに入る。上記のSSHを有効にしていれば、LANをつないで`ssh <admin>@<ip>`でも入れる。
-`pkill -f usb-sentinel-display`でアプリを止め、`sudo bash scripts/kiosk-disable.sh`で自動起動とロックダウンを戻す。
-Ctrl+Alt+F1でデスクトップに戻る。ログイン時の異常終了は`~/.local/state/usb-sentinel-display/autostart.log`に残る。
-手順1〜3は`install-all.sh`が内部で行う内容の説明で、個別にやり直すときに使う。
+以下の手順1〜3は`install-all.sh`が内部で行う内容の説明で、個別にやり直すときに使う。
 
 ### 1. Dockerとサービスの導入
 
@@ -344,7 +365,7 @@ grep allow_destructive /etc/usb-sentinel/config.toml
 キーボードを装うUSB機器（BadUSB）はキオスクに向けて打鍵できる。次の3つの対策で被害を限定するが、
 いずれもエアギャップの代わりにはならない。
 
-**GNOMEのロックダウン（`scripts/kiosk-enable.sh`が適用）。** `scripts/kiosk-lockdown.sh`は
+**GNOMEのロックダウン（`install-all.sh`の手順10または`scripts/kiosk-enable.sh`が適用）。** `scripts/kiosk-lockdown.sh`は
 `org.gnome.desktop.wm.keybindings`、`org.gnome.shell.keybindings`、`org.gnome.mutter.keybindings`、
 `org.gnome.mutter.wayland.keybindings`、`org.gnome.settings-daemon.plugins.media-keys`の全ショートカットを
 `switch-to-session-1..12`（Ctrl+Alt+F1〜F12。パスワード付きのテキストコンソールで、管理者の入口として残す）を
@@ -395,7 +416,7 @@ allow with-interface match-all { 09:*:* }
    ディスプレイが再起動してもロックは残る（ベースラインは`/run`）。
 5. 再起動後、ボタンは「モード: 検査のみ」で、モードファイルは消えている。
 6. 1回の誤入力がログアウトと再起動を越えて`~/.local/state/usb-sentinel-display/erase-strikes`に残る。
-7. `kiosk-enable.sh`の実行後、Super、Super+1〜9、Shift+Super+1、Ctrl+Super+1、Super+A/S/V、Super+Page Down、
+7. インストーラがキオスクを有効化したあと（または`kiosk-enable.sh`の実行後）、Super、Super+1〜9、Shift+Super+1、Ctrl+Super+1、Super+A/S/V、Super+Page Down、
    Ctrl+Alt+矢印、Shift+Ctrl+Alt+矢印、Alt+F1、Alt+F2、Alt+Space、Alt+Tab、Alt+Esc、Alt+F4、Ctrl+Alt+T、
    Ctrl+Alt+Del、Ctrl+Alt+Tab、Print、電源キーで画面に変化がない。Ctrl+Alt+F3ではテキストコンソールが開く。
    `gsettings list-recursively org.gnome.desktop.wm.keybindings`は空リストだけを返す。
@@ -444,7 +465,6 @@ backendが書くSQLite索引（`/var/lib/usb-sentinel/db/inspections.sqlite`）�
 導入手順、ポートのキャリブレーション、設定、操作、トラブルシュートは
 [frontend/README.ja.md](frontend/README.ja.md)を参照。有効化に必要なホスト設定の要点は次のとおり。
 
-- 画面解像度を480x320に固定する（GNOMEの設定または`~/.config/monitors.xml`）。
 - GNOMEの自動マウントを無効にする。Desktop版では必須で、有効のままだと`run-docker.sh`が
   host-mounted diskとして検査を拒否する。
 - スリープとスクリーンセーバーを止める（`gsettings`）。
@@ -453,7 +473,7 @@ backendが書くSQLite索引（`/var/lib/usb-sentinel/db/inspections.sqlite`）�
   ディレクトリ（`2770`）も同じグループで読める。
 - `fonts-noto-cjk`を導入する。
 - `frontend/deploy/usb-sentinel-display.desktop`をXDG autostart（`~/.config/autostart/`）に登録する。
-  `install-all.sh`は`Hidden=true`付きで書き、`kiosk-enable.sh`がその行を外す。
+  `install-all.sh`がこれを書き、指示がなければ最後の手順で有効化する。`kiosk-disable.sh`が再び隠す。
 
 ## 結果の持ち出し（air gap越し）
 

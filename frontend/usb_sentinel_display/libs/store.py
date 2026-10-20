@@ -103,9 +103,11 @@ class SqliteIndex:
             (rows, notice key). If the notice key is not None, rows is empty and the caller rescans.
         """
         try:
-            # Path.exists() re-raises OSErrors other than ENOENT etc. (e.g. EACCES when the parent
-            # lacks exec permission), so call it inside try and treat it as "cannot open".
-            if not self.path.exists():
+            # stat() rather than Path.exists(): since Python 3.14 exists() returns False for any
+            # OSError, which would report EACCES (parent lacks exec permission) as missing.
+            try:
+                self.path.stat()
+            except FileNotFoundError:
                 return [], NOTICE_DB_MISSING
             uri = f"{self.path.resolve().as_uri()}?mode=ro"
             conn = self._connect(uri, uri=True, timeout=_CONNECT_TIMEOUT_S)

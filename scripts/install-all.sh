@@ -100,6 +100,9 @@ if [[ -x "${UV_BIN}" ]]; then
 else
     readonly UV_TMP="$(mktemp -d)"
     trap 'rm -rf "${UV_TMP}"' EXIT
+    # mktemp -d creates a root-owned 0700 directory; the display user must be
+    # able to traverse it to read install.sh.
+    chmod 0755 "${UV_TMP}"
     curl -LsSf "${UV_INSTALLER_URL}" -o "${UV_TMP}/install.sh"
     echo "downloaded uv installer: ${UV_INSTALLER_URL}"
     echo "SHA-256: $(sha256sum "${UV_TMP}/install.sh" | cut -d' ' -f1)"

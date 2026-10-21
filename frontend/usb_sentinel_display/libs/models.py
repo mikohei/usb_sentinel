@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+# result.json verdict of a ClamAV detection (backend Verdict.MALWARE_DETECTED).
+MALWARE_VERDICT = "Malware Detected"
+
 
 class SlotState(StrEnum):
     """Display state of a slot (design doc 3.4)."""

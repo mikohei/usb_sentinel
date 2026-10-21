@@ -1,7 +1,7 @@
 from dataclasses import dataclass, replace
 
 from .config import PortMapping
-from .models import AttachedDisk, ResultRecord, ResultSummary, Slot, SlotState
+from .models import MALWARE_VERDICT, AttachedDisk, ResultRecord, ResultSummary, Slot, SlotState
 from .result_file import serial_for_dir
 from .units import ACTIVE_STATES, unit_name
 
@@ -29,8 +29,10 @@ def bind_result(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord
     """Pick the readable result bound to a disk (design doc 3.5 plus port_path priority).
 
     Candidates are readable with mtime at or after the connect time. The primary key is port_path
-    (kernel_name if the result has none). With several, prefer a dir-name serial match;
-    on a tie, the largest directory name.
+    (kernel_name if the result has none). With several, prefer a dir-name serial match, then
+    Malware Detected; on a tie, the largest directory name. One insertion normally has one
+    result; several mean the clock went back (an earlier session's result looks newer), and a
+    detection must not be hidden by it.
     """
     candidates: list[ResultRecord] = []
     for record in records:
@@ -46,8 +48,13 @@ def bind_result(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord
     if not candidates:
         return None
     wanted = serial_for_dir(disk.serial, disk.kernel_name)
-    preferred = [record for record in candidates if record.serial_part == wanted]
-    return max(preferred or candidates, key=lambda record: record.name)
+    preferred = [record for record in candidates if record.serial_part == wanted] or candidates
+    malware = [
+        record
+        for record in preferred
+        if record.summary is not None and record.summary.verdict == MALWARE_VERDICT
+    ]
+    return max(malware or preferred, key=lambda record: record.name)
 
 
 def bind_broken(disk: AttachedDisk, records: list[ResultRecord]) -> ResultRecord | None:

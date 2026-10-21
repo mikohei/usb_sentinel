@@ -274,6 +274,8 @@ backend第2期は検査1件ごとに`/var/lib/usb-sentinel/db/inspections.sqlite
 
 **何を読むか。** 接続中のディスクの接続時刻以降に始まった行（`started_at`の下限、プレースホルダ付きのSELECT 1文）を候補にする。行ごとに`results_dir/<inspection_id>/result.json`を従来どおり読み、SHA-256を再計算して`result_digest`と比べる。一致すれば完了結果、不一致なら即「結果破損」にする。`state='started'`で`result.json`がまだ無い行は「検査中」か「結果なし」の材料にする（「表示の意味」の状態表）。`inspection_id`は結果ディレクトリ名の形式（`<timestamp>-<serial>`）を通ったものだけを使い、`output_dir`列は使わない。
 
+**候補が複数あるとき。** 同じポートの候補が複数あれば、ディレクトリ名のシリアルが一致するものを優先し、その中に「マルウェア検知」があればそれを選ぶ。残りが並べばディレクトリ名の大きいものにする。1回の挿入に結果は通常1件だが、時計が戻ると前のセッションの結果も新しく見えて候補に入る。そのとき検知を古い結果で隠さないためである。時計の巻き戻しはルートREADMEの「安全設計」を参照。
+
 **どう開くか。** `file:...?mode=ro`のURIで接続し、`PRAGMA query_only = ON`と`PRAGMA busy_timeout = 1000`を設定する。SQLはSELECTだけで、DBには書かない。`PRAGMA user_version`が想定（`2`）より大きければ読まない。版2で`mode`列（`scan_only`／`full`。更新前の行はNULL）が増えたが、frontendは読まない。タイルのタグは`result.json`から作る。
 
 **フォールバック。** 次の場合は索引を使わず、従来の結果ディレクトリの走査に切り替える。表示は止まらず、情報ストリップに理由を出す。

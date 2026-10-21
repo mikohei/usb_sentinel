@@ -1,8 +1,10 @@
+import dataclasses
 from pathlib import Path
 
 from usb_sentinel_display.libs.config import PortMapping
 from usb_sentinel_display.libs.mapper import bind_broken, bind_result, bind_started
 from usb_sentinel_display.libs.models import (
+    MALWARE_VERDICT,
     AttachedDisk,
     ResultRecord,
     ResultSummary,
@@ -66,6 +68,12 @@ def record(
     return ResultRecord(
         dir_name, mtime, serial_part, summary(kernel, serial, port_path, mtime, dir_name), False
     )
+
+
+def with_verdict(rec: ResultRecord, verdict: str = MALWARE_VERDICT) -> ResultRecord:
+    """The same record with another verdict."""
+    assert rec.summary is not None
+    return dataclasses.replace(rec, summary=dataclasses.replace(rec.summary, verdict=verdict))
 
 
 def started(
@@ -133,6 +141,16 @@ class TestBindResult:
         mine_new = record(mtime=1150.0, name="20250601T120500Z-ABC123")
         assert bind_result(disk(), [other, mine_old, mine_new]) is mine_new
         assert bind_result(disk(serial="ZZZ"), [other, mine_old]) is other
+
+    def test_malware_detected_wins_over_a_larger_name(self) -> None:
+        """A clock that went back lets an earlier session's result bind too (its name sorts
+        later); among the serial matches, Malware Detected is shown instead of hidden."""
+        earlier_session = record(mtime=1300.0, name="20261020T230705Z-ABC123")
+        malware = with_verdict(record(mtime=1200.0, name="20260727T210948Z-ABC123"))
+        assert bind_result(disk(), [malware, earlier_session]) is malware
+        # The serial match still comes first: another drive's detection does not take over.
+        other = with_verdict(record(serial="OTHER", name="20261020T230000Z-OTHER"))
+        assert bind_result(disk(), [other, earlier_session]) is earlier_session
 
     def test_unreadable_records_skipped(self) -> None:
         assert bind_result(disk(), [record(broken=True)]) is None

@@ -238,7 +238,7 @@ class TestTilesView:
             labels = [i18n.verdict_label(lang, v) for v in VERDICT_CODES]
             labels.append(i18n.verdict_label(lang, "Bogus"))
             for label in labels:
-                width = fonts.verdict.measure("P1 " + label)
+                width = fonts.tile_title.measure("P1 " + label)
                 if label == "異常なし（検査のみ）":
                     width = min(width, fonts.verdict_compact.measure("P1 " + label))
                 assert width <= limit, f"{lang} {label!r} {width}px > {limit}px"
@@ -267,7 +267,7 @@ class TestTilesView:
             for item in canvas.find_all()
             if canvas.type(item) == "text"
         }
-        assert used["P1 異常なし"] == str(fonts.verdict)
+        assert used["P1 異常なし"] == str(fonts.tile_title)
         assert used["P2 異常なし（検査のみ）"] == str(fonts.verdict_compact)
 
     def test_state_labels_fit_tile(self, fonts: Fonts) -> None:
@@ -277,7 +277,7 @@ class TestTilesView:
         for lang in i18n.LANGUAGES:
             for key in state_keys:
                 label = i18n.text(lang, key)
-                width = fonts.verdict.measure("P4 " + label)
+                width = fonts.tile_title.measure("P4 " + label)
                 assert width <= limit, f"{lang} {key} {label!r} {width}px > {limit}px"
 
     def test_serial_text_rules(self) -> None:

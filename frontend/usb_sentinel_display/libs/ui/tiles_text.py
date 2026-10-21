@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..mode_view import ModeState, ModeView
-from ..models import Slot, SlotState
+from ..models import MALWARE_VERDICT, Slot, SlotState
 from ..result_file import TAG_ERASED, TAG_SCAN
 from . import theme
 from .i18n import state_label, text, verdict_label
@@ -100,6 +100,24 @@ def status_text(slot: Slot, now: float, dots: int, lang: str) -> str:
     return word
 
 
+def files_text(slot: Slot, lang: str) -> tuple[str, str] | None:
+    """File count for the right end of line 3: a finished result whose hash inventory has rows.
+
+    A drive straight from the factory should be empty, so files on it are worth a look even
+    when the verdict is clean.
+
+    Returns:
+        (full, short) texts, the short one for when the full one does not fit. None for an
+        empty or missing inventory.
+    """
+    if slot.state not in (SlotState.DONE, SlotState.REMOVED) or slot.result is None:
+        return None
+    lines = slot.result.detail.hash_lines
+    if lines is None or lines <= 0:
+        return None
+    return text(lang, "tile.files", count=lines), text(lang, "tile.files_short", count=lines)
+
+
 def title_text(slot: Slot, lang: str) -> str:
     """Port name and verdict on line 1 (state text when there is no verdict)."""
     label = text(lang, "fallback_label") if slot.fallback else slot.label
@@ -121,7 +139,7 @@ def is_malware(slot: Slot) -> bool:
     return (
         slot.state is SlotState.DONE
         and slot.result is not None
-        and slot.result.verdict == "Malware Detected"
+        and slot.result.verdict == MALWARE_VERDICT
     )
 
 

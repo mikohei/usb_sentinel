@@ -218,7 +218,7 @@ class TestTileTag:
         assert len(serials) == 1
         serial = str(canvas.itemcget(serials[0], "text"))
         assert serial.endswith("…")
-        total = fonts.body.measure(serial) + TAG_GAP + fonts.body.measure(tag_text)
+        total = fonts.tile_body.measure(serial) + TAG_GAP + fonts.tile_body.measure(tag_text)
         assert total <= LINE2_MAX_PX, f"{lang} {tag} {serial!r} {total}px"
 
     def test_removed_slot_also_tagged(self, root: tk.Tk, fonts: Fonts) -> None:

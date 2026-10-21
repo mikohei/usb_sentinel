@@ -2,6 +2,7 @@
 
 import logging
 import tkinter as tk
+from tkinter import font as tkfont
 from typing import cast
 
 import pytest
@@ -80,3 +81,49 @@ class TestVerdictColors:
             theme.verdict_color("Inconclusive"),
             theme.UNKNOWN_VERDICT_COLOR,
         )
+
+
+class _LineFont:
+    """Stands in for tkfont.Font in row_layout: only metrics("linespace")."""
+
+    def __init__(self, linespace: int) -> None:
+        self.linespace = linespace
+
+    def metrics(self, option: str) -> int:
+        assert option == "linespace"
+        return self.linespace
+
+
+def _tile_fonts(title: int, body: int) -> theme.Fonts:
+    """A font set whose tile fonts have the given line pitches; the others are huge."""
+    huge = cast(tkfont.Font, _LineFont(99))
+    return theme.Fonts(
+        verdict=huge,
+        body=huge,
+        arrow=huge,
+        verdict_compact=huge,
+        tile_title=cast(tkfont.Font, _LineFont(title)),
+        tile_body=cast(tkfont.Font, _LineFont(body)),
+    )
+
+
+class TestTileFonts:
+    def test_row_layout_counts_only_the_tile_fonts(self) -> None:
+        """Noto Sans CJK JP on the Pi: 16 px bold (24) + 11 px (17) x 2 = 58 gives 3 lines."""
+        assert theme.row_layout(ROOT, _tile_fonts(24, 17)) == 3
+        assert theme.row_layout(ROOT, _tile_fonts(24, 18)) == 2
+
+    def test_sizes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Tile line 1 16 px bold (long labels 12 px bold), lines 2-3 11 px; the QR strip, the
+        buttons and the dialog keep 18 px bold / 14 px."""
+        monkeypatch.setattr(theme.tkfont, "Font", lambda root, **options: options)
+        fonts = theme.Fonts.create(ROOT, "F")
+        sizes = {name: getattr(fonts, name) for name in theme.Fonts.__dataclass_fields__}
+        assert sizes == {
+            "verdict": {"family": "F", "size": -18, "weight": "bold"},
+            "body": {"family": "F", "size": -14},
+            "arrow": {"family": "F", "size": -24},
+            "verdict_compact": {"family": "F", "size": -12, "weight": "bold"},
+            "tile_title": {"family": "F", "size": -16, "weight": "bold"},
+            "tile_body": {"family": "F", "size": -11},
+        }

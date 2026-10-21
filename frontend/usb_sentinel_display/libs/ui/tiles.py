@@ -29,6 +29,7 @@ from .tiles_text import (  # noqa: F401 -- re-exported for callers of the old mo
     SERIAL_HEAD,
     SERIAL_MAX,
     TWO_ROW_HEAD,
+    files_text,
     finished_hhmm,
     fit_text,
     hit_target,
@@ -87,8 +88,8 @@ class TilesView:
         self._lang = "en"
         # Line heights in design units: the fonts are device-sized, the drawing is not yet.
         self._line_h = (
-            fonts.verdict.metrics("linespace") / geometry.scale,
-            fonts.body.metrics("linespace") / geometry.scale,
+            fonts.tile_title.metrics("linespace") / geometry.scale,
+            fonts.tile_body.metrics("linespace") / geometry.scale,
         )
         canvas.bind("<Button-1>", self._on_click)
 
@@ -131,6 +132,13 @@ class TilesView:
         key = tag_key(drive_tag(slot.result))
         return text(self._lang, key) if key is not None else None
 
+    def _right_end(self, y: float, label: str, color: str) -> None:
+        """Draw a right-aligned label ending at x=152 (drive tag on line 2, file count on 3)."""
+        if label:
+            self.canvas.create_text(
+                TAG_RIGHT_X, y, text=label, anchor="ne", fill=color, font=self.fonts.tile_body
+            )
+
     def _tile(self, slot: Slot, selected: bool, blink_on: bool, now: float, dots: int) -> None:
         """Draw one tile."""
         y0 = slot.index * TILE_H
@@ -151,29 +159,36 @@ class TilesView:
         title = title_text(slot, self._lang)
         # A long label (e.g. 異常なし（検査のみ）) switches to the compact font instead of clipping.
         title_room = self.geometry.px(TILE_W - TEXT_X * 2)
-        title_font = self.fonts.verdict
+        title_font = self.fonts.tile_title
         if title_font.measure(title) > title_room:
             title_font = self.fonts.verdict_compact
         canvas.create_text(TEXT_X, y, text=title, anchor="nw", fill=color, font=title_font)
         y += verdict_h
         serial = serial_text(slot, self.rows)
         status = status_text(slot, now, dots, self._lang)
+        font = self.fonts.tile_body
         if self.rows == 2:
             line = f"{serial} {status}".strip()
-            canvas.create_text(TEXT_X, y, text=line, anchor="nw", fill=color, font=self.fonts.body)
+            canvas.create_text(TEXT_X, y, text=line, anchor="nw", fill=color, font=font)
             return
+        measure = font.measure
+        # Both sides in device pixels: the font measures at device size.
+        room = self.geometry.px(TILE_W - TEXT_X * 2 - TAG_GAP)
         tag = self._tag(slot)
         if tag is not None:
-            measure = self.fonts.body.measure
-            # Both sides in device pixels: the font measures at device size.
-            room = self.geometry.px(TILE_W - TEXT_X * 2 - TAG_GAP) - measure(tag)
-            serial = fit_text(serial, room, measure)
-            canvas.create_text(
-                TAG_RIGHT_X, y, text=tag, anchor="ne", fill=color, font=self.fonts.body
-            )
-        canvas.create_text(TEXT_X, y, text=serial, anchor="nw", fill=color, font=self.fonts.body)
+            serial = fit_text(serial, room - measure(tag), measure)
+            self._right_end(y, tag, color)
+        canvas.create_text(TEXT_X, y, text=serial, anchor="nw", fill=color, font=font)
         y += body_h
-        canvas.create_text(TEXT_X, y, text=status, anchor="nw", fill=color, font=self.fonts.body)
+        files = files_text(slot, self._lang)
+        if files is not None:
+            # The status stays whole; the count drops its label before it loses digits.
+            left = room - measure(status)
+            full, short = files
+            self._right_end(
+                y, full if measure(full) <= left else fit_text(short, left, measure), color
+            )
+        canvas.create_text(TEXT_X, y, text=status, anchor="nw", fill=color, font=font)
 
     def _buttons(self, lang: str, mode: ModeView) -> None:
         """Draw the prev/language/next row, the separator and the mode button (design 3.5)."""

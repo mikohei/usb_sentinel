@@ -165,8 +165,12 @@ class Fonts:
     verdict: tkfont.Font
     body: tkfont.Font
     arrow: tkfont.Font
-    # Smaller bold font for a tile line 1 that does not fit at the verdict size.
+    # Smaller bold font for a tile line 1 that does not fit at the tile_title size.
     verdict_compact: tkfont.Font
+    # Tile line 1 (port and verdict) and lines 2-3 (serial, tag, status, file count). Sized so
+    # Noto Sans CJK JP fits 3 lines: 24 + 17 x 2 = 58 px (measured on the Pi).
+    tile_title: tkfont.Font
+    tile_body: tkfont.Font
 
     @classmethod
     def create(cls, root: tk.Misc, family: str, geometry: Geometry = IDENTITY) -> "Fonts":
@@ -176,13 +180,16 @@ class Fonts:
             body=tkfont.Font(root, family=family, size=-geometry.font_px(14)),
             arrow=tkfont.Font(root, family=family, size=-geometry.font_px(24)),
             verdict_compact=tkfont.Font(
-                root, family=family, size=-geometry.font_px(13), weight="bold"
+                root, family=family, size=-geometry.font_px(12), weight="bold"
             ),
+            tile_title=tkfont.Font(root, family=family, size=-geometry.font_px(16), weight="bold"),
+            tile_body=tkfont.Font(root, family=family, size=-geometry.font_px(11)),
         )
 
 
 def row_layout(root: tk.Misc, fonts: Fonts, geometry: Geometry = IDENTITY) -> int:
-    """Choose the tile line count. 2 lines if the 3-line total pitch exceeds 58 px (design doc 1.2).
+    """Choose the tile line count. 2 lines if the 3-line total pitch of the tile fonts exceeds
+    58 px (design doc 1.2).
 
     Args:
         root: Unused, but tells the caller that font measuring happens after Tk init.
@@ -192,5 +199,5 @@ def row_layout(root: tk.Misc, fonts: Fonts, geometry: Geometry = IDENTITY) -> in
     Returns:
         2 or 3.
     """
-    total = fonts.verdict.metrics("linespace") + fonts.body.metrics("linespace") * 2
+    total = fonts.tile_title.metrics("linespace") + fonts.tile_body.metrics("linespace") * 2
     return 2 if total > geometry.px(ROW_LIMIT_PX) else 3

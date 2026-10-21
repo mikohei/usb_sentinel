@@ -2,10 +2,18 @@
 
 import pytest
 
+from tests.test_gui_smoke import summary as sample_summary
 from usb_sentinel_display.libs.mode_view import ModeState, ModeView
+from usb_sentinel_display.libs.models import AttachedDisk, ResultDetail, Slot, SlotState
 from usb_sentinel_display.libs.ui import theme
 from usb_sentinel_display.libs.ui.confirm import confirm_hit
-from usb_sentinel_display.libs.ui.tiles_text import fit_text, hit_target, mode_button, tag_key
+from usb_sentinel_display.libs.ui.tiles_text import (
+    files_text,
+    fit_text,
+    hit_target,
+    mode_button,
+    tag_key,
+)
 
 
 def view(state: ModeState, locked: str | None = None) -> ModeView:
@@ -149,3 +157,25 @@ class TestConfirmHit:
         assert theme.DIALOG_KEYS == ((14, 118), (130, 234), (246, 350), (362, 466))
         assert theme.DIALOG_KEY_Y == (196, 304)
         assert theme.DIALOG_CANCEL == (392, 4, 476, 40)
+
+
+class TestFilesText:
+    @staticmethod
+    def slot(state: SlotState, lines: int | None) -> Slot:
+        result = sample_summary(detail=ResultDetail(hash_lines=lines))
+        disk = AttachedDisk("sda", "1-1.1", "ABC", 0.0) if state is SlotState.DONE else None
+        return Slot(0, "P1", state, disk, result, None, False)
+
+    @pytest.mark.parametrize("state", [SlotState.DONE, SlotState.REMOVED])
+    def test_count_when_the_inventory_has_rows(self, state: SlotState) -> None:
+        """A finished result with hash inventory rows names the file count."""
+        assert files_text(self.slot(state, 96), "ja") == ("ファイル96件", "96件")
+        assert files_text(self.slot(state, 1), "en") == ("Files: 1", "F:1")
+
+    @pytest.mark.parametrize("lines", [0, None])
+    def test_nothing_for_an_empty_or_missing_inventory(self, lines: int | None) -> None:
+        assert files_text(self.slot(SlotState.DONE, lines), "ja") is None
+
+    def test_nothing_without_a_finished_result(self) -> None:
+        inspecting = Slot(0, "P1", SlotState.INSPECTING, None, None, None, False)
+        assert files_text(inspecting, "ja") is None

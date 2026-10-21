@@ -27,6 +27,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "inspecting_minutes": "Scanning ({minutes} min){dots}",
         "done_at": "Done {time}",
         "removed_at": "Removed {time}",
+        # Right end of tile line 3 when the hash inventory has rows (11 px). The short form keeps
+        # the number when the full one does not fit beside the status.
+        "tile.files": "Files: {count}",
+        "tile.files_short": "F:{count}",
         "state_at": "{word} {time}",
         "overflow": "+{count} more",
         "check_journal": "Check journalctl -u {unit}",
@@ -93,6 +97,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "inspecting_minutes": "検査中（{minutes}分）{dots}",
         "done_at": "完了{time}",
         "removed_at": "抜去{time}",
+        "tile.files": "ファイル{count}件",
+        "tile.files_short": "{count}件",
         "state_at": "{word}{time}",
         "overflow": "他{count}台",
         "check_journal": "journalctl -u {unit}を確認",

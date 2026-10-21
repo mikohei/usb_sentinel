@@ -84,7 +84,7 @@ usb_sentinel_display/
       i18n.py            ja／enの文言と判定ラベル、言語の記録（XDG状態ディレクトリ）。tkinterを読まない
       strip.py           情報ストリップの文言を組む純関数。geometry.pyだけを読み、tkinterもtheme.pyも読まない
       tiles.py           タイル4つ、◀／言語／▶の行、モードボタンの行、タイルのタグ（検査のみ／消去済）のCanvas描画
-      tiles_text.py      タイル・モードボタンの表示文字列と当たり判定の純関数（fit_text、hit_target、tag_key、mode_button）
+      tiles_text.py      タイル・モードボタンの表示文字列と当たり判定の純関数（fit_text、hit_target、tag_key、mode_button、files_text）
       confirm.py         消去モードのコード入力ダイアログ（ConfirmView、confirm_hit）
       mode_ui.py         ModeControllerとtkの結線（ハートビートのafter、ダイアログの表示と非表示）
       app_wiring.py      AppOptions（--scale）、MonitorLike、choose_scale、build_monitor（app.pyの分割）
@@ -107,6 +107,7 @@ tests/                   偽sysfsツリーとFakeRunnerで外部依存を差し�
   test_gui_smoke.py      @pytest.mark.gui。QrView／TilesView／キー束縛。tk.Tk()が作れない環境では自動skip
   test_gui_app.py        @pytest.mark.gui。Appのtick結線・QRモード・言語切替。材料はtest_gui_smokeから借りる
   test_gui_scale.py      @pytest.mark.gui。scale 2.0でのApp（960x640、QR 583px、フォント比）、TilesView／ConfirmViewのタップ換算
+  test_gui_tile_files.py @pytest.mark.gui。タイルのフォント（1行目16px太字、2・3行目11px）と3行目右端のファイル数
   （300行を超えたテストはtest_collect.py／test_result_detail.py／test_qr_detail.py／test_qr_detail_limits.py／test_mapper_update.py／test_monitor_flow.pyに分け、材料は元のファイルからimportする）
 scripts/                 開発用スクリプト（パッケージには含めない。assertを許可）
   make-fixtures.py       偽sysfsツリーとサンプル結果、display.tomlを出力先に作る（--ceiling、--strikes）

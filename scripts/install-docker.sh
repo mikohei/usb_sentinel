@@ -34,6 +34,7 @@ systemd-tmpfiles --create /etc/tmpfiles.d/usb-sentinel.conf
 install -d -m 0750 -g usb-sentinel /var/lib/usb-sentinel/results
 install -d -m 2770 -g usb-sentinel /var/lib/usb-sentinel/db
 install -m 0755 "${REPO_DIR}/scripts/run-docker.sh" "${APP_DIR}/scripts/run-docker.sh"
+install -m 0755 "${REPO_DIR}/scripts/clock-floor.sh" "${APP_DIR}/scripts/clock-floor.sh"
 if [[ ! -f /etc/usb-sentinel/config.toml ]]; then
     install -m 0644 "${REPO_DIR}/deploy/config.example.toml" /etc/usb-sentinel/config.toml
 fi
@@ -51,7 +52,10 @@ install -m 0644 "${REPO_DIR}/deploy/usb-sentinel-docker@.service" \
 rm -f /etc/udev/rules.d/99-usb-sentinel.rules
 install -m 0644 "${REPO_DIR}/deploy/99-usb-sentinel-docker.rules" \
     /etc/udev/rules.d/99-usb-sentinel-docker.rules
+# No RTC and no network: keep the clock from going back at each boot (scripts/clock-floor.sh).
+install -m 0644 "${REPO_DIR}/deploy/usb-sentinel-clock.service" /etc/systemd/system/usb-sentinel-clock.service
 systemctl daemon-reload
+systemctl enable --now usb-sentinel-clock.service
 udevadm control --reload
 echo "Display users need: sudo usermod -aG usb-sentinel <user> (then log in again)."
 echo "Installed. Fetch the ClamAV DB (sudo bash scripts/update-clamav.sh), then insert a USB disk."

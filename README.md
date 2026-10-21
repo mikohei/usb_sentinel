@@ -136,6 +136,7 @@ Step 7  Classify the verdict (No Defect / No Defect (Scan Only) / Counterfeit Su
 - Destructive inspections are blocked in several ways. No write is made if any of the following holds: malware is FAIL or ERROR, `allow_destructive = false`, the inspection mode is `scan_only` (the display's mode button was not switched to "Scan + erase" when the drive was inserted), or a mount remains. The host side passes the device read-only unless all of `USB_SENTINEL_DEVICE_ACCESS=rw`, `allow_destructive = true` and the display mode `full` hold.
 - "No detection" is not confused with "clean". A clamscan exit code other than 0/1, a timeout, a mix of unreadable files, and a missing filesystem are all treated as ERROR. While any step remains unimplemented, the verdict is never `No Defect`.
 - Safety guard. A device that does not satisfy all of the following is refused before the inspection starts (exit code 2): it is on the USB bus, it is removable, it is not the root disk, and its capacity is non-zero.
+- The clock never goes back. The Pi 4 has no RTC, so an offline boot always starts at the same old time. Results of an earlier session would then look newer than a drive inserted now and bind to it on the screen. Right after boot (before Docker), `usb-sentinel-clock.service` moves the clock to one second after the newest of the last shutdown time, the newest result and the SQLite index. It never moves the clock back. The clock still lags real time by as long as the station was off, so if result times serve as evidence, set the time over the LAN or fit an RTC module.
 
 ## Layout
 
@@ -223,6 +224,7 @@ doc/
 deploy/
   99-usb-sentinel-docker.rules  udev rules for Docker (host side)
   usb-sentinel-docker@.service systemd unit that starts Docker (host side)
+  usb-sentinel-clock.service systemd unit that keeps the clock from going back at boot (host side)
   config.example.toml      All configuration keys
 scripts/
   install-all.sh           One-shot setup of a single Pi (Docker, uv, display app, ClamAV DB; arms the kiosk at the end)
@@ -232,6 +234,7 @@ scripts/
   ssh-access.sh            Opt-in key-only SSH for maintenance (sourced by install-all.sh, INSTALL_SSH=1)
   install-docker.sh        Docker setup (called from install-all.sh; can also be used alone)
   run-docker.sh            Starts an inspection container per USB drive
+  clock-floor.sh           Moves the clock just past the newest record at boot; saves the time at shutdown
   update-clamav.sh         Fetches and verifies the ClamAV definition DB (use it to refresh later)
   clamav-db.sh             Shared fetch/verify functions (sourced by install-all.sh and update-clamav.sh)
   erase-setting.sh         Shared setter for the two erase keys (sourced by install-docker.sh)

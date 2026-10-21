@@ -86,6 +86,7 @@ tests/                   FakeRunnerで外部コマンドをモックしたテス
                          検査モード切替: test_orchestrator_mode.py（allow_destructive×mode×malwareの行列）、
                          test_run_docker.py／test_run_docker_argv.py（bash関数を`bash -c 'source "$1"; shift; "$@"'`で
                          呼ぶ。macOS bash 3.2で動く）、test_install_scripts.py（bash -nと配線）、
+                         test_clock_floor.py（scripts/clock-floor.shの時計の下限と、そのユニットの配線）、
                          test_install_kiosk.py（install-all.shを偽のバイナリで最後まで実行する。
                          kioskの質問、INSTALL_KIOSK、kiosk_arm、kiosk-enable.sh）、
                          test_boot_video_hint.py（boot-video-hint.shのcmdline.txt追記と

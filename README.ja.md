@@ -133,6 +133,7 @@ Step 7  判定分類（No Defect / No Defect (Scan Only) / Counterfeit Suspected
 - 破壊的検査は多重にブロックする。マルウェアがFAILまたはERROR、`allow_destructive = false`、検査モードが`scan_only`（挿入時にディスプレイのモードボタンが「検査＋消去」になっていなかった）、マウントが残っている、のいずれかであれば書き込みを行わない。ホスト側も、`USB_SENTINEL_DEVICE_ACCESS=rw`、`allow_destructive = true`、ディスプレイのモード`full`の3つがそろわない限りデバイスを読み取り専用で渡す。
 - 「検知なし」を「クリーン」と混同しない。clamscanの終了コードが0/1以外、タイムアウト、読み取り不能ファイルの混在、ファイルシステム不在は全てERRORとして扱う。未実装ステップが残る限り`No Defect`とは判定しない。
 - 安全ガード。USBバス経由・リムーバブル・ルートディスクでない・容量が非ゼロ、を満たさないデバイスは検査開始前に拒否する（終了コード2）。
+- 時計を巻き戻さない。Pi 4にはRTCが無く、LANなしで起動すると毎回同じ古い時刻から始まる。すると前のセッションの結果が、いま挿したドライブより新しく見えて画面に結び付く。`usb-sentinel-clock.service`は起動直後（Dockerより前）に、前回の終了時刻・最新の結果・SQLite索引のうち最も新しい時刻の1秒後へ時計を進める。戻すことはしない。電源を切っていた時間の分だけ実時刻より遅れるため、結果の日時を証跡に使うなら、LANにつないで時刻を合わせるかRTCモジュールを付ける。
 
 ## 構成
 
@@ -220,6 +221,7 @@ doc/
 deploy/
   99-usb-sentinel-docker.rules  Docker用udevルール（ホスト側）
   usb-sentinel-docker@.service Docker起動用systemdユニット（ホスト側）
+  usb-sentinel-clock.service 起動時に時計を巻き戻さないsystemdユニット（ホスト側）
   config.example.toml      設定の全キー
 scripts/
   install-all.sh           Pi 1台への一括導入（Docker、uv、表示アプリ、ClamAV DB。最後にキオスクを有効化する）
@@ -229,6 +231,7 @@ scripts/
   ssh-access.sh            保守用の鍵認証SSH（任意。install-all.shがINSTALL_SSH=1のときに読み込む）
   install-docker.sh        Docker構成の導入（install-all.shから呼ばれる。単独でも使える）
   run-docker.sh            USBごとに検査コンテナを起動
+  clock-floor.sh           起動時に時計を最新の記録の直後へ進め、終了時に時刻を記録する
   update-clamav.sh         ClamAV定義DBの取得と確認（あとから更新するときに使う）
   clamav-db.sh             定義DBの取得・確認の共通関数（install-all.shとupdate-clamav.shが読み込む）
   erase-setting.sh         消去許可の2行を設定する共通関数（install-docker.shが読み込む）

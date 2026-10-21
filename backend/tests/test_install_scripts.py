@@ -43,6 +43,7 @@ def _ordered(text: str, *needles: str) -> None:
         "kiosk-disable.sh",
         "boot-video-hint.sh",
         "run-docker.sh",
+        "clock-floor.sh",
         "ssh-access.sh",
         "keyfile.sh",
         "erase-setting.sh",

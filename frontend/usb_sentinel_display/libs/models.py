@@ -152,6 +152,7 @@ CAPACITY_KIND_CODES: dict[str, str] = {
     "defect": "D",
     "counterfeit": "C",
     "unverified": "U",
+    "slow": "L",
 }
 
 # Mapping from device class (speed.details.device_class) to detail QR `dc` (doc/qr-payload.md 6.4).

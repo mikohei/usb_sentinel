@@ -255,6 +255,7 @@ class TestDetailPages:
             ("defect", "D"),
             ("counterfeit", "C"),
             ("unverified", "U"),
+            ("slow", "L"),
         ):
             data = check(build_detail_page(summary(detail=ResultDetail(capacity_kind=kind)), 2))
             assert data["ck"] == code

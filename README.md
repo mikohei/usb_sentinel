@@ -123,8 +123,9 @@ Step 1  ★ Malware scan (ClamAV) ← run first to ensure safety
           → Even on a detection, the Step 2 inventory is still created. Step 4 and later are SKIPPED.
 Step 2  Create the hash inventory (SHA-256 → hash-inventory.tsv)
 Step 3  Unmount (prerequisite for the destructive inspections that follow)
-Step 4  Capacity verification (f3write + f3read / f3probe)
-Step 5  Speed verification (fio)
+Step 4  Capacity verification (f3probe -> exFAT format -> f3write + f3read in 8 GB batches;
+          f3probe only with use_probe = true)
+Step 5  Speed verification (fio), then the drive is formatted as exFAT (to inspect and use it again)
 Step 6  Write results (result.json / result.txt / result-qr.png), record one row in SQLite
 Step 7  Classify the verdict (No Defect / No Defect (Scan Only) / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive)
 ```
@@ -133,6 +134,7 @@ Step 7  Classify the verdict (No Defect / No Defect (Scan Only) / Counterfeit Su
 
 - ClamAV runs first. Once ClamAV has run the scan, the hash inventory is created regardless of the result (detection, error, or timeout), as evidence for later comparison. If ClamAV has not opened any file (clamscan is missing, or there is no definition DB), no inventory is created either. The tool never proceeds to the destructive inspections (f3 / fio). An inventory created after a timeout or a scan failure (exit code 2) only reads the bytes of files that ClamAV did not open, under `ro,noexec,nosuid,nodev`; it neither executes nor interprets them.
 - Read-only mount. The mount for scanning and hash computation uses `ro,noexec,nosuid,nodev`, leaving no room for an infected file to run on the host.
+- A drive with malware is kept as evidence. On a detection or a failed scan, neither the capacity and speed inspections nor the final format run, and nothing is written to the drive (the scan uses a `ro` mount).
 - Destructive inspections are blocked in several ways. No write is made if any of the following holds: malware is FAIL or ERROR, `allow_destructive = false`, the inspection mode is `scan_only` (the display's mode button was not switched to "Scan + erase" when the drive was inserted), or a mount remains. The host side passes the device read-only unless all of `USB_SENTINEL_DEVICE_ACCESS=rw`, `allow_destructive = true` and the display mode `full` hold.
 - "No detection" is not confused with "clean". A clamscan exit code other than 0/1, a timeout, a mix of unreadable files, and a missing filesystem are all treated as ERROR. While any step remains unimplemented, the verdict is never `No Defect`.
 - Safety guard. A device that does not satisfy all of the following is refused before the inspection starts (exit code 2): it is on the USB bus, it is removable, it is not the root disk, and its capacity is non-zero.
@@ -158,7 +160,9 @@ backend/
       steps/
         malware.py         ClamAV scan
         capacity.py        Entry point of capacity verification (f3write + f3read / f3probe) and verdict writing
-        capacity_write.py  f3write mode of capacity verification (rw mount, then f3write → f3read)
+        capacity_write.py  f3write mode of capacity verification (format, rw mount, then f3write → f3read)
+        capacity_batches.py Batched f3write / f3read and the early stops on clear failures
+        format_fs.py       exFAT format of the whole drive (before f3write and at the end)
         capacity_fs.py     rw mount for capacity verification and the f3 parser
         capacity_probe.py  f3probe mode
         capacity_judge.py  Capacity verdict (±7% band, counterfeit suspicion, non-destructive check of the advertised capacity)
@@ -677,13 +681,13 @@ On a PC connected to the network, compare `sha256sum result.json` with `digest` 
 |---|---|
 | `Malware Detected` | Malware was detected (takes priority over other failures) |
 | `Counterfeit Suspected` | Suspected capacity counterfeiting. Any of: (1) the advertised or real capacity exceeds 107% of the nominal capacity (`nominal_bytes`), (2) f3probe reports `Bad news`, (3) f3read finds 50% or more lost sectors. This is a suspicion, not a conclusion |
-| `Defective` | The capacity is as advertised, but f3read detected lost, corrupted, changed, or overwritten sectors |
-| `Spec Mismatch` | Any step is FAIL (insufficient capacity, insufficient speed) |
+| `Defective` | The capacity is as advertised, but f3read detected lost, corrupted, changed, or overwritten sectors; or f3write / f3read reported an I/O error, or a written file is missing |
+| `Spec Mismatch` | Any step is FAIL (insufficient capacity, insufficient speed, writes too slow or stalled during the capacity check) |
 | `Inconclusive` | ERROR, or SKIPPED / unimplemented steps remain |
 | `No Defect` | All steps Pass |
 | `No Defect (Scan Only)` | Scan-only mode: malware and the other steps Pass, and capacity and speed are `SKIPPED` only because of `allow_destructive = false` or `Inspection mode is scan_only` |
 
-The priority is `Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect` > `No Defect (Scan Only)`, and if any other ERROR or SKIPPED remains the verdict is `Inconclusive`. The basis for a verdict is kept in `reasons` (sentences) and `reason_codes` (`m:found`, `c:over`, `c:probe`, `c:lost`, `c:short`, `c:defect`, `s:severe`, `s:minor`, and `<step abbreviation>:timeout` / `error` / `skipped`) in `result.json`.
+The priority is `Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect` > `No Defect (Scan Only)`, and if any other ERROR or SKIPPED remains the verdict is `Inconclusive`. The basis for a verdict is kept in `reasons` (sentences) and `reason_codes` (`m:found`, `c:over`, `c:probe`, `c:lost`, `c:short`, `c:defect`, `c:slow`, `s:severe`, `s:minor`, and `<step abbreviation>:timeout` / `error` / `skipped`) in `result.json`.
 
 `Counterfeit Suspected` is treated as a signal to escalate, because f3probe can output `Bad news` even for a genuine product with many bad blocks, and mixing up GB and GiB can push a value over 107%. The nominal, advertised, and measured values and their ratios are kept in `result.json`, the QR, and SQLite, so a person makes the final decision.
 
@@ -695,7 +699,7 @@ When `[capacity] nominal_bytes` is set to the nominal capacity from the product 
 
 - `nominal_bytes` is the decimal notation converted directly to bytes (32GB → `32000000000`). A GiB notation (32GiB = `34359738368`) is 1.0737 times the GB value, so mixing them up turns a genuine product into a counterfeit suspect. If many genuine products are advertised in GiB, relax it to `over_ratio = 1.10`.
 - Non-destructive check of the advertised capacity. If `nominal_bytes` is set, right at the start of the inspection, before any mounting or scanning, only the advertised capacity from lsblk is compared with the nominal capacity and recorded in `advertised_check` of `result.json`. It is recorded even with `allow_destructive = false` and even when a malware detection stops the inspection, and an excess gives `Counterfeit Suspected`. It writes nothing and does not affect the condition (gate) for proceeding to the destructive inspections.
-- When the capacity step has run, the measured capacity is judged with the same band. If f3read reports 50% or more lost sectors (`lost_ratio`), it is counterfeit suspected. This is because defects in genuine products stay at a few percent or less.
+- When the capacity step has run, the measured capacity is judged with the same band. If f3read reports 50% or more lost sectors (`lost_ratio`), it is counterfeit suspected. This is because defects in genuine products stay at a few percent or less. f3read's `Data LOST` is already the sum of corrupted, changed and overwritten sectors, so it is not added to its breakdown again.
 - `config.toml` is one per host, so when you inspect different products on the four ports at the same time, the same nominal value applies to all of them. Manage the nominal value for each case on the reader app side.
 
 #### Speed
@@ -735,17 +739,40 @@ Measured values are recorded in `steps.speed.details.read.mb_s` and `write.mb_s`
 
 ### `result.txt`
 
-`result.txt` is `result.json` in a human-readable form. It starts with three lines, `Verdict:`, `Device:`, and `Advertised capacity:` (the capacity lsblk reports). Then it shows `Link speed:`, `Elapsed:`, `Advertised capacity exceeded:`, and `Warning:` lines, and after the line of each step it shows `Nominal (product):`, `Kind:`, and `Severity:`. Items added in phase 2 are omitted together with their line when there is no value (a step that ended in ERROR has none), so you can judge missing data by the presence of the line.
+`result.txt` is `result.json` in a human-readable form. It starts with three lines, `Verdict:`, `Device:`, and `Advertised capacity:` (the capacity lsblk reports). Then it shows `Link speed:`, `Elapsed:`, `Reformat:`, `Advertised capacity exceeded:`, and `Warning:` lines, and after the line of each step it shows `Nominal (product):`, `Kind:`, and `Severity:`. Items added in phase 2 are omitted together with their line when there is no value (a step that ended in ERROR has none), so you can judge missing data by the presence of the line.
 
-### Limits of the f3write mode
+### Flow of the f3write mode and early stops
 
-The default (`use_probe = false`) verifies free space with f3write + f3read and estimates the real capacity by adding the used amount (`statvfs`). Inspect the following samples with `use_probe = true` (f3probe).
+The default capacity check (`use_probe = false`) runs in this order.
 
-- (a) A nearly full sample. The verified area does not reach the threshold, so the result is `ERROR` (the used amount alone never makes a sample pass).
-- (b) An NTFS sample. It cannot be mounted rw in the Docker setup (`ntfs-3g` uses FUSE, but `run-docker.sh` does not pass `/dev/fuse`).
-- (c) A counterfeit product usually becomes `Spec Mismatch`, but if the rewinding writes break the FAT area, the output of f3read cannot be parsed and the result is `ERROR` (`Inconclusive`). A sample that over-reports its used amount also becomes `Inconclusive`. Re-inspect a sample whose summary starts with `Could not parse f3read output` or `Verified area ... is below threshold ...` with `use_probe = true`.
+1. f3probe looks for counterfeit capacity (`probe_first = true`, a few minutes). `Bad news` ends the step as `Counterfeit Suspected`. If f3probe cannot run or finish, a warning is kept and f3write goes on.
+2. The whole drive (the whole disk, without a partition table) is formatted as exFAT (`wipefs` and `mkfs.exfat`). The full capacity is verified even for a drive whose filesystem an earlier inspection removed, or an NTFS drive.
+3. f3write writes 1 GB files, `batch_files` (default 8) at a time.
+4. f3read reads them back in the same batches.
+5. When the last batch is read, the usual judgment (short capacity, counterfeit, defect) is made.
 
-f3probe writes to the device directly without going through the filesystem, so it is not affected by the above. In either mode the contents of the sample are erased.
+The capacity check has no time limit (`timeout_s = 0`), so 2 TB and 8 TB drives are checked to the end. Instead, a clear quality failure ends the step early, and the summary states it.
+
+| Stops when | Verdict | Summary starts with |
+|---|---|---|
+| f3probe reports `Bad news` | `Counterfeit Suspected` | `Suspected counterfeit: f3probe: Bad news:` |
+| f3write reports a write failure (`Write failure`) | `Defective` | `Write error in files ...` |
+| The write speed stays below the speed step's threshold (nominal value or class minimum × `pass_ratio`) for `slow_batches` batches in a row (default 3) | `Spec Mismatch` | `Write speed shortfall:` |
+| A batch (8 GB) does not finish even at `stall_mb_s` (default 1 MB/s) | `Spec Mismatch` | `Write stalled:` / `Read stalled:` |
+| The read-back finds non-OK sectors while files remain | `Defective`; `Counterfeit Suspected` when at least 50% of what was read is lost | `Data corruption in read-back of files ...` |
+| The read-back hits an I/O error, or a written file is missing | Same as above | Same as above |
+
+A positive `timeout_s` is still a limit for the whole capacity step, as before; exceeding it is `Timed out` (`Inconclusive`). An older `config.toml` has `timeout_s = 14400.0` (4 hours); change it to `0` to remove the limit.
+
+The time needed is about capacity ÷ speed: writing 512 GB at 15 MB/s takes about 9 hours, and reading it back at 20 MB/s about 7 hours. When in a hurry, use `use_probe = true` (f3probe only, a few minutes). In f3probe mode, information on non-OK sectors is not available, so the verdict is never `Defective`.
+
+### Format after the inspection
+
+A drive that went through the capacity and speed inspections is formatted as exFAT at the end (`reformat = true`, the default). fio writes to the start of the drive directly to measure its speed, so without the format no filesystem would remain, and the next inspection of the drive would stop at `No filesystem to scan` (`Inconclusive`). With it, the same drive can be inspected again, for example to redo an inspection after an operator mistake.
+
+- The format runs only when the inspection went on to the capacity and speed steps (gate `permitted` true). It never runs on a malware detection, a failed scan, or in scan-only mode.
+- The outcome is kept in `reformat` of `result.json` (`status`: `done` / `failed` / `skipped`) and the `Reformat:` line of `result.txt`. A failure does not change the verdict; `warnings` gets `Drive not reformatted: ...`. Nothing is formatted while a mount remains (`skipped`).
+- A drive pulled out during the format is left without a filesystem. Format it as exFAT or FAT32 on a PC before inserting it again.
 
 ## Development
 
@@ -763,9 +790,9 @@ The capacity (f3) and speed (fio) steps are implemented, but the following are w
 
 1. fio parameters (`block_size` / `queue_depth` / `duration_s`): the defaults of 1M / 8 / 30 seconds are provisional. Calibration against CrystalDiskMark numbers is needed
 2. Source of the nominal speed and how it is configured: who sets `nominal_read_mb_s` / `nominal_write_mb_s` for each sample, and how
-3. Whether adding the used area to the real capacity is appropriate: in f3write mode, the sample's reported value (`statvfs`) is added
+3. The threshold for slow writes: the speed step's (fio) threshold is applied to the average speed of an f3write batch (8 GB). Check on real devices that it fits the speed after the SLC cache is used up
 4. Offline update procedure for the ClamAV definition DB: how to bring it into the isolated environment, and how often
-5. Confirmation on a real Raspberry Pi 4: agreement between the real output of f3read / f3probe / fio and the parsers, writing inside the container with Docker `rw`, and the behavior of `mount -w` (see the on-device checks in `.agents/tasks/f3-fio-steps/final-report.md` for details)
+5. Confirmation on a real Raspberry Pi 4: agreement between the real output of f3read / f3probe / fio and the parsers, batched runs with `f3write --start-at --end-at`, `wipefs` and `mkfs.exfat` inside the container, and that a formatted drive reads on Windows and macOS, writing inside the container with Docker `rw`, and the behavior of `mount -w` (see the on-device checks in `.agents/tasks/f3-fio-steps/final-report.md` for details)
 
 The on-device checks added in phase 2 (hash inventory separation, ±7% band, link speed, SQLite, QR v:3) are as follows.
 

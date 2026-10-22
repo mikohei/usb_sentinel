@@ -120,8 +120,8 @@ Step 1  ★ マルウェアスキャン（ClamAV）← 最初に実施して安�
           → 検知してもStep 2の台帳は作る。Step 4以降はSKIPPED。
 Step 2  ハッシュ台帳の作成（SHA-256 → hash-inventory.tsv）
 Step 3  アンマウント（以降の破壊的検査の前提）
-Step 4  容量検証（f3write + f3read / f3probe）
-Step 5  速度検証（fio）
+Step 4  容量検証（f3probe → exFATで初期化 → f3write + f3read を8GBずつ。use_probe = trueならf3probeのみ）
+Step 5  速度検証（fio）。続けてドライブをexFATで初期化する（再検査と再利用のため）
 Step 6  結果出力（result.json / result.txt / result-qr.png）、SQLiteへ1行記録
 Step 7  判定分類（No Defect / No Defect (Scan Only) / Counterfeit Suspected / Spec Mismatch / Defective / Malware Detected / Inconclusive）
 ```
@@ -130,6 +130,7 @@ Step 7  判定分類（No Defect / No Defect (Scan Only) / Counterfeit Suspected
 
 - ClamAVを最初に走らせる。ClamAVがスキャンを実行した後は、結果（検知・エラー・タイムアウト）にかかわらずハッシュ台帳を作成する（照合用の証跡）。ClamAVがファイルを開いていない状態（clamscan不在、定義DBなし）では台帳も作らない。破壊的検査（f3 / fio）へは絶対に進まない。タイムアウトやスキャン失敗（終了コード2）の後に作る台帳は、ClamAVが開いていないファイルも`ro,noexec,nosuid,nodev`の下でバイト列として読むだけで、実行も解釈もしない。
 - read-onlyマウント。スキャンとハッシュ計算のためのマウントは`ro,noexec,nosuid,nodev`で行い、感染ファイルがホスト側で実行される余地を残さない。
+- マルウェアを検知したドライブは証拠としてそのまま残す。検知またはスキャン失敗のときは、容量・速度の検査も最後の初期化も行わず、ドライブには一切書き込まない（スキャンは`ro`マウントで行う）。
 - 破壊的検査は多重にブロックする。マルウェアがFAILまたはERROR、`allow_destructive = false`、検査モードが`scan_only`（挿入時にディスプレイのモードボタンが「検査＋消去」になっていなかった）、マウントが残っている、のいずれかであれば書き込みを行わない。ホスト側も、`USB_SENTINEL_DEVICE_ACCESS=rw`、`allow_destructive = true`、ディスプレイのモード`full`の3つがそろわない限りデバイスを読み取り専用で渡す。
 - 「検知なし」を「クリーン」と混同しない。clamscanの終了コードが0/1以外、タイムアウト、読み取り不能ファイルの混在、ファイルシステム不在は全てERRORとして扱う。未実装ステップが残る限り`No Defect`とは判定しない。
 - 安全ガード。USBバス経由・リムーバブル・ルートディスクでない・容量が非ゼロ、を満たさないデバイスは検査開始前に拒否する（終了コード2）。
@@ -155,8 +156,10 @@ backend/
       steps/
         malware.py         ClamAVスキャン
         capacity.py        容量検証（f3write + f3read / f3probe）の入口と判定の書き込み
-        capacity_write.py  容量検証のf3writeモード（rwマウントしてf3write→f3read）
+        capacity_write.py  容量検証のf3writeモード（初期化してrwマウントし、f3write→f3read）
+        capacity_batches.py f3write・f3readの分割実行と、明確な異常での打ち切り
         capacity_fs.py     容量検証用のrwマウントとf3パーサ
+        format_fs.py       ドライブ全体のexFAT初期化（f3writeの前と、検査の最後）
         capacity_probe.py  f3probeモード
         capacity_judge.py  容量の判定（±7%帯、偽装疑い、申告容量の非破壊チェック）
         speed.py           速度検証（fio）の入口と判定
@@ -647,13 +650,13 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 |---|---|
 | `Malware Detected` | マルウェア検知（他の失敗より優先） |
 | `Counterfeit Suspected` | 容量偽装の疑い。(1)申告容量または実容量が公称容量（`nominal_bytes`）の107%超、(2)f3probeが`Bad news`を報告、(3)f3readで消失セクタが50%以上、のいずれか。「疑い」であり断定ではない |
-| `Defective` | 容量は申告どおりだが、f3readが消失・破損・変化・上書きされたセクタを検知した |
-| `Spec Mismatch` | いずれかのステップがFAIL（容量不足、速度不足） |
+| `Defective` | 容量は申告どおりだが、f3readが消失・破損・変化・上書きされたセクタを検知した。またはf3write・f3readがI/Oエラーを報告した、書いたファイルが消えた |
+| `Spec Mismatch` | いずれかのステップがFAIL（容量不足、速度不足、容量検査中の書き込みが遅すぎる・進まない） |
 | `Inconclusive` | ERROR、またはSKIPPED / 未実装ステップが残る |
 | `No Defect` | 全ステップPass |
 | `No Defect (Scan Only)` | 検査のみモードで、マルウェア検査などほかのステップがPass。容量と速度は`allow_destructive = false`または`Inspection mode is scan_only`の理由だけで`SKIPPED` |
 
-優先順位は`Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect` > `No Defect (Scan Only)`で、それ以外のERRORやSKIPPEDが残れば`Inconclusive`になる。判定の根拠は`result.json`の`reasons`（文）と`reason_codes`（`m:found`、`c:over`、`c:probe`、`c:lost`、`c:short`、`c:defect`、`s:severe`、`s:minor`、`<ステップ略号>:timeout`／`error`／`skipped`）に残る。
+優先順位は`Malware Detected` > `Counterfeit Suspected` > `Defective` > `Spec Mismatch` > `No Defect` > `No Defect (Scan Only)`で、それ以外のERRORやSKIPPEDが残れば`Inconclusive`になる。判定の根拠は`result.json`の`reasons`（文）と`reason_codes`（`m:found`、`c:over`、`c:probe`、`c:lost`、`c:short`、`c:defect`、`c:slow`、`s:severe`、`s:minor`、`<ステップ略号>:timeout`／`error`／`skipped`）に残る。
 
 `Counterfeit Suspected`は、f3probeが不良ブロックの多い正規品にも`Bad news`を出し得ること、GB／GiBの混同で107%を超え得ることから、エスカレーションの合図として扱う。公称・申告・実測の各値とその比率が`result.json`、QR、SQLiteに残るので、人が最終判断する。
 
@@ -665,7 +668,7 @@ QRはバイトモードで最大2953バイトしか入らないため全文は�
 
 - `nominal_bytes`は10進表記をそのままバイトに直した値にする（32GB → `32000000000`）。GiB表記（32GiB = `34359738368`）はGBの1.0737倍なので、混同すると正規品が偽装疑いになる。GiB申告の正規品が多ければ`over_ratio = 1.10`に緩める。
 - 申告容量の非破壊チェック。`nominal_bytes`が設定されていれば、マウントもスキャンもしていない検査開始直後にlsblkの申告容量だけを公称容量と比べ、`result.json`の`advertised_check`に記録する。`allow_destructive = false`でも、マルウェア検知で止まっても記録され、超過なら`Counterfeit Suspected`になる。書き込みは一切せず、破壊的検査に進む条件（ゲート）には影響しない。
-- 容量ステップが走ったときは、実測容量も同じ帯で判定する。f3readの消失セクタが50%以上（`lost_ratio`）なら偽装疑いとする。正規品の不良は数%以下にとどまるためである。
+- 容量ステップが走ったときは、実測容量も同じ帯で判定する。f3readの消失セクタが50%以上（`lost_ratio`）なら偽装疑いとする。正規品の不良は数%以下にとどまるためである。f3readの`Data LOST`は破損・変化・上書きの合計なので、内訳と2重に数えない。
 - `config.toml`はホストで1つなので、4ポートで異なる商品を同時に検査する場合は全員に同じ公称値が当たる。ケースごとの公称値は読み取りアプリ側で管理する。
 
 #### 速度
@@ -705,17 +708,40 @@ pass_ratio = 0.80           # 公称値×pass_ratio以上でPASS
 
 ### `result.txt`
 
-`result.txt`は`result.json`を人が読む形にしたもので、先頭に`Verdict:`、`Device:`、`Advertised capacity:`（lsblkの申告容量）の3行を出す。続いて`Link speed:`、`Elapsed:`、`Advertised capacity exceeded:`、`Warning:`の行を、各ステップの行の後に`Nominal (product):`、`Kind:`、`Severity:`を出す。第2期で足した項目は値が無ければ行ごと省く（ERRORで終わったステップには無い）ので、行の有無で欠損を判断できる。
+`result.txt`は`result.json`を人が読む形にしたもので、先頭に`Verdict:`、`Device:`、`Advertised capacity:`（lsblkの申告容量）の3行を出す。続いて`Link speed:`、`Elapsed:`、`Reformat:`、`Advertised capacity exceeded:`、`Warning:`の行を、各ステップの行の後に`Nominal (product):`、`Kind:`、`Severity:`を出す。第2期で足した項目は値が無ければ行ごと省く（ERRORで終わったステップには無い）ので、行の有無で欠損を判断できる。
 
-### f3writeモードの制限
+### f3writeモードの流れと打ち切り
 
-既定（`use_probe = false`）はf3write + f3readで空き領域を検証し、既使用量（`statvfs`）を加算して実容量を見積もる。次の検体は`use_probe = true`（f3probe）で検査する。
+既定（`use_probe = false`）の容量検査は次の順に進む。
 
-- (a) ほぼ満杯の検体。検証済み領域が閾値に届かないため`ERROR`になる（既使用量だけでは合格させない）。
-- (b) NTFSの検体。Docker構成ではrwマウントできない（`ntfs-3g`はFUSEを使うが`run-docker.sh`は`/dev/fuse`を渡していない）。
-- (c) 容量偽装品は多くの場合`Spec Mismatch`になるが、巻き戻し書き込みでFAT領域が壊れるとf3readの出力を解析できず`ERROR`（`Inconclusive`）になる。既使用量を過大に申告する検体も同様に`Inconclusive`になる。summaryが`Could not parse f3read output`または`Verified area ... is below threshold ...`で始まる検体は`use_probe = true`で再検査する。
+1. f3probeで偽装を調べる（`probe_first = true`、数分）。`Bad news`なら`Counterfeit Suspected`で終える。f3probeが動かない・終わらないときは警告を残してf3writeに進む。
+2. ドライブ全体（パーティションを作らずディスク全体）をexFATで初期化する（`wipefs`と`mkfs.exfat`）。前回の検査で消えたファイルシステムやNTFSの検体でも、容量の全体を検証できる。
+3. f3writeで1GBのファイルを`batch_files`個（既定8）ずつ書く。
+4. f3readで同じ単位で読み戻す。
+5. 最後の読み戻しまで終われば、通常の判定（容量不足・偽装疑い・不良）を行う。
 
-f3probeはファイルシステムを介さずデバイスに直接書くため、上記の影響を受けない。いずれのモードでも検体の内容は消去される。
+容量検査には時間の上限が無い（`timeout_s = 0`）。2TBや8TBのドライブも最後まで検査する。そのかわり、品質に明確な異常があれば、その内容をsummaryに書いて途中で打ち切る。
+
+| 打ち切る条件 | 判定 | summaryの書き出し |
+|---|---|---|
+| f3probeが`Bad news`を報告した | `Counterfeit Suspected` | `Suspected counterfeit: f3probe: Bad news:` |
+| f3writeが書き込みエラー（`Write failure`）を報告した | `Defective` | `Write error in files ...` |
+| 書き込み速度が、速度検査の閾値（公称値または種別の最低値×`pass_ratio`）を`slow_batches`回（既定3）続けて下回った | `Spec Mismatch` | `Write speed shortfall:` |
+| 1回分（8GB）を`stall_mb_s`（既定1MB/s）の速さでも終えられない | `Spec Mismatch` | `Write stalled:`／`Read stalled:` |
+| 読み戻しで不良セクタが出た（残りのファイルがある場合） | `Defective`。読んだ分の50%以上が失われていれば`Counterfeit Suspected` | `Data corruption in read-back of files ...` |
+| 読み戻しでI/Oエラーが出た、書いたファイルが無い | 同上 | 同上 |
+
+`timeout_s`に正の値を書くと、従来どおり容量検査全体の上限になる。超えたときは`Timed out`（`Inconclusive`）である。以前の`config.toml`には`timeout_s = 14400.0`（4時間）が書かれているので、上限なしにするには`0`に書き換える。
+
+1回あたりの所要時間の目安は容量÷速度で、512GBを15MB/sで書いて20MB/sで読むと、書き込みに約9時間、読み戻しに約7時間かかる。急ぐときは`use_probe = true`（f3probeだけ。数分）にする。f3probeモードでは非OKセクタの情報が得られないため`Defective`にはならない。
+
+### 検査後の初期化
+
+容量・速度の検査を実行したドライブは、最後にexFATで初期化してから返す（`reformat = true`、既定）。fioは速度を測るためにドライブの先頭へ直接書くので、初期化しないとファイルシステムが残らず、次に挿したときマルウェア検査が`No filesystem to scan`（`Inconclusive`）で止まる。初期化すれば、作業ミスのやり直しなどで同じドライブを再検査できる。
+
+- 初期化するのは、容量・速度の検査に進んだとき（ゲート`permitted`が真）だけである。マルウェアの検知、スキャンの失敗、検査のみモードでは行わない。
+- 結果は`result.json`の`reformat`（`status`: `done`／`failed`／`skipped`）と`result.txt`の`Reformat:`行に残る。失敗しても判定は変わらず、`warnings`に`Drive not reformatted: ...`が出る。マウントが残っていれば初期化しない（`skipped`）。
+- 初期化の途中でドライブを抜くと、ファイルシステムが無いまま残る。PCでexFATかFAT32に初期化してから挿し直す。
 
 ## 開発
 
@@ -733,9 +759,9 @@ uv run python -m usb_sentinel selftest   # 依存コマンドがMISSと報告さ
 
 1. fioのパラメータ（`block_size` / `queue_depth` / `duration_s`）— 既定の1M / 8 / 30秒は暫定値。CrystalDiskMarkと数値を突き合わせるキャリブレーションが必要
 2. 公称速度の入手元と設定運用— `nominal_read_mb_s` / `nominal_write_mb_s`を検体ごとに誰がどう設定するか
-3. 既使用領域を実容量に加算する扱いの妥当性— f3writeモードでは検体の申告値（`statvfs`）を足している
+3. 書き込み速度の打ち切り基準— 速度検査（fio）の閾値をf3writeの1回分（8GB）の平均速度に当てている。SLCキャッシュが尽きた後の速度で妥当か、実機で確かめる
 4. ClamAV定義DBのオフライン更新手順— 隔離環境への持ち込み方法と頻度
-5. Raspberry Pi 4での実機確認— f3read / f3probe / fioの実出力とパーサの一致、Docker `rw`でのコンテナ内書き込み、`mount -w`の挙動（詳細は`.agents/tasks/f3-fio-steps/final-report.md`の実機確認項目）
+5. Raspberry Pi 4での実機確認— f3read / f3probe / fioの実出力とパーサの一致、`f3write --start-at --end-at`の分割実行、コンテナ内の`wipefs`・`mkfs.exfat`と、初期化後のドライブがWindows・macOSで読めること、Docker `rw`でのコンテナ内書き込み、`mount -w`の挙動（詳細は`.agents/tasks/f3-fio-steps/final-report.md`の実機確認項目）
 
 第2期（ハッシュ台帳の分離、±7%帯、リンク速度、SQLite、QR v:3）で加わった実機確認項目は次のとおり。
 

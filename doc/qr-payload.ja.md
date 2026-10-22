@@ -73,7 +73,7 @@ usb_sentinelが出すQRコードの中身と、`result.json`・Pi側SQLiteとの
 | `nominal_bytes` | int \| null | 設定された公称容量（商品ページの値）。未設定なら`null` |
 | `advertised_bytes` | int | lsblkが報告した申告容量 |
 | `actual_bytes` | int \| null | 実測容量 |
-| `kind` | str \| null | `ok` / `short` / `defect` / `counterfeit` / `unverified`（第6.5節） |
+| `kind` | str \| null | `ok` / `short` / `defect` / `counterfeit` / `unverified` / `slow`（第6.5節） |
 | `lost_ratio` | float \| null | f3readで消失したセクタの比率。f3probeモードは`null` |
 | `counterfeit_reasons` | list[str] \| null | 偽装疑いの理由コード（第6.7節）。疑いが無ければ`[]` |
 | `probe_verdict_line` | str \| null | f3probeの`Good news:`／`Bad news:`の行。f3writeモードは`null` |
@@ -166,7 +166,7 @@ frontendが通常QRの次のページとして出す。お薬手帳のQR（JAHIS
 | `cn` | int \| null | `advertised_check.nominal_bytes`（設定された公称容量。容量ステップがSKIPPEDでも入る） | MB（10^6バイト、切り捨て） |
 | `ca` | int | `device.advertised_bytes`（申告容量） | MB |
 | `cx` | int \| null | `steps[capacity].details.actual_bytes`（実測容量） | MB |
-| `ck` | str | 容量の区別1文字（第6.5節）。`-`=ok、`S`=short、`D`=defect、`C`=counterfeit、`U`=unverified、`?`=ステップがPASS／FAIL以外 | 1 |
+| `ck` | str | 容量の区別1文字（第6.5節）。`-`=ok、`S`=short、`D`=defect、`C`=counterfeit、`U`=unverified、`L`=slow、`?`=ステップがPASS／FAIL以外 | 1 |
 | `co` | int \| null | 申告容量の非破壊チェック。`1`=申告容量が公称×`over_ratio`を超過、`0`=超過なし、`null`=`nominal_bytes`未設定。容量ステップがSKIPPEDでも値が入る | 1 |
 | `cl` | float \| null | `lost_ratio`（小数4桁） | 比率 |
 | `ls` | int \| null | `device.link_speed_mbps` | Mbps |
@@ -284,6 +284,7 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 | `D` | `defect` | 容量は足りているがセクタ不良 |
 | `C` | `counterfeit` | 偽装疑い（内訳は`counterfeit_reasons`） |
 | `U` | `unverified` | 検証済み領域が閾値に届かない（f3writeモードでほぼ満杯の検体。ERROR） |
+| `L` | `slow` | 容量検査の途中で、書き込みが速度の閾値を続けて下回った、または書き込み・読み戻しが進まなくなった（`Spec Mismatch`。`actual_bytes`は`null`） |
 | `?` | — | 容量ステップがPASS／FAIL以外（SKIPPED・ERROR・未実装）で`kind`が無い |
 
 ### 6.6 申告容量の超過（`co`、`advertised_over`）
@@ -330,7 +331,8 @@ frontendへの要望（第2期）: `Counterfeit Suspected`の表示は日本語�
 | `c:probe` | f3probeの`Bad news` |
 | `c:lost` | 消失セクタ50%以上 |
 | `c:short` | 容量不足 |
-| `c:defect` | セクタ不良（`Defective`） |
+| `c:defect` | セクタ不良、またはf3write・f3readのI/Oエラー（`Defective`） |
+| `c:slow` | 容量検査中の書き込みが遅すぎる、または進まない（`Spec Mismatch`） |
 | `s:severe` | 速度不足、著しく下回る |
 | `s:minor` | 速度不足、わずかに下回る |
 | `<略号>:timeout` | そのステップがタイムアウト（`m:timeout`、`c:timeout`、`s:timeout`、`h:timeout`） |
@@ -416,7 +418,7 @@ backendは検査1件につき`/var/lib/usb-sentinel/db/inspections.sqlite`の`in
 | `clamav_scan_time_s` | REAL | clamscan集計行の`Time` |
 | `nominal_bytes`、`advertised_bytes`、`actual_bytes` | INTEGER | 公称（`advertised_check.nominal_bytes`）・申告・実測（バイト） |
 | `advertised_over` | INTEGER | 非破壊チェックの超過（1/0） |
-| `capacity_kind` | TEXT | `ok` / `short` / `defect` / `counterfeit` / `unverified` |
+| `capacity_kind` | TEXT | `ok` / `short` / `defect` / `counterfeit` / `unverified` / `slow` |
 | `counterfeit_reasons` | TEXT | JSON配列。非破壊チェックの`over_advertised`と容量ステップの理由を重複なしで和集合にしたもの |
 | `lost_ratio` | REAL | 消失比率 |
 | `probe_verdict_line` | TEXT | f3probeの判定行 |
@@ -496,6 +498,7 @@ Pi側の列（第8.1節）をそのまま持ち、ケース情報を列として
 | ファイル用QR v:3 | `result-qr.png` | 検査モード切替。`verdict`の後に`mode`（`scan_only`／`full`）を追加。`v`は`3`のまま |
 | 詳細QR v:3 1枚目 | 画面 | 検査モード切替。`dv`の後に`md`（`s`／`f`／`null`）を追加。最悪147バイト |
 | SQLite `user_version` 2 | `inspections.sqlite` | 検査モード切替。`mode`列。backendとfrontendは同時に配備する。古いfrontendは`user_version` 2を拒否して結果ディレクトリの走査にフォールバックする |
+| 詳細QR v:3、`result.json` | 画面、`result-qr.png` | 容量検査の打ち切り。`kind`（`ck`）に`slow`（`L`）、`reason_codes`に`c:slow`を追加。`result.json`に`reformat`（検査後のexFAT初期化。`status`は`done`／`failed`／`skipped`、未実行なら`{}`）を追加。版は変えない。古い読み取りアプリは`L`を未知の区別として扱う |
 
 - 読み取りアプリは`v`で分岐し、v:1のファイル用QRも読めるようにしておく（第2期より前の結果ディレクトリが残っている）。v:1には`truncated`キーが無いことがあるので、無ければ`false`と解釈する。
 - ファイル用QR v:3は、将来キーを足すときも既存キーの意味を変えない。読み取りアプリは未知のキーを無視し、既知のキーが無ければ`null`扱いにする。

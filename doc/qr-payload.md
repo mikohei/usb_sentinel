@@ -73,7 +73,7 @@ Contents of `capacity`:
 | `nominal_bytes` | int \| null | The configured nominal capacity (the value on the product page). `null` if not set |
 | `advertised_bytes` | int | The advertised capacity reported by lsblk |
 | `actual_bytes` | int \| null | The measured capacity |
-| `kind` | str \| null | `ok` / `short` / `defect` / `counterfeit` / `unverified` (Section 6.5) |
+| `kind` | str \| null | `ok` / `short` / `defect` / `counterfeit` / `unverified` / `slow` (Section 6.5) |
 | `lost_ratio` | float \| null | The ratio of sectors lost in f3read. `null` in f3probe mode |
 | `counterfeit_reasons` | list[str] \| null | Reason codes for counterfeit suspicion (Section 6.7). `[]` if there is no suspicion |
 | `probe_verdict_line` | str \| null | The `Good news:` / `Bad news:` line of f3probe. `null` in f3write mode |
@@ -166,7 +166,7 @@ Byte budget of code 1: with the header, a 32-character serial, `k`, six-digit `e
 | `cn` | int \| null | `advertised_check.nominal_bytes` (the configured nominal capacity; present even when the capacity step is SKIPPED) | MB (10^6 bytes, rounded down) |
 | `ca` | int | `device.advertised_bytes` (advertised capacity) | MB |
 | `cx` | int \| null | `steps[capacity].details.actual_bytes` (measured capacity) | MB |
-| `ck` | str | One-character capacity classification (Section 6.5). `-`=ok, `S`=short, `D`=defect, `C`=counterfeit, `U`=unverified, `?`=the step is neither PASS nor FAIL | 1 |
+| `ck` | str | One-character capacity classification (Section 6.5). `-`=ok, `S`=short, `D`=defect, `C`=counterfeit, `U`=unverified, `L`=slow, `?`=the step is neither PASS nor FAIL | 1 |
 | `co` | int \| null | Non-destructive check of the advertised capacity. `1`=the advertised capacity exceeds nominal × `over_ratio`, `0`=no excess, `null`=`nominal_bytes` is not set. The value is present even when the capacity step is SKIPPED | 1 |
 | `cl` | float \| null | `lost_ratio` (4 decimal places) | Ratio |
 | `ls` | int \| null | `device.link_speed_mbps` | Mbps |
@@ -284,6 +284,7 @@ In `st` of the normal QR, a name not in the table uses its first 3 characters, a
 | `D` | `defect` | The capacity is sufficient, but there are bad sectors |
 | `C` | `counterfeit` | Counterfeit suspected (the breakdown is in `counterfeit_reasons`) |
 | `U` | `unverified` | The verified area does not reach the threshold (a nearly full sample in f3write mode. ERROR) |
+| `L` | `slow` | During the capacity check, writes stayed below the speed threshold, or writing or reading back stalled (`Spec Mismatch`; `actual_bytes` is `null`) |
 | `?` | — | The capacity step is neither PASS nor FAIL (SKIPPED, ERROR, or not implemented), so there is no `kind` |
 
 ### 6.6 Excess over the advertised capacity (`co`, `advertised_over`)
@@ -330,7 +331,8 @@ The form is `<step abbreviation>:<reason>`. The order follows the order of `step
 | `c:probe` | f3probe `Bad news` |
 | `c:lost` | 50% or more lost sectors |
 | `c:short` | Insufficient capacity |
-| `c:defect` | Bad sectors (`Defective`) |
+| `c:defect` | Bad sectors, or an I/O error from f3write / f3read (`Defective`) |
+| `c:slow` | Writes too slow or stalled during the capacity check (`Spec Mismatch`) |
 | `s:severe` | Insufficient speed, far below |
 | `s:minor` | Insufficient speed, slightly below |
 | `<abbreviation>:timeout` | That step timed out (`m:timeout`, `c:timeout`, `s:timeout`, `h:timeout`) |
@@ -416,7 +418,7 @@ For each inspection, the backend writes one row to the `inspections` table of `/
 | `clamav_scan_time_s` | REAL | `Time` in the clamscan summary |
 | `nominal_bytes`, `advertised_bytes`, `actual_bytes` | INTEGER | Nominal (`advertised_check.nominal_bytes`), advertised, and measured (bytes) |
 | `advertised_over` | INTEGER | Excess found by the non-destructive check (1/0) |
-| `capacity_kind` | TEXT | `ok` / `short` / `defect` / `counterfeit` / `unverified` |
+| `capacity_kind` | TEXT | `ok` / `short` / `defect` / `counterfeit` / `unverified` / `slow` |
 | `counterfeit_reasons` | TEXT | JSON array. The union, without duplicates, of `over_advertised` from the non-destructive check and the reasons from the capacity step |
 | `lost_ratio` | REAL | Lost ratio |
 | `probe_verdict_line` | TEXT | The verdict line of f3probe |
@@ -496,6 +498,7 @@ Confirm that the carried-out result has not been tampered with.
 | File QR v:3 | `result-qr.png` | Inspection-mode toggle. Added `mode` (`scan_only` / `full`) after `verdict`. `v` stays `3` |
 | Detail QR v:3 code 1 | Screen | Inspection-mode toggle. Added `md` (`s` / `f` / `null`) after `dv`; worst case 147 bytes |
 | SQLite `user_version` 2 | `inspections.sqlite` | Inspection-mode toggle. Column `mode`. Deploy the backend and the frontend together: an old frontend refuses `user_version` 2 and falls back to scanning the results directory |
+| Detail QR v:3, `result.json` | Screen, `result-qr.png` | Early stop of the capacity check. Added `slow` (`L`) to `kind` (`ck`) and `c:slow` to `reason_codes`. Added `reformat` to `result.json` (the exFAT format after the inspection; `status` is `done` / `failed` / `skipped`, `{}` when it did not run). Versions unchanged; an old reader app treats `L` as an unknown classification |
 
 - The reader app branches on `v` and should also be able to read file QR v:1 (results directories from before phase 2 remain). v:1 may not have the `truncated` key; if it is absent, interpret it as `false`.
 - When keys are added to file QR v:3 in the future, the meaning of existing keys will not change. The reader app ignores unknown keys and treats a missing known key as `null`.

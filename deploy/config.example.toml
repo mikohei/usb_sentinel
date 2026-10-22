@@ -23,6 +23,12 @@ mount_root = "/run/usb-sentinel/mnt"
 # USB_SENTINEL_DEVICE_ACCESS=rw) unless it runs with INSTALL_ALLOW_ERASE=0.
 allow_destructive = false
 
+# After the capacity and speed checks ran, format the whole drive as exFAT so it can
+# be used and inspected again (fio writes to the start of the drive and leaves no
+# filesystem). Never done when those checks did not run: a drive with malware, a
+# failed scan, or scan-only mode is left exactly as it was inserted.
+reformat = true
+
 # Whether to build the file hash inventory (hash-inventory.tsv).
 # Used to compare hashes outside the isolated station.
 # Once ClamAV has actually scanned, the inventory is built whatever the scan result
@@ -75,13 +81,33 @@ pass_ratio = 0.93
 # nominal_bytes = 32000000000
 over_ratio = 1.07
 
-# When true, use f3probe (fast, destructive, writes to the device directly).
-# When false, use f3write + f3read (verifies only the free space; use true for
-# full drives, NTFS, or samples whose output cannot be parsed).
+# When true, use f3probe only (fast, destructive, writes to the device directly).
+# When false, format the whole drive as exFAT and verify all of it with f3write +
+# f3read. Large drives take long: about capacity / speed for each of the two.
 use_probe = false
 
-# Time limit in seconds for the whole step. Exceeding it is an ERROR (never a Pass).
-timeout_s = 14400.0
+# f3write mode: run f3probe first; "Bad news" ends the step as counterfeit within
+# minutes instead of after the full write.
+probe_first = true
+
+# Time limit in seconds for the whole step. 0 means no limit: the step then ends
+# early only on a clear failure (below), so 2 TB and 8 TB drives are checked to the
+# end. A positive value is a hard limit; exceeding it is an ERROR (never a Pass).
+timeout_s = 0.0
+
+# f3write and f3read run batch_files 1 GB files at a time, with checks between
+# batches: a write or read I/O error ends the step as Defective, and corruption
+# found while files remain ends the read-back.
+batch_files = 8
+
+# Writes slower than the speed step's threshold ([speed] nominal_write_mb_s or the
+# device_class minimum, times pass_ratio) for this many batches in a row end the
+# step as Spec Mismatch.
+slow_batches = 3
+
+# A batch that cannot finish at this rate (MB/s) is stopped as stalled (Spec
+# Mismatch).
+stall_mb_s = 1.0
 
 [speed]
 # Parameters for the fio sequential read followed by sequential write. These are

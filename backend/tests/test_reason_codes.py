@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from tests.test_classify import _counterfeit, _result
-from usb_sentinel.libs import StepResult, StepStatus
-from usb_sentinel.libs.orchestrator import reason_codes_for
+from usb_sentinel.libs import StepResult, StepStatus, Verdict
+from usb_sentinel.libs.orchestrator import classify, reason_codes_for
 
 
 class TestReasonCodes:
@@ -70,6 +70,21 @@ class TestReasonCodes:
         )
 
         assert reason_codes_for(result) == ["c:defect"]
+
+    def test_slow_is_spec_mismatch(self) -> None:
+        # A capacity step stopped for a slow or stalled drive (neither defect nor counterfeit).
+        result = _result(
+            StepResult(name="malware", status=StepStatus.PASS),
+            StepResult(
+                name="capacity",
+                status=StepStatus.FAIL,
+                summary="Write stalled: files 1-8 not finished within 8590s (below 1MB/s)",
+                details={"kind": "slow", "defect": False, "counterfeit": False},
+            ),
+        )
+
+        assert reason_codes_for(result) == ["c:slow"]
+        assert classify(result)[0] is Verdict.SPEC_MISMATCH
 
     def test_speed_severity(self) -> None:
         severe = _result(

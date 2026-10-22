@@ -25,6 +25,9 @@ _VERDICT = re.compile(r"^(Good news|Bad news):.*$", re.MULTILINE)
 
 # Block size used when there is no Physical block size line.
 DEFAULT_BLOCK_SIZE = 512
+# Upper limit for one f3probe run (seconds). f3probe touches a few hundred MB whatever the size
+# of the drive, so it normally ends in minutes.
+PROBE_TIMEOUT_S = 7200.0
 
 
 @dataclass
@@ -78,7 +81,7 @@ def run_probe(
         result.summary = not_found_summary("f3probe")
         return None
     argv = ["f3probe", "--destructive", "--time-ops", ctx.device.path]
-    probe = run_within_budget(ctx, budget, argv, commands)
+    probe = run_within_budget(ctx, budget, argv, commands, cap_s=PROBE_TIMEOUT_S)
     if probe is None:
         result.summary = TIMEOUT_SUMMARY
         return None

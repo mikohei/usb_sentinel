@@ -24,6 +24,10 @@ from usb_sentinel.libs import FakeRunner, StepContext, StepStatus
 from usb_sentinel.libs.steps.capacity import CapacityStep
 
 
+def _with_timeout(ctx: StepContext, timeout_s: float) -> None:
+    ctx.config = replace(ctx.config, capacity=replace(ctx.config.capacity, timeout_s=timeout_s))
+
+
 class TestErrorPaths:
     def test_nearly_full_drive_is_error_not_pass(
         self, ctx: StepContext, f3_runner: FakeRunner
@@ -109,7 +113,9 @@ class TestErrorPaths:
     def test_f3write_zero_without_speed_continues(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
-        f3_runner.register(["f3write"], returncode=0, stdout="Free space: 0.00 Byte\n")
+        written = "".join(f"Creating file {n}.h2w ... OK!\n" for n in range(1, 30))
+        stdout = written + "Free space: 0.00 Byte\nWriting speed not available\n"
+        f3_runner.register(["f3write"], returncode=0, stdout=stdout)
 
         result = capacity_step().run(ctx)
 
@@ -168,7 +174,11 @@ class TestErrorPaths:
         assert result.summary == "Could not stat the mount point"
         assert any(c[0] == "umount" for c in f3_runner.calls)
 
-    def test_f3write_timeout_unmounts(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
+    def test_f3write_overall_timeout_unmounts(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        # The overall timeout_s is shorter than the stall cap, so a timeout is ERROR, not slow.
+        _with_timeout(ctx, 14400)
         f3_runner.register(["f3write"], returncode=-1, timed_out=True)
 
         result = capacity_step().run(ctx)
@@ -179,34 +189,27 @@ class TestErrorPaths:
         assert f3_runner.calls[-1][0] == "umount"
 
     def test_budget_exhausted_before_f3write(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
+        _with_timeout(ctx, 14400)
         clock = iter([0.0, 100_000.0, 100_000.0, 100_000.0])
         step = CapacityStep(statvfs=lambda _p: make_statvfs(), monotonic=lambda: next(clock))
 
         result = step.run(ctx)
 
         assert result.summary == "Timed out"
-        assert not any(c[0] == "f3write" for c in f3_runner.calls)
-        assert f3_runner.calls[-1][0] == "umount"
+        assert f3_runner.calls == []
 
-    def test_no_filesystem_is_error_without_mount(
+    def test_drive_without_filesystem_is_formatted(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
+        # A drive left blank (for example by an earlier inspection) is verified like any other.
         no_fs = json.loads(json.dumps(LSBLK_DISK))
         no_fs["blockdevices"][0]["children"] = []
         f3_runner.register(["lsblk"], stdout=json.dumps(no_fs))
 
         result = capacity_step().run(ctx)
 
-        assert result.status is StepStatus.ERROR
-        assert "use_probe" in result.summary
-        assert not any(c[0] == "mount" for c in f3_runner.calls)
-
-    def test_lsblk_failure_is_error(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
-        f3_runner.register(["lsblk"], stdout="not json")
-
-        result = capacity_step().run(ctx)
-
-        assert result.summary.startswith("Could not get device information")
+        assert result.status is StepStatus.PASS
+        assert ("mkfs.exfat", "/dev/sda") in f3_runner.calls
 
     def test_missing_f3write_does_not_mount(self, ctx: StepContext) -> None:
         runner = FakeRunner(missing={"f3write"})
@@ -217,7 +220,16 @@ class TestErrorPaths:
 
         assert result.status is StepStatus.ERROR
         assert result.summary == "f3write not found"
+        # Not even the f3probe pre-check runs, so the drive is left as it was.
         assert runner.calls == []
+
+    def test_missing_mkfs_does_not_probe(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
+        f3_runner.missing.add("mkfs.exfat")
+
+        result = capacity_step().run(ctx)
+
+        assert result.summary == "mkfs.exfat not found"
+        assert f3_runner.calls == []
 
 
 class TestUnmountFailure:
@@ -247,6 +259,7 @@ class TestUnmountFailure:
     def test_timeout_then_umount_failure_keeps_summary(
         self, ctx: StepContext, f3_runner: FakeRunner
     ) -> None:
+        _with_timeout(ctx, 14400)
         f3_runner.register(["f3write"], returncode=-1, timed_out=True)
         f3_runner.register(["umount"], returncode=32, stderr="target is busy")
 

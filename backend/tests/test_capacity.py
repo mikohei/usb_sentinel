@@ -1,8 +1,9 @@
 """f3write+f3read mode of the capacity step (CapacityStep).
 
 Verify the four judgment branches (PASS / short capacity / data corruption / insufficient
-verification), summation, and handling of leftover .h2w files. ERROR paths and umount failures
-are in test_capacity_errors.py.
+verification), the f3probe pre-check and format before f3write, and handling of leftover .h2w
+files. ERROR paths and umount failures are in test_capacity_errors.py; batching and early
+stops are in test_capacity_batches.py.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from tests.conftest import (
+    F3PROBE_FAKE,
     F3READ_OK_SECTORS,
     LSBLK_DISK,
     STATVFS_USED_BYTES,
@@ -53,9 +55,11 @@ class TestPass:
         assert d["verified_ratio"] == round(d["verified_bytes"] / 32_000_000_000, 4)
         assert d["bad_sectors"] == 0
         assert d["defect"] is False
-        assert d["probe"] is None
+        assert d["probe_first"] is True
+        assert d["probe"]["verdict_line"].startswith("Good news:")
         fs = d["filesystems"][0]
-        assert fs["device"] == "/dev/sda1"
+        assert fs["device"] == "/dev/sda"
+        assert fs["fstype"] == "exfat"
         assert fs["mountpoint"] == str(_rw_target(ctx))
         assert fs["used_bytes"] == STATVFS_USED_BYTES
         assert fs["ok_sectors"] == F3READ_OK_SECTORS
@@ -73,19 +77,15 @@ class TestPass:
         result = capacity_step().run(ctx)
 
         assert result.details["commands"] == _non_lsblk(f3_runner)
-        assert [c[0] for c in result.details["commands"]] == [
-            "mount",
-            "f3write",
-            "f3read",
-            "umount",
-        ]
-        assert result.details["commands"][0] == [
-            "mount",
-            "-w",
-            "-o",
-            "noexec,nosuid,nodev",
-            "/dev/sda1",
-            str(_rw_target(ctx)),
+        target = str(_rw_target(ctx))
+        assert result.details["commands"] == [
+            ["f3probe", "--destructive", "--time-ops", "/dev/sda"],
+            ["wipefs", "--all", "--force", "/dev/sda"],
+            ["mkfs.exfat", "/dev/sda"],
+            ["mount", "-w", "-o", "noexec,nosuid,nodev", "/dev/sda", target],
+            ["f3write", "--start-at=1", "--end-at=64", target],
+            ["f3read", "--start-at=1", "--end-at=29", target],
+            ["umount", target],
         ]
 
     def test_exact_threshold_passes(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
@@ -109,22 +109,81 @@ class TestPass:
         assert result.status is StepStatus.FAIL
         assert result.summary.startswith("Capacity shortfall:")
 
-    def test_multiple_filesystems_are_summed(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
+    def test_existing_partitions_become_one_exfat(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        # Whatever the drive held, the whole disk is formatted and verified as one filesystem.
         two = json.loads(json.dumps(LSBLK_DISK))
         two["blockdevices"][0]["children"].append(
             {"path": "/dev/sda2", "fstype": "ext4", "type": "part", "mountpoint": None}
         )
         f3_runner.register(["lsblk"], stdout=json.dumps(two))
-        f3_runner.register(["f3read"], stdout=f3read_output(30_000_000))
 
         result = capacity_step().run(ctx)
 
-        fs = result.details["filesystems"]
-        assert [e["device"] for e in fs] == ["/dev/sda1", "/dev/sda2"]
-        assert [e["mountpoint"] for e in fs] == [str(_rw_target(ctx, 0)), str(_rw_target(ctx, 1))]
-        assert result.details["verified_bytes"] == 2 * 30_000_000 * 512
-        assert result.details["used_bytes"] == 2 * STATVFS_USED_BYTES
+        assert [e["device"] for e in result.details["filesystems"]] == ["/dev/sda"]
+        assert [c for c in f3_runner.calls if c[:2] == ("mount", "-w")] == [
+            ("mount", "-w", "-o", "noexec,nosuid,nodev", "/dev/sda", str(_rw_target(ctx)))
+        ]
         assert result.status is StepStatus.PASS
+
+    def test_format_failure_is_error_without_mount(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        f3_runner.register(["mkfs.exfat"], returncode=1, stderr="mkfs.exfat: device busy")
+
+        result = capacity_step().run(ctx)
+
+        assert result.status is StepStatus.ERROR
+        assert result.summary == "Format failed: mkfs.exfat: mkfs.exfat: device busy"
+        assert not any(c[0] in ("mount", "f3write") for c in f3_runner.calls)
+
+
+class TestProbeFirst:
+    def test_bad_news_stops_before_format(self, ctx: StepContext, f3_runner: FakeRunner) -> None:
+        f3_runner.register(["f3probe"], returncode=1, stdout=F3PROBE_FAKE)
+
+        result = capacity_step().run(ctx)
+
+        assert result.status is StepStatus.FAIL
+        assert result.details["kind"] == "counterfeit"
+        assert result.details["counterfeit_reasons"] == ["probe_bad_news"]
+        assert result.details["mode"] == "f3write"
+        assert result.summary.startswith("Suspected counterfeit: f3probe: Bad news:")
+        assert [c[0] for c in f3_runner.calls] == ["f3probe"]
+
+    def test_unfinished_pre_check_warns_and_continues(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        f3_runner.register(["f3probe"], returncode=-1, timed_out=True)
+
+        result = capacity_step().run(ctx)
+
+        assert result.status is StepStatus.PASS
+        assert "f3probe pre-check did not finish: Timed out" in result.warnings
+        assert "timed_out" not in result.details
+
+    def test_missing_f3probe_warns_and_continues(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        f3_runner.missing.add("f3probe")
+
+        result = capacity_step().run(ctx)
+
+        assert result.status is StepStatus.PASS
+        assert "f3probe pre-check did not finish: f3probe not found" in result.warnings
+
+    def test_disabled_pre_check_does_not_probe(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        ctx.config = replace(ctx.config, capacity=replace(ctx.config.capacity, probe_first=False))
+
+        result = capacity_step().run(ctx)
+
+        assert result.status is StepStatus.PASS
+        assert result.details["probe_first"] is False
+        assert result.details["probe"] is None
+        assert not any(c[0] == "f3probe" for c in f3_runner.calls)
 
 
 class TestFail:
@@ -133,7 +192,9 @@ class TestFail:
     ) -> None:
         # Counterfeit: only about 8 GB is readable and the rest is LOST. The loss ratio is 50% or
         # more, so it is suspected counterfeit.
-        f3_runner.register(["f3read"], stdout=f3read_output(15_625_000, lost_sectors=44_000_000))
+        f3_runner.register(
+            ["f3read"], stdout=f3read_output(15_625_000, overwritten_sectors=44_000_000)
+        )
 
         result = capacity_step().run(ctx)
 
@@ -152,7 +213,7 @@ class TestFail:
     ) -> None:
         f3_runner.register(
             ["f3read"],
-            stdout=f3read_output(F3READ_OK_SECTORS, lost_sectors=10, corrupted_sectors=2),
+            stdout=f3read_output(F3READ_OK_SECTORS, corrupted_sectors=2, overwritten_sectors=10),
         )
 
         result = capacity_step().run(ctx)
@@ -161,7 +222,21 @@ class TestFail:
         assert result.details["defect"] is True
         assert result.details["bad_sectors"] == 12
         assert result.summary.startswith("Data corruption: 12 sectors")
-        assert "lost 10 / corrupted 2" in result.summary
+        assert "(corrupted 2 / slightly changed 0 / overwritten 10)" in result.summary
+
+    def test_lost_ratio_counts_each_bad_sector_once(
+        self, ctx: StepContext, f3_runner: FakeRunner
+    ) -> None:
+        # f3read prints Data LOST as the sum of its breakdown; summing both would halve the
+        # ratio. 40% read OK and 60% overwritten is a 60% loss.
+        f3_runner.register(
+            ["f3read"], stdout=f3read_output(40_000_000, overwritten_sectors=60_000_000)
+        )
+
+        result = capacity_step().run(ctx)
+
+        assert result.details["lost_ratio"] == 0.6
+        assert result.details["kind"] == "counterfeit"
 
 
 def _with_nominal(ctx: StepContext, nominal: int) -> StepContext:

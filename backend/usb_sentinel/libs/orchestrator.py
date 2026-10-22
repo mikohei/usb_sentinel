@@ -13,6 +13,7 @@ from .runner import CommandRunner
 from .steps import StepContext
 from .steps.capacity import CapacityStep
 from .steps.capacity_judge import precheck_advertised
+from .steps.format_fs import reformat
 from .steps.malware import MalwareScanStep
 from .steps.speed import SpeedStep
 from .store import InspectionStore, NullStore
@@ -123,7 +124,8 @@ def _fail_codes(step: StepResult) -> list[str]:
         codes = [
             _COUNTERFEIT_CODES[reason] for reason in step.details.get("counterfeit_reasons", [])
         ]
-        codes += {"short": ["c:short"], "defect": ["c:defect"]}.get(step.details.get("kind"), [])
+        kinds = {"short": ["c:short"], "defect": ["c:defect"], "slow": ["c:slow"]}
+        codes += kinds.get(step.details.get("kind"), [])
         return codes
     if step.name == "speed":
         # severity is set by the severity judgment in speed.py. No code if absent.
@@ -180,12 +182,13 @@ def inspect(
 ) -> InspectionResult:
     """Drive the whole inspection sequence.
 
-    probe -> safety guard -> ro mount -> malware -> inventory -> destructive tests -> verdict.
+    probe -> safety guard -> ro mount -> malware -> inventory -> destructive tests -> exFAT
+    format -> verdict.
 
-    When malware is detected, destructive tests (f3, fio) are not run. The condition `permitted`
-    for running destructive tests (all steps PASS, allow_destructive, inspection mode full, and
-    unmounted) is a safety gate and must not be relaxed. The hash inventory is built only after
-    clamscan has run a scan.
+    When malware is detected, destructive tests (f3, fio) and the format are not run. The
+    condition `permitted` for running destructive tests (all steps PASS, allow_destructive,
+    inspection mode full, and unmounted) is a safety gate and must not be relaxed. The hash
+    inventory is built only after clamscan has run a scan.
 
     Args:
         runner: Command runner.
@@ -270,6 +273,11 @@ def inspect(
         result.steps.append(
             _timed(step.run, ctx) if permitted else StepResult(name, StepStatus.SKIPPED, reason)
         )
+    # Inside the same gate as the destructive steps: a drive with malware keeps its evidence.
+    if permitted and config.reformat:
+        result.reformat = reformat(ctx)
+        if result.reformat["status"] != "done":
+            result.warnings.append(f"Drive not reformatted: {result.reformat['summary']}")
     result.verdict, result.reasons = classify(result)
     result.reason_codes = reason_codes_for(result)
     now = datetime.now(UTC)

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import (
+    F3PROBE_GENUINE,
     F3READ_OK,
     F3WRITE_OK,
     LSBLK_DISK,
@@ -29,7 +30,7 @@ from usb_sentinel.libs import (
 from usb_sentinel.libs import device as device_mod
 
 # Commands that must not be called by destructive steps (used to verify a closed gate).
-DESTRUCTIVE_COMMANDS = {"f3probe", "f3write", "f3read", "fio"}
+DESTRUCTIVE_COMMANDS = {"f3probe", "f3write", "f3read", "fio", "wipefs", "mkfs.exfat"}
 
 CLAMSCAN_VERSION = "ClamAV 1.0.3/27200/Mon Feb 12 09:23:12 2024"
 
@@ -51,6 +52,9 @@ def full_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
     fake.register(["clamscan", "--recursive"], returncode=0, stdout="")
     fake.register(["mount"], returncode=0)
     fake.register(["umount"], returncode=0)
+    fake.register(["f3probe"], stdout=F3PROBE_GENUINE)
+    fake.register(["wipefs"])
+    fake.register(["mkfs.exfat"])
     fake.register(["f3write"], stdout=F3WRITE_OK)
     fake.register(["f3read"], stdout=F3READ_OK)
     fake.register(["fio", "--name=seq_read"], stdout=fio_json("read", bw_bytes=85_300_000))

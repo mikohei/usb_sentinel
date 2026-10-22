@@ -116,7 +116,11 @@ def missing_command(runner: CommandRunner, commands: Iterable[str]) -> str | Non
 
 
 def run_within_budget(
-    ctx: StepContext, budget: Budget, argv: list[str], commands: list[list[str]]
+    ctx: StepContext,
+    budget: Budget,
+    argv: list[str],
+    commands: list[list[str]],
+    cap_s: float | None = None,
 ) -> CommandResult | None:
     """If budget remains, record argv in commands and run it. Otherwise return None unrun.
 
@@ -128,6 +132,8 @@ def run_within_budget(
         budget: Time budget.
         argv: argv to run (fixed list).
         commands: Where run argv values are recorded (appended right before running).
+        cap_s: Upper limit for this one command (seconds). Required when the budget is
+            unlimited (math.inf), so that timeout_s is always finite.
 
     Returns:
         Result of the command. None if it was not run because the budget ran out.
@@ -135,7 +141,8 @@ def run_within_budget(
     if budget.remaining() <= 0:
         return None
     commands.append(argv)
-    return ctx.runner.run(argv, timeout_s=budget.remaining())
+    remaining = budget.remaining()
+    return ctx.runner.run(argv, timeout_s=remaining if cap_s is None else min(remaining, cap_s))
 
 
 def mark_timed_out(result: StepResult) -> None:

@@ -39,6 +39,10 @@ def _header_lines(result: InspectionResult) -> list[str]:
         lines.append(f"Link speed: {result.device.link_speed_mbps}Mbps")
     if result.elapsed_s is not None:
         lines.append(f"Elapsed: {result.elapsed_s}s")
+    if result.reformat:
+        lines.append(
+            f"Reformat: {result.reformat.get('status')} ({result.reformat.get('summary')})"
+        )
     if result.advertised_check.get("exceeded") is True:
         lines.append(f"Advertised capacity exceeded: {result.advertised_check.get('summary', '')}")
     lines.extend(f"Warning: {warning}" for warning in result.warnings)

@@ -41,8 +41,10 @@ class TestParseF3Read:
             slightly_changed_sectors=0,
             overwritten_sectors=0,
             read_mb_s=62.9,
+            validated=tuple(range(1, 30)),
         )
         assert summary.bad_sectors == 0
+        assert summary.read_error is False
 
     def test_parses_data_lost(self) -> None:
         text = (
@@ -58,7 +60,8 @@ class TestParseF3Read:
         assert summary.corrupted_sectors == 2048
         assert summary.slightly_changed_sectors == 3
         assert summary.overwritten_sectors == 44333887
-        assert summary.bad_sectors == 44335938 + 2048 + 3 + 44333887
+        # Data LOST is already the sum of the three kinds; it is not added to them again.
+        assert summary.bad_sectors == 44335938
 
     def test_missing_speed_line_is_none(self) -> None:
         text = "  Data OK: 1.00 GB (1953125 sectors)\nData LOST: 0.00 Byte (0 sectors)\n"

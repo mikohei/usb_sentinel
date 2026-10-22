@@ -1,8 +1,9 @@
 """Capacity verification step (f3write+f3read, or f3probe).
 
 A destructive test, called only after passing the orchestrator gate. All external commands go
-through ctx.runner.run(), with argv as a fixed list. f3write mode lives in capacity_write.py and
-f3probe mode in capacity_probe.py.
+through ctx.runner.run(), with argv as a fixed list. f3write mode lives in capacity_write.py
+(batches in capacity_batches.py) and f3probe mode in capacity_probe.py. In f3write mode,
+f3probe runs first (probe_first) so that counterfeit capacity ends the step in minutes.
 """
 
 import math
@@ -16,12 +17,13 @@ from . import StepContext
 from .capacity_fs import MountError, MountpointError, NotWritableError, UnmountError
 from .capacity_judge import CapacityVerdict, evaluate, judge, over_threshold
 from .capacity_probe import run_probe
-from .capacity_write import Totals, run_f3write
+from .capacity_write import F3WRITE_COMMANDS, Totals, run_f3write
 from .common import (
     STDERR_HEAD_CHARS,
     Budget,
     DeviceQueryError,
     is_permission_error,
+    missing_command,
     not_found_summary,
 )
 
@@ -32,7 +34,8 @@ __all__ = ["DEFAULT_MONOTONIC", "DEFAULT_STATVFS", "CapacityStep", "evaluate"]
 DEFAULT_STATVFS: Callable[[str], os.statvfs_result] = os.statvfs
 DEFAULT_MONOTONIC: Callable[[], float] = time.monotonic
 
-# f3read non-OK sector kinds (keys of filesystems[].{key}_sectors).
+# f3read sector counts (keys of filesystems[].{key}_sectors). lost is the non-OK total and the
+# other three are its breakdown.
 _BAD_SECTOR_KEYS = ("lost", "corrupted", "slightly_changed", "overwritten")
 # summary when an rw mount fails for lack of permission or write protection.
 _MOUNT_NOT_WRITABLE_SUMMARY = "Permission denied: could not mount read-write"
@@ -79,13 +82,21 @@ class CapacityStep:
             filesystems=[],
             probe=None,
         )
-        budget = Budget(config.timeout_s, self.monotonic)
+        result.details["probe_first"] = config.probe_first and not config.use_probe
+        # timeout_s = 0 means no overall limit; every command then gets its own cap.
+        budget = Budget(config.timeout_s or math.inf, self.monotonic)
         try:
             if config.use_probe:
                 actual = run_probe(ctx, result, budget, commands)
                 if actual is None:
                     return result
                 return self._judge_probe(result, actual)
+            missing = missing_command(ctx.runner, F3WRITE_COMMANDS)
+            if missing is not None:
+                result.summary = not_found_summary(missing)
+                return result
+            if config.probe_first and self._precheck(ctx, result, budget, commands):
+                return result
             totals = run_f3write(ctx, result, budget, commands, self.statvfs)
             if totals is None:
                 return result
@@ -116,11 +127,34 @@ class CapacityStep:
             result.summary = f"umount failed: {str(exc)[:STDERR_HEAD_CHARS]}"
         return result
 
+    def _precheck(
+        self, ctx: StepContext, result: StepResult, budget: Budget, commands: list[list[str]]
+    ) -> bool:
+        """f3probe before f3write. True if f3probe found counterfeit capacity (result is final).
+
+        A pre-check that does not finish only adds a warning; f3write then decides.
+        """
+        try:
+            actual = run_probe(ctx, result, budget, commands)
+        except CommandNotFoundError as exc:
+            result.summary, actual = not_found_summary(str(exc)), None
+        if actual is None:
+            result.warnings.append(f"f3probe pre-check did not finish: {result.summary}")
+            result.summary = ""
+            result.details.pop("timed_out", None)
+            return False
+        verdict_line = result.details["probe"]["verdict_line"] or ""
+        if not verdict_line.startswith("Bad news:"):
+            return False
+        self._judge_probe(result, actual)
+        return True
+
     def _judge_f3write(self, result: StepResult, totals: Totals) -> StepResult:
         """Judgment for f3write mode (done after umount). The core is capacity_judge.judge()."""
         entries = result.details["filesystems"]
         bad = {key: sum(entry[f"{key}_sectors"] for entry in entries) for key in _BAD_SECTOR_KEYS}
-        sectors = sum(entry["ok_sectors"] for entry in entries) + sum(bad.values())
+        # lost is f3read's Data LOST, already the total of the other three kinds.
+        sectors = sum(entry["ok_sectors"] for entry in entries) + bad["lost"]
         advertised: int = result.details["advertised_bytes"]
         verdict = self._judge(
             result,
@@ -136,8 +170,7 @@ class CapacityStep:
         )
         if verdict.kind == "defect":
             result.summary += (
-                f" (lost {bad['lost']} / corrupted {bad['corrupted']}"
-                f" / slightly changed {bad['slightly_changed']}"
+                f" (corrupted {bad['corrupted']} / slightly changed {bad['slightly_changed']}"
                 f" / overwritten {bad['overwritten']})"
             )
         return result

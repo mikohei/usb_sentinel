@@ -8,13 +8,22 @@ import pytest
 
 from tests.conftest import (
     CLAMSCAN_VERSION,
+    F3PROBE_GENUINE,
     F3READ_OK,
     F3WRITE_OK,
     LSBLK_DISK,
     fio_json,
     make_statvfs,
 )
-from usb_sentinel.libs import Config, FakeRunner, StepContext, StepStatus, Verdict, inspect
+from usb_sentinel.libs import (
+    Config,
+    FakeRunner,
+    InspectionMode,
+    StepContext,
+    StepStatus,
+    Verdict,
+    inspect,
+)
 from usb_sentinel.libs import device as device_mod
 from usb_sentinel.libs.config import load_config
 from usb_sentinel.libs.mounter import mounted
@@ -72,6 +81,9 @@ def test_nonboolean_flags_rejected(config: Config) -> None:
 def test_rw_mount_always_uses_noexec_nosuid_nodev(ctx: StepContext, runner: FakeRunner) -> None:
     """Even the capacity check's rw mount leaves no room to execute infected files."""
     runner.register(["lsblk"], stdout=LSBLK_UNMOUNTED)
+    runner.register(["f3probe"], stdout=F3PROBE_GENUINE)
+    runner.register(["wipefs"])
+    runner.register(["mkfs.exfat"])
     runner.register(["mount"])
     runner.register(["umount"])
     runner.register(["f3write"], stdout=F3WRITE_OK)
@@ -119,6 +131,8 @@ def infected_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeRunn
     fake.register(["mount"])
     fake.register(["umount"])
     fake.register(["f3probe"])
+    fake.register(["wipefs"])
+    fake.register(["mkfs.exfat"])
     fake.register(["f3write"], stdout=F3WRITE_OK)
     fake.register(["f3read"], stdout=F3READ_OK)
     fake.register(["fio"], stdout=fio_json("read"))
@@ -144,8 +158,12 @@ def test_no_write_commands_after_malware_detection(
     infected_runner: FakeRunner, config: Config
 ) -> None:
     """After infection is detected, the only external commands called are ro mount, umount, and
-    queries."""
-    inspect(infected_runner, replace(config, allow_destructive=True), "/dev/sda")
+    queries, even in full mode: the drive is kept as evidence (no f3, fio or format)."""
+    enabled = replace(config, allow_destructive=True)
+    result = inspect(infected_runner, enabled, "/dev/sda", mode=InspectionMode.FULL)
+
+    assert result.mode is InspectionMode.FULL
+    assert result.reformat == {}
 
     allowed = {"lsblk", "udevadm", "findmnt", "clamscan", "mount", "umount"}
     assert {c[0] for c in infected_runner.calls} <= allowed

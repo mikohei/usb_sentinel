@@ -40,6 +40,12 @@ def _require_positive(name: str, value: object) -> None:
         raise ValueError(f"{name} must be positive")
 
 
+def _require_non_negative(name: str, value: object) -> None:
+    """Check that the value is a number >= 0."""
+    if _require_number(name, value) < 0:
+        raise ValueError(f"{name} must be zero or positive")
+
+
 def _require_positive_int(name: str, value: object) -> None:
     """Check that the value is an integer >= 1 other than bool."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -64,23 +70,37 @@ class MalwareConfig:
 class CapacityConfig:
     pass_ratio: float = 0.93
     use_probe: bool = False
-    timeout_s: float = 14400
+    # Time limit for the whole step (seconds). 0 means no limit: the step then stops only on a
+    # stall or a clear quality failure (see stall_mb_s and slow_batches).
+    timeout_s: float = 0
     # Nominal capacity from the product page (bytes, decimal). If unset, the size reported by
     # lsblk is used as the denominator.
     nominal_bytes: int | None = None
     # Upper ratio for excess capacity (exceeding nominal x over_ratio suggests counterfeit).
     over_ratio: float = 1.07
+    # f3write mode: run f3probe first so counterfeit capacity is caught in minutes.
+    probe_first: bool = True
+    # Number of 1 GiB f3 files per f3write / f3read call. Checks run between calls.
+    batch_files: int = 8
+    # Consecutive write batches below the write speed threshold that end the step as slow.
+    slow_batches: int = 3
+    # A batch that cannot keep this rate (MB/s) is stopped as stalled.
+    stall_mb_s: float = 1.0
 
     def __post_init__(self) -> None:
         """Validate the ranges of the settings."""
         _require_ratio("capacity.pass_ratio", self.pass_ratio)
-        _require_positive("capacity.timeout_s", self.timeout_s)
-        if not isinstance(self.use_probe, bool):
-            raise ValueError("capacity.use_probe must be a TOML boolean")
+        _require_non_negative("capacity.timeout_s", self.timeout_s)
+        for key in ("use_probe", "probe_first"):
+            if not isinstance(getattr(self, key), bool):
+                raise ValueError(f"capacity.{key} must be a TOML boolean")
         if self.nominal_bytes is not None:
             _require_positive_int("capacity.nominal_bytes", self.nominal_bytes)
         if _require_number("capacity.over_ratio", self.over_ratio) <= 1.0:
             raise ValueError("capacity.over_ratio must be greater than 1.0")
+        _require_positive_int("capacity.batch_files", self.batch_files)
+        _require_positive_int("capacity.slow_batches", self.slow_batches)
+        _require_positive("capacity.stall_mb_s", self.stall_mb_s)
 
 
 @dataclass(frozen=True)
@@ -123,6 +143,9 @@ class Config:
     # Host ceiling for destructive steps (f3, fio). False forces scan_only whatever
     # `inspect --mode` requests; True only allows `--mode full` to run them.
     allow_destructive: bool = False
+    # After the destructive steps ran, format the whole drive as exFAT so it can be used and
+    # inspected again. Never done when they did not run (malware, failed scan, scan_only).
+    reformat: bool = True
     hash_inventory: bool = True
     # Time limit for building the hash inventory (seconds). Not a table because
     # hash_inventory is a bool.
@@ -136,7 +159,7 @@ class Config:
 
     def __post_init__(self) -> None:
         """Check the types of boolean keys and that the hash inventory time limit is positive."""
-        for key in ("allow_destructive", "hash_inventory", "emit_qr"):
+        for key in ("allow_destructive", "reformat", "hash_inventory", "emit_qr"):
             if not isinstance(getattr(self, key), bool):
                 raise ValueError(f"{key} must be a TOML boolean")
         _require_positive("hash_inventory_timeout_s", self.hash_inventory_timeout_s)

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from usb_sentinel.libs import Config, DeviceInfo, FakeRunner, StepContext
+from usb_sentinel.libs.config import CapacityConfig
 from usb_sentinel.libs.steps.capacity import CapacityStep
 
 # Format matching real clamscan --version output.
@@ -36,16 +37,24 @@ F3WRITE_OK = (
     "Average writing speed: 18.20 MB/s\n"
 )
 
+# Files written by F3WRITE_OK (f3 writes 1 GiB per file; the last one is partial).
+F3_FILES = range(1, 30)
+
+
+def validating_lines(files: range = F3_FILES) -> str:
+    """The per-file lines f3read prints (one per file it read)."""
+    return "".join(
+        f"Validating file {n}.h2w ... 2097152/        0/      0/      0\n" for n in files
+    )
+
+
 # stdout of f3read 8.x. Data OK is about 30.2 GB (58984375 sectors).
 F3READ_OK = (
     "F3 read 8.0\n"
     "Copyright (C) 2010 Digirati Internet LTDA.\n"
     "This is free software; see the source for copying conditions.\n"
     "\n"
-    "                  SECTORS      ok/corrupted/changed/overwritten\n"
-    "Validating file 1.h2w ... 2097152/        0/      0/      0\n"
-    "Validating file 29.h2w ... 2097152/        0/      0/      0\n"
-    "\n"
+    "                  SECTORS      ok/corrupted/changed/overwritten\n" + validating_lines() + "\n"
     "  Data OK: 30.20 GB (58984375 sectors)\n"
     "Data LOST: 0.00 Byte (0 sectors)\n"
     "\t       Corrupted: 0.00 Byte (0 sectors)\n"
@@ -58,16 +67,57 @@ F3READ_OK = (
 F3READ_OK_SECTORS = 58984375
 
 
-def f3read_output(ok_sectors: int, lost_sectors: int = 0, corrupted_sectors: int = 0) -> str:
-    """Build f3read stdout with the given sector counts."""
-    return (
+def f3read_output(
+    ok_sectors: int,
+    corrupted_sectors: int = 0,
+    overwritten_sectors: int = 0,
+    *,
+    files: range = F3_FILES,
+    changed_sectors: int = 0,
+) -> str:
+    """Build f3read stdout with the given sector counts.
+
+    As in f3read, `Data LOST` is the sum of corrupted, slightly changed and overwritten.
+    """
+    lost = corrupted_sectors + changed_sectors + overwritten_sectors
+    return validating_lines(files) + (
         f"  Data OK: {ok_sectors * 512 / 1e9:.2f} GB ({ok_sectors} sectors)\n"
-        f"Data LOST: {lost_sectors * 512 / 1e9:.2f} GB ({lost_sectors} sectors)\n"
+        f"Data LOST: {lost * 512 / 1e9:.2f} GB ({lost} sectors)\n"
         f"\t       Corrupted: 0.00 Byte ({corrupted_sectors} sectors)\n"
-        "\tSlightly changed: 0.00 Byte (0 sectors)\n"
-        "\t     Overwritten: 0.00 Byte (0 sectors)\n"
+        f"\tSlightly changed: 0.00 Byte ({changed_sectors} sectors)\n"
+        f"\t     Overwritten: 0.00 Byte ({overwritten_sectors} sectors)\n"
         "Average reading speed: 62.90 MB/s\n"
     )
+
+
+# stdout of f3probe 8.x for a genuine 32 GB drive and for a counterfeit one.
+F3PROBE_GENUINE = (
+    "F3 probe 8.0\n"
+    "Copyright (C) 2010 Digirati Internet LTDA.\n"
+    "\n"
+    "WARNING: Probing normally takes from a few seconds to 15 minutes.\n"
+    "Probing /dev/sda: done\n"
+    "\n"
+    "Good news: The device `/dev/sda' is the real thing\n"
+    "\n"
+    "Device geometry:\n"
+    "\t         *Usable* size: 29.80 GB (62500000 blocks)\n"
+    "\t        Announced size: 29.80 GB (62500000 blocks)\n"
+    "\t                Module: 32.00 GB (2^35 Bytes)\n"
+    "\tApproximate cache size: 0.00 Byte (0 blocks), need-reset=no\n"
+    "\t   Physical block size: 512.00 Byte (2^9 Bytes)\n"
+    "\n"
+    "Probe time: 1'10\"\n"
+)
+
+F3PROBE_FAKE = (
+    "Bad news: The device `/dev/sda' is a counterfeit of type limbo\n"
+    "\n"
+    "Device geometry:\n"
+    "\t         *Usable* size: 7.50 GB (15625000 blocks)\n"
+    "\t        Announced size: 29.80 GB (62500000 blocks)\n"
+    "\t   Physical block size: 512.00 Byte (2^9 Bytes)\n"
+)
 
 
 def fio_json(
@@ -134,11 +184,16 @@ def device() -> DeviceInfo:
 
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
-    """Test config. Output is confined under tmp_path."""
+    """Test config. Output is confined under tmp_path.
+
+    batch_files covers every file of F3WRITE_OK, so f3write and f3read run once each (the
+    batching itself is tested in test_capacity_batches.py).
+    """
     return Config(
         results_dir=tmp_path / "results",
         mount_root=tmp_path / "mnt",
         allow_destructive=False,
+        capacity=CapacityConfig(batch_files=64),
     )
 
 
@@ -175,6 +230,9 @@ LSBLK_DISK = {
 def f3_runner(runner: FakeRunner) -> FakeRunner:
     """FakeRunner with the commands needed for the capacity step (f3write mode) to PASS."""
     runner.register(["lsblk"], stdout=json.dumps(LSBLK_DISK))
+    runner.register(["f3probe"], stdout=F3PROBE_GENUINE)
+    runner.register(["wipefs"])
+    runner.register(["mkfs.exfat"])
     runner.register(["mount"])
     runner.register(["umount"])
     runner.register(["f3write"], stdout=F3WRITE_OK)

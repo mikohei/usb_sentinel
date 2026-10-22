@@ -77,6 +77,9 @@ class InspectionResult:
     warnings: list[str] = field(default_factory=list)
     # Non-destructive comparison of reported vs. nominal capacity. Empty dict if not run.
     advertised_check: dict[str, Any] = field(default_factory=dict)
+    # exFAT format after the destructive steps (status "done" / "failed" / "skipped").
+    # Empty dict when they did not run, so the drive was left exactly as inserted.
+    reformat: dict[str, Any] = field(default_factory=dict)
 
     def step(self, name: str) -> StepResult | None:
         """Return the first step result whose name matches, or None if there is none."""

@@ -25,10 +25,33 @@ class TestCapacityConfig:
         with pytest.raises(ValueError, match="capacity.pass_ratio"):
             CapacityConfig(pass_ratio=ratio)  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
-    @pytest.mark.parametrize("timeout", [0, -1, True])
+    @pytest.mark.parametrize("timeout", [-1, True])
     def test_rejects_invalid_timeout(self, timeout: object) -> None:
         with pytest.raises(ValueError, match="capacity.timeout_s"):
             CapacityConfig(timeout_s=timeout)  # ty: ignore[invalid-argument-type]  intentionally invalid type
+
+    def test_timeout_defaults_to_no_limit(self) -> None:
+        assert CapacityConfig().timeout_s == 0
+        assert CapacityConfig(timeout_s=0).timeout_s == 0
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("batch_files", 0),
+            ("batch_files", 1.5),
+            ("slow_batches", 0),
+            ("slow_batches", True),
+            ("stall_mb_s", 0),
+            ("stall_mb_s", -1.0),
+        ],
+    )
+    def test_rejects_invalid_batch_settings(self, key: str, value: object) -> None:
+        with pytest.raises(ValueError, match=f"capacity.{key}"):
+            CapacityConfig(**{key: value})  # ty: ignore[invalid-argument-type]  intentionally invalid type
+
+    def test_rejects_string_probe_first(self) -> None:
+        with pytest.raises(ValueError, match="probe_first"):
+            CapacityConfig(probe_first="true")  # ty: ignore[invalid-argument-type]  intentionally invalid type
 
     def test_rejects_string_use_probe(self) -> None:
         with pytest.raises(ValueError, match="use_probe"):

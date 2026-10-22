@@ -30,6 +30,12 @@ _DATA_LOST = re.compile(r"Data LOST: .*\((\d+) sectors\)")
 _CORRUPTED = re.compile(r"Corrupted: .*\((\d+) sectors\)")
 _SLIGHTLY_CHANGED = re.compile(r"Slightly changed: .*\((\d+) sectors\)")
 _OVERWRITTEN = re.compile(r"Overwritten: .*\((\d+) sectors\)")
+# f3write prints "Creating file N.h2w ... " and then the outcome on the same line: "OK!",
+# "No space left." (creation failed with ENOSPC), or "Write failure: <strerror>".
+_CREATING = re.compile(r"^Creating file (\d+)\.h2w \.\.\. (.*)$", re.MULTILINE)
+_FREE_SPACE = re.compile(r"^Free space: ([\d.]+) ", re.MULTILINE)
+_VALIDATING = re.compile(r"^Validating file (\d+)\.h2w ", re.MULTILINE)
+_READ_IO_WARNING = "Not all data was read due to I/O error(s)"
 
 
 class MountpointError(RuntimeError):
@@ -50,7 +56,12 @@ class UnmountError(RuntimeError):
 
 @dataclass
 class F3ReadSummary:
-    """Summary extracted from f3read stdout."""
+    """Summary extracted from f3read stdout.
+
+    f3read prints `Data LOST` as the sum of corrupted, slightly changed and overwritten
+    sectors, so lost_sectors is already the total of non-OK sectors and the other three are its
+    breakdown.
+    """
 
     ok_sectors: int
     lost_sectors: int
@@ -58,16 +69,33 @@ class F3ReadSummary:
     slightly_changed_sectors: int = 0
     overwritten_sectors: int = 0
     read_mb_s: float | None = None
+    # File numbers f3read printed a "Validating file" line for.
+    validated: tuple[int, ...] = ()
+    # f3read warned "Not all data was read due to I/O error(s)".
+    read_error: bool = False
 
     @property
     def bad_sectors(self) -> int:
-        """Total of non-OK sectors."""
-        return (
-            self.lost_sectors
-            + self.corrupted_sectors
-            + self.slightly_changed_sectors
-            + self.overwritten_sectors
+        """Total of non-OK sectors (`Data LOST`; the breakdown if that is larger)."""
+        breakdown = (
+            self.corrupted_sectors + self.slightly_changed_sectors + self.overwritten_sectors
         )
+        return max(self.lost_sectors, breakdown)
+
+
+@dataclass(frozen=True)
+class F3WriteBatch:
+    """Outcome of one f3write call (one batch of files)."""
+
+    # File numbers that were created and hold data (creation lines other than "No space").
+    written: tuple[int, ...]
+    # Number of "Creating file" lines (files f3write attempted).
+    attempted: int
+    # strerror texts of "Write failure" outcomes.
+    failures: tuple[str, ...]
+    # The filesystem is full (an ENOSPC outcome, "No space!", or a final free space of 0).
+    disk_full: bool
+    write_mb_s: float | None
 
 
 def _speed_mb_s(pattern: re.Pattern[str], text: str) -> float | None:
@@ -106,6 +134,38 @@ def parse_f3read(text: str) -> F3ReadSummary:
         slightly_changed_sectors=_optional_sectors(_SLIGHTLY_CHANGED, text),
         overwritten_sectors=_optional_sectors(_OVERWRITTEN, text),
         read_mb_s=_speed_mb_s(_READ_SPEED, text),
+        validated=tuple(int(number) for number in _VALIDATING.findall(text)),
+        read_error=_READ_IO_WARNING in text,
+    )
+
+
+def parse_f3write_batch(text: str) -> F3WriteBatch:
+    """Parse the stdout of one `f3write --start-at --end-at` call.
+
+    f3write keeps going after a write failure and still exits 0, so failures are found only in
+    the per-file outcome lines.
+    """
+    written: list[int] = []
+    failures: list[str] = []
+    attempted = 0
+    disk_full = "No space!" in text
+    for number, outcome in _CREATING.findall(text):
+        attempted += 1
+        if outcome.startswith("No space"):
+            disk_full = True
+            continue
+        written.append(int(number))
+        if outcome.startswith("Write failure: "):
+            failures.append(outcome.removeprefix("Write failure: ").strip())
+    free = _FREE_SPACE.findall(text)
+    if free and float(free[-1]) == 0:
+        disk_full = True
+    return F3WriteBatch(
+        written=tuple(written),
+        attempted=attempted,
+        failures=tuple(failures),
+        disk_full=disk_full,
+        write_mb_s=parse_f3write(text),
     )
 
 

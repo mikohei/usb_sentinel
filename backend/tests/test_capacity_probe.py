@@ -6,38 +6,11 @@ from dataclasses import replace
 
 import pytest
 
+from tests.conftest import F3PROBE_FAKE, F3PROBE_GENUINE
 from usb_sentinel.libs import FakeRunner, StepContext, StepStatus
 from usb_sentinel.libs.config import CapacityConfig
 from usb_sentinel.libs.steps.capacity import CapacityStep
 from usb_sentinel.libs.steps.capacity_probe import ProbeSummary, parse_f3probe
-
-F3PROBE_GENUINE = (
-    "F3 probe 8.0\n"
-    "Copyright (C) 2010 Digirati Internet LTDA.\n"
-    "\n"
-    "WARNING: Probing normally takes from a few seconds to 15 minutes.\n"
-    "Probing /dev/sda: done\n"
-    "\n"
-    "Good news: The device `/dev/sda' is the real thing\n"
-    "\n"
-    "Device geometry:\n"
-    "\t         *Usable* size: 29.80 GB (62500000 blocks)\n"
-    "\t        Announced size: 29.80 GB (62500000 blocks)\n"
-    "\t                Module: 32.00 GB (2^35 Bytes)\n"
-    "\tApproximate cache size: 0.00 Byte (0 blocks), need-reset=no\n"
-    "\t   Physical block size: 512.00 Byte (2^9 Bytes)\n"
-    "\n"
-    "Probe time: 1'10\"\n"
-)
-
-F3PROBE_FAKE = (
-    "Bad news: The device `/dev/sda' is a counterfeit of type limbo\n"
-    "\n"
-    "Device geometry:\n"
-    "\t         *Usable* size: 7.50 GB (15625000 blocks)\n"
-    "\t        Announced size: 29.80 GB (62500000 blocks)\n"
-    "\t   Physical block size: 512.00 Byte (2^9 Bytes)\n"
-)
 
 
 class TestParseF3Probe:
@@ -173,6 +146,8 @@ class TestProbeMode:
     ) -> None:
         clock = iter([0.0, 100_000.0])
         runner.register(["f3probe"], stdout=F3PROBE_GENUINE)
+        capacity = replace(probe_ctx.config.capacity, timeout_s=14400)
+        probe_ctx.config = replace(probe_ctx.config, capacity=capacity)
 
         result = CapacityStep(monotonic=lambda: next(clock)).run(probe_ctx)
 
